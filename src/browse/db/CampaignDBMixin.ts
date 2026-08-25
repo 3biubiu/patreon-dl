@@ -348,6 +348,56 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
       : null;
     }
 
+    /**
+     * Returns the vanity of a campaign's creator if a campaign exists for it,
+     * otherwise `null`. Used to resolve inline links to locally-stored campaigns.
+     */
+    getCampaignVanityIfExists(vanity: string) {
+      this.log('debug', `Check if campaign with creator vanity "${vanity}" exists in DB`);
+      try {
+        const result = this.get(
+          `
+          SELECT user.vanity AS vanity
+          FROM campaign
+          LEFT JOIN user ON user.user_id = campaign.creator_id
+          WHERE user.vanity = ? COLLATE NOCASE
+          LIMIT 1
+          `,
+          [vanity]
+        );
+        return (result?.vanity as string | undefined) || null;
+      } catch (error) {
+        this.log(
+          'error',
+          `Failed to check if campaign with creator vanity "${vanity}" exists in DB:`,
+          error
+        );
+        return null;
+      }
+    }
+
+    /**
+     * Returns the id of the campaign belonging to `creatorId`, or `null` if there
+     * is none. Used to resolve inline links of the form `.../user/posts?u={userId}`.
+     */
+    getCampaignIdByCreatorId(creatorId: string) {
+      this.log('debug', `Get campaign by creator #${creatorId} from DB`);
+      try {
+        const result = this.get(
+          `SELECT campaign_id FROM campaign WHERE creator_id = ? LIMIT 1`,
+          [creatorId]
+        );
+        return (result?.campaign_id as string | undefined) || null;
+      } catch (error) {
+        this.log(
+          'error',
+          `Failed to get campaign by creator #${creatorId} from DB:`,
+          error
+        );
+        return null;
+      }
+    }
+
     checkCampaignExists(id: string) {
       this.log('debug', `Check if campaign #${id} exists in DB`);
       try {

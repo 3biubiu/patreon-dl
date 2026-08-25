@@ -35,6 +35,7 @@ export type ProductFilterSearchParams =
 
 export type MediaFilterSearchParams = 
   'source_type' |
+  'media_types' |
   'is_viewable' |
   'tier_ids' |
   'sort_by' |

@@ -2,7 +2,7 @@ import { type APIConstructor } from ".";
 import { PostType } from "../../entities/Post.js";
 import { type FilterData, type FilterOption, type FilterSection, type MediaFilterSearchParams, type PostFilterSearchParams, type ProductFilterSearchParams } from "../types/Filter.js";
 import { type ContentListSortBy } from "../types/Content.js";
-import { type MediaListSortBy } from "../types/Media.js";
+import { MEDIA_ITEM_TYPES, type MediaItemType, type MediaListSortBy } from "../types/Media.js";
 
 export function FilterAPIMixin<TBase extends APIConstructor>(Base: TBase) {
   return class FilterAPI extends Base {
@@ -278,6 +278,7 @@ export function FilterAPIMixin<TBase extends APIConstructor>(Base: TBase) {
     ): FilterData<MediaFilterSearchParams> {
       const mediaCountByTier = this.db.getMediaCountByTier(campaignId);
       const mediaCountByType = this.db.getMediaCountByContentType(campaignId);
+      const mediaCountByMediaType = this.db.getMediaCountByMediaType(campaignId);
       const mediaCountByYear = this.db.getMediaCountByDate('year', {
         campaign: campaignId
       });
@@ -321,6 +322,37 @@ export function FilterAPIMixin<TBase extends APIConstructor>(Base: TBase) {
           displayHint: 'pill',
           searchParam: 'source_type',
           options: sourceTypeOptions
+        });
+      }
+
+      const mediaTypeTitles: Record<MediaItemType, string> = {
+        image: 'Images',
+        video: 'Videos',
+        audio: 'Audio',
+        other: 'Files'
+      };
+      const mediaTypeCounts = new Map(mediaCountByMediaType.map(({ mediaType, count }) => [ mediaType, count ]));
+      const mediaTypeOptions: FilterOption[] = MEDIA_ITEM_TYPES.reduce<FilterOption[]>((result, mediaType) => {
+        const count = mediaTypeCounts.get(mediaType) || 0;
+        if (count > 0) {
+          result.push({
+            title: `${mediaTypeTitles[mediaType]} (${count})`,
+            value: mediaType
+          });
+        }
+        return result;
+      }, []);
+      if (mediaTypeOptions.length > 1) {
+        mediaTypeOptions.unshift({
+          title: 'Any type',
+          value: null,
+          isDefault: true
+        });
+        sections.push({
+          title: 'Media type',
+          displayHint: 'pill',
+          searchParam: 'media_types',
+          options: mediaTypeOptions
         });
       }
 

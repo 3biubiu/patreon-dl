@@ -4,6 +4,7 @@ import { type DBInstance } from '../../db';
 import path from 'path';
 import fs from 'fs';
 import Basehandler from './BaseHandler.js';
+import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
 
 export default class MediaRequestHandler extends Basehandler {
@@ -21,6 +22,7 @@ export default class MediaRequestHandler extends Basehandler {
   handleMediaRequest(req: Request, res: Response, id: string) {
     const { t: isRequestingThumbnail } = req.query;
     const { lapid } = req.query; // Linked attachment parent post Id
+    const isDownloadRequest = req.query.dl === '1' && !isRequestingThumbnail;
     let downloaded: Downloaded | null | undefined = null;
     if (lapid) {
       const post = this.#db.getContent(lapid as string, 'post');
@@ -52,6 +54,11 @@ export default class MediaRequestHandler extends Basehandler {
       }
       res.status(404).send('Media not found');
       return;
+    }
+    // Force a "Save as" instead of letting the browser render the file inline.
+    // The filename always comes from the file on disk - never from the request.
+    if (isDownloadRequest) {
+      res.setHeader('Content-Disposition', contentDisposition(path.basename(mediaFilePath)));
     }
     const isVideo = downloaded.mimeType?.startsWith('video/');
     if (isThumbnail || !isVideo || !req.headers.range) {

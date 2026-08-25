@@ -3,8 +3,8 @@ import { type Downloadable, type Post } from "../../../entities";
 import { Badge, Card, Stack } from "react-bootstrap";
 import MediaGrid from "./MediaGrid";
 import path from "path";
-import React, { useMemo } from "react";
-import { Link, useLocation } from "react-router";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import MediaImage from "./MediaImage";
 import LightGallery from "lightgallery/react";
 import "lightgallery/css/lightgallery.css";
@@ -15,7 +15,7 @@ import lgThumbnail from 'lightgallery/plugins/thumbnail';
 import lgZoom from 'lightgallery/plugins/zoom';
 import lgVideo from 'lightgallery/plugins/video';
 import FadeContent from "./FadeContent";
-import { getCampaignBaseUrl, getContentUrl } from "../utils/Misc";
+import { getCampaignBaseUrl, getContentUrl, getFileIcon } from "../utils/Misc";
 
 interface PostCardProps {
   post: Post;
@@ -27,6 +27,43 @@ interface PostCardProps {
 function PostCard(props: PostCardProps) {
   const { post, showCampaign = false, useShowMore = false, contextQS } = props;
   const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const attachmentsRef = useRef<HTMLDivElement>(null);
+  // Set when arriving from the media gallery, so the file that was clicked
+  // there can be pointed out on this page.
+  const highlightMediaId = searchParams.get('media');
+
+  // Post content is injected as raw HTML, so links rewritten by the server to
+  // point at locally-stored content are plain anchors and would otherwise
+  // trigger a full page load. Route them through the SPA router instead.
+  const handleContentClick = useCallback((e: React.MouseEvent<HTMLElement>) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+      return;
+    }
+    const anchor = (e.target as HTMLElement).closest('a');
+    const href = anchor?.getAttribute('href') || '';
+    // Site-relative page links only. Media endpoints must stay real requests
+    // so the browser can stream or download them, and protocol-relative URLs
+    // ("//host/path") point off-site despite starting with a slash.
+    if (!href.startsWith('/') || href.startsWith('//') || href.startsWith('/media/')) {
+      return;
+    }
+    if (anchor?.target && anchor.target !== '_self') {
+      return;
+    }
+    e.preventDefault();
+    void navigate(href);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (!highlightMediaId) {
+      return;
+    }
+    const el = attachmentsRef.current?.querySelector(`[data-media-id="${CSS.escape(highlightMediaId)}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightMediaId, post.id]);
 
   const mediaItems: Downloadable<any> = [];
   if (post.video) {
@@ -49,24 +86,30 @@ function PostCard(props: PostCardProps) {
   }
 
   const attachments = useMemo(() => {
-    const links = post.attachments.reduce<{title: string; url: string}[]>((result, att) => {
+    const links = post.attachments.reduce<{id: string; title: string; url: string}[]>((result, att) => {
       if (att.downloaded?.path) {
         const title = att.filename || path.parse(att.downloaded.path).base;
         result.push({
+          id: att.id,
           title,
-          url: `/media/${att.id}`
+          url: `/media/${att.id}?dl=1`
         });
       }
       return result;
     }, []);
     if (links.length > 0) {
       return (
-        <div>
-          <p>Attachments:</p>
-          <ul>
+        <div ref={attachmentsRef} className="post-card__attachments">
+          <p className="post-card__attachments-heading">Attachments:</p>
+          <ul className="post-card__attachment-list">
             {
-              links.map(({title, url}) => (
-                <li>
+              links.map(({id, title, url}) => (
+                <li
+                  key={id}
+                  data-media-id={id}
+                  className={`post-card__attachment ${id === highlightMediaId ? 'post-card__attachment--highlighted' : ''}`}
+                >
+                  <span className="material-icons-outlined post-card__attachment-icon">{getFileIcon(title)}</span>
                   <a href={url}>{title}</a>
                 </li>
               ))
@@ -75,7 +118,7 @@ function PostCard(props: PostCardProps) {
         </div>
       )
     }
-  }, [post]);
+  }, [post, highlightMediaId]);
 
   const audio = useMemo(() => {
     const audio =
@@ -193,7 +236,13 @@ function PostCard(props: PostCardProps) {
         }
       </Stack>
       { audio }
-      <Card.Text className="post-card__content" dangerouslySetInnerHTML={{__html: post.content || ''}} />
+      <Card.Text
+        ref={contentRef}
+        as="div"
+        className="post-card__content"
+        onClick={handleContentClick}
+        dangerouslySetInnerHTML={{__html: post.content || ''}}
+      />
       { attachments }
     </Stack>
   );

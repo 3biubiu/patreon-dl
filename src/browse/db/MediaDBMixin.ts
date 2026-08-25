@@ -3,13 +3,14 @@ import { type Downloadable, type Downloaded, type Post, type Campaign, type Prod
 import { PostType } from '../../entities/Post.js';
 import { getYearMonthString } from '../../utils/Misc.js';
 import { type ContentType } from '../types/Content.js';
-import { type GetMediaListParams, type MediaList, type MediaListItem } from '../types/Media.js';
+import { type GetMediaListParams, type MediaItemType, type MediaList, type MediaListItem } from '../types/Media.js';
+import path from 'path';
 
 export type MediaDBConstructor = new (
   ...args: any[]
 ) => InstanceType<ReturnType<typeof MediaDBMixin<DBConstructor>>>;
 
-type DBMediaType = 'image' | 'video' | 'audio' | 'other';
+type DBMediaType = MediaItemType;
 
 export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
   return class MediaDB extends Base {
@@ -183,7 +184,7 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
     }
 
     getMediaList<T extends ContentType>(params: GetMediaListParams<T>): MediaList<T> {
-      const { campaign, sourceType, isViewable, datePublished, sortBy, limit, offset } = params;
+      const { campaign, sourceType, isViewable, mediaTypes, datePublished, sortBy, limit, offset } = params;
       const campaignId = !campaign ? null : (typeof campaign === 'string' ? campaign : campaign.id );
       const tiers = params.sourceType === 'post' ? (params as GetMediaListParams<'post'>).tiers : null;
       const tierIds = tiers && tiers.length > 0 ? tiers.map((tier) => typeof tier === 'string' ? tier : tier.id) : null;
@@ -191,6 +192,7 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
         campaign: campaignId,
         sourceType,
         isViewable,
+        mediaTypes,
         tierIds,
         datePublished,
         sortBy,
@@ -227,6 +229,9 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
       const whereIns: { column: string; values: (string | number)[] }[] = [];
       if (tierIds) {
         whereIns.push({ column: 'tier_id', values: tierIds });
+      }
+      if (mediaTypes && mediaTypes.length > 0) {
+        whereIns.push({ column: 'media.media_type', values: mediaTypes });
       }
       const whereClauseParts: string[] = [];
       if (whereEquals.length > 0) {
@@ -269,6 +274,7 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
           media.media_id,
           media.media_type,
           media.mime_type,
+          media.download_path,
           media.thumbnail_width,
           media.thumbnail_height,
           media.thumbnail_download_path,
@@ -286,6 +292,9 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
           id: row.media_id,
           mediaType: row.media_type,
           mimeType: row.mime_type ?? null,
+          filename: row.download_path ? path.basename(row.download_path) : null,
+          downloadPath: row.download_path ?? null,
+          size: null,
           thumbnail: row.thumbnail_download_path ? {
             path: row.thumbnail_download_path,
             width: row.thumbnail_width || null,
@@ -373,6 +382,29 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
       }));
     }
 
+    getMediaCountByMediaType(campaign?: Campaign | string | null) {
+      const campaignId = typeof campaign === 'string' ? campaign : campaign?.id;
+      this.log('debug', `Get media count by media type for campaign #${campaignId}`);
+      const whereClauseParts: string[] = [];
+      const whereValues: string[] = [];
+      if (campaignId) {
+        whereClauseParts.push('content_media.campaign_id = ?');
+        whereValues.push(campaignId);
+      }
+      const whereClause = whereClauseParts.join(' AND ');
+      const sql = this.getMediaListSQL({
+        select: 'COUNT(DISTINCT media.media_id) AS media_count, media.media_type',
+        where: whereClause,
+        groupBy: 'media.media_type',
+        orderBy: 'media.media_type ASC'
+      });
+      const rows = this.all(sql, whereValues);
+      return rows.map((row) => ({
+        mediaType: row.media_type as MediaItemType,
+        count: row.media_count as number
+      }));
+    }
+
     getMediaCountByTier(campaign: Campaign | string) {
       const campaignId = typeof campaign === 'string' ? campaign : campaign.id;
       this.log('debug', `Get media count by tier for campaign #${campaignId}`);
@@ -412,16 +444,15 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
           (
             (
               content.content_type = 'product' AND
-              (
-                media_type IN ('image', 'video', 'audio')
-                OR
-                mime_type = 'application/pdf'
-              )
+              media_type IN ('image', 'video', 'audio', 'other')
             )
             OR
             (
               content.content_type = 'post' AND 
               (
+                -- Non-AV files (attachments: PDFs, archives, 3D models, documents...)
+                -- are listed regardless of post subtype.
+                media_type = 'other' OR
                 (content.content_subtype IN ('${PostType.Audio}', '${PostType.Podcast}', '${PostType.Link}') AND media_type = 'audio') OR 
                 (content.content_subtype IN ('${PostType.Video}', '${PostType.VideoEmbed}', '${PostType.Podcast}', '${PostType.Link}') AND media_type = 'video') OR 
                 (content.content_subtype NOT IN ('${PostType.Audio}', '${PostType.Podcast}', '${PostType.Video}', '${PostType.VideoEmbed}', '${PostType.Link}') AND media_type IN ('image', 'video', 'audio'))

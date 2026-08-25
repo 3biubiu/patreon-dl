@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router";
 import { type MediaListItem } from "../../types/Media";
 import "../assets/styles/MediaGallery.scss";
 import LightGallery from 'lightgallery/react';
@@ -10,33 +11,148 @@ import lgThumbnail from 'lightgallery/plugins/thumbnail';
 import lgZoom from 'lightgallery/plugins/zoom';
 import lgVideo from 'lightgallery/plugins/video';
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
-import { getContentUrl } from "../utils/Misc";
+import { formatFileSize, getContentUrlForMedia, getFileExtension, getFileIcon } from "../utils/Misc";
 
 interface MediaGalleryProps {
   items: MediaListItem<any>[];
 }
 
 const ROW_HEIGHT = 160;
+const FILE_TILE_WIDTH = 220;
 const BORDER_WIDTH = 0;
 const GAP = 8;
 
-type MediaGalleryItemProps =
-  Omit<LightGalleryItemProps, 'classNamePrefix' | 'style'> &
-  {
-    fixed: boolean;
+type LGProps = Omit<LightGalleryItemProps, 'classNamePrefix' | 'style'>;
+
+interface FileProps {
+  filename: string;
+  extension: string;
+  icon: string;
+  size: string | null;
+  downloadURL: string;
+}
+
+/**
+ * A single entry in the gallery. Entries with `lg` open in the lightbox;
+ * entries with `file` (archives, 3D models, documents...) are shown as a
+ * download card, since there is nothing to preview.
+ */
+interface GalleryTile {
+  id: string;
+  /** Natural width at `ROW_HEIGHT`, used both for row packing and flex-basis. */
+  width: number;
+  sourceTitle: string | null;
+  sourceURL: string;
+  lg?: LGProps;
+  file?: FileProps;
+}
+
+function buildTile(mi: MediaListItem<any>): GalleryTile {
+  const mediaURL = `/media/${mi.id}`;
+  const isImage = !mi.mimeType || mi.mimeType.startsWith('image/');
+  const isVideo = mi.mimeType?.startsWith('video/') ?? false;
+  const isAudio = mi.mimeType?.startsWith('audio/') ?? false;
+  const isPDF = mi.mimeType?.toLowerCase() === 'application/pdf';
+
+  const sourceTitle = mi.source.type === 'post' ? mi.source.title : mi.source.name;
+  const base = {
+    id: mi.id,
+    sourceTitle,
+    sourceURL: getContentUrlForMedia(mi.source, mi.id)
   };
 
-function MediaGalleryItem(props: MediaGalleryItemProps) {
-  const { fixed } = props;
+  // Anything without a preview becomes a file card.
+  if (!isImage && !isVideo && !isAudio && !isPDF) {
+    const filename = mi.filename || mi.id;
+    return {
+      ...base,
+      width: FILE_TILE_WIDTH,
+      file: {
+        filename,
+        extension: getFileExtension(filename).toUpperCase(),
+        icon: getFileIcon(filename),
+        size: formatFileSize(mi.size),
+        downloadURL: `${mediaURL}?dl=1`
+      }
+    };
+  }
+
+  let thumbnailURL: string | undefined = undefined;
+  if (mi.thumbnail) {
+    thumbnailURL = `${mediaURL}?t=1`;
+  }
+  // Use post / product image if media has no thumbnail (notably PDFs)
+  else if (mi.source.type === 'post') {
+    if (mi.source.thumbnail?.downloaded?.path) {
+      thumbnailURL = `/media/post:${mi.source.id}:thumbnail`;
+    }
+    else if (mi.source.coverImage?.downloaded?.path) {
+      thumbnailURL = `/media/post:${mi.source.id}:cover`;
+    }
+  }
+  else if (mi.source.type === 'product') {
+    const img = mi.source.previewMedia.find((pm: any) => pm.type === 'image' && pm.downloaded?.thumbnail?.path) ||
+      mi.source.contentMedia.find((cm: any) => cm.type === 'image' && cm.downloaded?.thumbnail?.path);
+    if (img) {
+      thumbnailURL = `/media/${img.id}`;
+    }
+  }
+
+  const dataAV = isVideo || isAudio ? JSON.stringify({
+    source: [
+      {
+        src: mediaURL,
+        type: mi.mimeType as string,
+      },
+    ],
+    attributes: {
+      preload: false,
+      controls: true,
+      playsInline: true
+    }
+  }) : undefined;
+  const dataSubHTML = sourceTitle ?
+    `<h4><a class="media-gallery__source-link" href="${base.sourceURL}">${sourceTitle}</a></h4>`
+    : undefined;
+
+  const width = mi.thumbnail?.width && mi.thumbnail?.height ?
+    BORDER_WIDTH + (ROW_HEIGHT / mi.thumbnail.height) * mi.thumbnail.width
+    : BORDER_WIDTH + ROW_HEIGHT;
+
+  return {
+    ...base,
+    width,
+    lg: {
+      id: mi.id,
+      href: isImage || isPDF ? mediaURL : undefined,
+      dataSrc: isImage ? mediaURL : undefined,
+      dataVideo: dataAV,
+      dataPoster: isVideo || isAudio ? thumbnailURL : undefined,
+      dataIframe: isPDF,
+      dataSubHTML,
+      thumbnailURL,
+      badge: isPDF ? 'PDF' : undefined
+    }
+  };
+}
+
+function FileTile(props: { file: FileProps }) {
+  const { file } = props;
   return (
-    <LightGalleryItem
-      {...props}
-      classNamePrefix="media-gallery"
-      style={{
-        flexGrow: fixed ? '0' : undefined
-      }}
-    />
-  )
+    <a
+      className="media-gallery__file"
+      href={file.downloadURL}
+      title={`Download ${file.filename}`}
+    >
+      <span className="material-icons-outlined media-gallery__file-icon">{file.icon}</span>
+      <span className="media-gallery__file-name">{file.filename}</span>
+      <span className="media-gallery__file-meta">
+        {file.extension ? <span className="media-gallery__file-ext">{file.extension}</span> : null}
+        {file.size ? <span>{file.size}</span> : null}
+        <span className="material-icons media-gallery__file-download">download</span>
+      </span>
+    </a>
+  );
 }
 
 function MediaGallery(props: MediaGalleryProps) {
@@ -57,110 +173,70 @@ function MediaGallery(props: MediaGalleryProps) {
     return () => observer.disconnect();
   }, []);
 
-  const lgItemPropsByRow = useMemo(() => {
+  const tiles = useMemo(() => items.map(buildTile), [items]);
+
+  // Pack tiles into rows of `containerWidth`. Tiles on the last row keep their
+  // natural width instead of stretching to fill it.
+  const rows = useMemo(() => {
     if (!containerWidth) {
       return null;
     }
-    const rows: Array<MediaListItem<any>[]> = [[]];
+    const result: GalleryTile[][] = [[]];
     let rowIndex = 0;
     let aggregateWidth = 0;
-    const itemsCopy = [...items];
-    while (itemsCopy.length > 0) {
-      const item = itemsCopy.shift();
-      if (!item) {
-        continue;
-      }
-      let itemWidth = 0;
-      if (item.thumbnail?.width && item.thumbnail?.height) {
-        const scaledWidth = (ROW_HEIGHT / item.thumbnail.height) * item.thumbnail.width;
-        itemWidth = BORDER_WIDTH + scaledWidth;
-      }
-      else {
-        itemWidth = BORDER_WIDTH + ROW_HEIGHT;
-      }
-      let gapWidth = rows[rowIndex].length > 0 ? GAP : 0;
-      if (rows[rowIndex].length > 0 && (aggregateWidth + gapWidth + itemWidth > containerWidth)) {
+    for (const tile of tiles) {
+      let gapWidth = result[rowIndex].length > 0 ? GAP : 0;
+      if (result[rowIndex].length > 0 && (aggregateWidth + gapWidth + tile.width > containerWidth)) {
         rowIndex++;
         aggregateWidth = 0;
         gapWidth = 0;
-        rows.push([]);
+        result.push([]);
       }
-      rows[rowIndex].push(item);
-      aggregateWidth += gapWidth + itemWidth;
+      result[rowIndex].push(tile);
+      aggregateWidth += gapWidth + tile.width;
     }
-    return rows;
-  }, [items, containerWidth]);
+    return result;
+  }, [tiles, containerWidth]);
 
-  const lgItemProps = useMemo(() => {
-    if (!lgItemPropsByRow) {
+  const renderedTiles = useMemo(() => {
+    if (!rows) {
       return null;
     }
-    return lgItemPropsByRow.reduce<MediaGalleryItemProps[]>((mp, rowItems, rowIndex) => {
-      mp.push(...rowItems.reduce<MediaGalleryItemProps[]>((mpInRow, mi) => {
-        const mediaURL = `/media/${mi.id}`;
-        let thumbnailURL: string | undefined = undefined;
-        // Use post / product image if media has no thumbnail (notably PDFs)
-        if (!mi.thumbnail) {
-          if (mi.source.type === 'post') {
-            if (mi.source.thumbnail?.downloaded?.path) {
-              thumbnailURL = `/media/post:${mi.source.id}:thumbnail`;
-            }
-            else if (mi.source.coverImage?.downloaded?.path) {
-              thumbnailURL = `/media/post:${mi.source.id}:cover`;
-            }
-          }
-          else if (mi.source.type === 'product') {
-            const img = mi.source.previewMedia.find((pm) => pm.type === 'image' && pm.downloaded?.thumbnail?.path) ||
-              mi.source.contentMedia.find((cm) => cm.type === 'image' && cm.downloaded?.thumbnail?.path)
-            if (img) {
-              thumbnailURL = `/media/${img.id}`;
-            }
-          }
-        }
-        else {
-          thumbnailURL = `${mediaURL}?t=1`;
-        }
-        const isImage = !mi.mimeType || mi.mimeType.startsWith('image/');
-        const isVideo = mi.mimeType?.startsWith('video/') ?? false;
-        const isAudio = mi.mimeType?.startsWith('audio/') ?? false;
-        const isPDF = mi.mimeType?.toLowerCase() === 'application/pdf';
-        const href = isImage || isPDF ? mediaURL : undefined;
-        const dataImage = isImage ? mediaURL : undefined;
-        const dataAV = isVideo || isAudio ? JSON.stringify({
-          source: [
+    return rows.reduce<React.ReactNode[]>((result, rowTiles, rowIndex) => {
+      const isLastRow = rowIndex === rows.length - 1;
+      for (const tile of rowTiles) {
+        result.push(
+          <div
+            key={`media-gallery-item-${tile.id}`}
+            className={`media-gallery__item ${tile.file ? 'media-gallery__item--file' : ''}`}
+            style={{
+              flexGrow: isLastRow ? 0 : 1,
+              flexBasis: `${tile.width}px`
+            }}
+          >
             {
-                src: mediaURL,
-                type: mi.mimeType as string,
-            },
-          ],
-          attributes: {
-            preload: false,
-            controls: true,
-            playsInline: true
-          }
-        }) : undefined;
-        const dataPoster = isVideo || isAudio ? thumbnailURL : undefined;
-        const title = mi.source.type === 'post' ? mi.source.title : mi.source.name;
-        const dataSubHTML =  title ? `<h4><a class="media-gallery__source-link" href="${getContentUrl(mi.source)}">${title}</a></h4>` : undefined;
-        if (dataImage || dataAV || isPDF) {
-          mpInRow.push({
-            id: mi.id,
-            href,
-            dataSrc: dataImage,
-            dataVideo: dataAV,
-            dataPoster,
-            dataIframe: isPDF,
-            dataSubHTML,
-            thumbnailURL,
-            fixed: rowIndex === lgItemPropsByRow.length - 1,
-            badge: isPDF ? 'PDF' : undefined
-          });
-        }
-        return mpInRow;
-      }, []));
-      return mp;
+              tile.lg ?
+                <LightGalleryItem {...tile.lg} classNamePrefix="media-gallery" />
+                : tile.file ? <FileTile file={tile.file} /> : null
+            }
+            {
+              tile.sourceTitle ? (
+                <Link
+                  to={tile.sourceURL}
+                  className="media-gallery__source"
+                  title={`Go to "${tile.sourceTitle}"`}
+                >
+                  <span className="material-icons media-gallery__source-icon">subdirectory_arrow_left</span>
+                  <span className="media-gallery__source-title">{tile.sourceTitle}</span>
+                </Link>
+              ) : null
+            }
+          </div>
+        );
+      }
+      return result;
     }, []);
-  }, [lgItemPropsByRow]);
+  }, [rows]);
 
   return (
     <LightGallery
@@ -177,7 +253,7 @@ function MediaGallery(props: MediaGalleryProps) {
           '--media-gallery-thumbnail-border': `${BORDER_WIDTH}px`,
         } as React.CSSProperties}
       >
-        {lgItemProps ? lgItemProps.map((m) => <MediaGalleryItem key={`media-gallery-item-${m.id}`} {...m} />) : null}
+        {renderedTiles}
       </div>
     </LightGallery>
   )

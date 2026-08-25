@@ -11,6 +11,23 @@ const DEFAULT_CONTENT_LIST_SORT_BY: ContentListSortBy = 'a-z';
 const DEFAULT_COLLECTION_LIST_SIZE = 10;
 const DEFAULT_COLLECTION_LIST_SORT_BY: CollectionListSortBy = 'a-z';
 
+/**
+ * Marks an inline link that has been rewritten to point at locally-stored content.
+ * `class` is one of the few attributes allowed through `sanitizeHTML()`, so this
+ * survives sanitization (unlike a `data-*` attribute would).
+ */
+export const INTERNAL_LINK_CLASS = 'post-card__internal-link';
+
+/**
+ * Link shapes that `URLHelper.analyzeURL()` does not recognise, because the
+ * downloader has no use for them, but which are common in post bodies:
+ * a bare creator page and a post referenced by id alone.
+ */
+const CREATOR_PAGE_URL_REGEX = /^https:\/\/(?:www\.)?patreon\.com\/(?:c\/|cw\/)?([^/?#]+)\/?$/;
+const BARE_POST_URL_REGEX = /^https:\/\/(?:www\.)?patreon\.com\/posts\/(\d+)\/?$/;
+/** Path segments that look like a vanity but are Patreon's own pages. */
+const RESERVED_VANITIES = [ 'posts', 'collection', 'home', 'search', 'login', 'signup', 'join', 'user', 'settings', 'messages', 'notifications' ];
+
 export function ContentAPIMixin<TBase extends APIConstructor>(Base: TBase) {
   return class ContentAPI extends Base {
     getContentList<T extends ContentType>(params: GetContentListParams<T>) {
@@ -169,24 +186,88 @@ export function ContentAPIMixin<TBase extends APIConstructor>(Base: TBase) {
       $('a').each((_, _el) => {
         const el = $(_el);
         const href = el.attr('href') || '';
-        let an;
-        try {
-          an = href.startsWith('https://') ? URLHelper.analyzeURL(href) : null;
-        }
-        catch (error: unknown) { 
-          this.log('warn', `Error analyzing inline link "${href}":`, error);
-          an = null;
-        }
-        if (an && an.type === 'post') {
-          const postExistsInDB = this.db.checkContentExists(an.postId, 'post');
-          if (postExistsInDB) {
-            el.attr('href', `/posts/${an.postId}`);
-            el.removeAttr('target');
-            hasModified = true;
-          }
+        const internalPath = this.#resolveInternalPath(href);
+        if (internalPath) {
+          el.attr('href', internalPath);
+          el.removeAttr('target');
+          el.removeAttr('rel');
+          el.addClass(INTERNAL_LINK_CLASS);
+          hasModified = true;
         }
       });
       return hasModified;
+    }
+
+    /**
+     * Maps a Patreon URL to the equivalent path within this site, but only if the
+     * content it points to is actually stored locally. Returns `null` otherwise,
+     * so the link is left alone and keeps pointing to the external site.
+     */
+    #resolveInternalPath(href: string): string | null {
+      if (!href) {
+        return null;
+      }
+      // Normalize protocol-relative ("//patreon.com/...") and plain-http links so
+      // they get analyzed the same way as https ones.
+      let url = href.trim();
+      if (url.startsWith('//')) {
+        url = `https:${url}`;
+      }
+      else if (url.startsWith('http://')) {
+        url = `https://${url.slice('http://'.length)}`;
+      }
+      if (!url.startsWith('https://')) {
+        return null;
+      }
+      let an;
+      try {
+        an = URLHelper.analyzeURL(url);
+      }
+      catch (error: unknown) {
+        this.log('warn', `Error analyzing inline link "${href}":`, error);
+        return null;
+      }
+      if (!an || an.type === 'customURL') {
+        return this.#resolveUnanalyzedPath(url);
+      }
+      switch (an.type) {
+        case 'post':
+          return this.db.checkContentExists(an.postId, 'post') ? `/posts/${an.postId}` : null;
+        case 'product':
+          return this.db.checkContentExists(an.productId, 'product') ? `/products/${an.productId}` : null;
+        case 'postsByCollection':
+          return this.db.checkCollectionExists(an.collectionId) ? `/collections/${an.collectionId}` : null;
+        case 'postsByUser': {
+          const vanity = this.db.getCampaignVanityIfExists(an.vanity);
+          return vanity ? `/${encodeURIComponent(vanity)}/posts` : null;
+        }
+        case 'shop': {
+          const vanity = this.db.getCampaignVanityIfExists(an.vanity);
+          return vanity ? `/${encodeURIComponent(vanity)}/shop` : null;
+        }
+        case 'postsByUserId': {
+          const campaignId = this.db.getCampaignIdByCreatorId(an.userId);
+          return campaignId ? `/campaigns/${campaignId}/posts` : null;
+        }
+        default:
+          return null;
+      }
+    }
+
+    #resolveUnanalyzedPath(url: string): string | null {
+      // Both patterns are anchored, so query strings and fragments have to go.
+      const base = url.split('#')[0].split('?')[0];
+      const barePostMatch = BARE_POST_URL_REGEX.exec(base);
+      if (barePostMatch) {
+        const postId = barePostMatch[1];
+        return this.db.checkContentExists(postId, 'post') ? `/posts/${postId}` : null;
+      }
+      const creatorMatch = CREATOR_PAGE_URL_REGEX.exec(base);
+      if (creatorMatch && !RESERVED_VANITIES.includes(creatorMatch[1].toLowerCase())) {
+        const vanity = this.db.getCampaignVanityIfExists(decodeURIComponent(creatorMatch[1]));
+        return vanity ? `/${encodeURIComponent(vanity)}` : null;
+      }
+      return null;
     }
   }
 }

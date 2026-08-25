@@ -134,6 +134,6 @@ export function getRouter(
     contentAPI: new ContentAPIRequestHandler(api, logger),
     media: new MediaRequestHandler(db, dataDir, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
-    mediaAPI: new MediaAPIRequestHandler(api, logger)
+    mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger)
   }).router;
 }

@@ -36,4 +36,41 @@
       margin: 1rem 0;
     }
   }
+
+  // Link the server rewrote to point at locally-stored content, so it stays
+  // inside this site instead of going back out to patreon.com.
+  &__internal-link {
+    text-decoration-style: dotted;
+    text-underline-offset: 0.2em;
+  }
+
+  &__attachments-heading {
+    margin-bottom: 0.5rem;
+  }
+
+  &__attachment-list {
+    list-style: none;
+    padding-left: 0;
+    margin-bottom: 0;
+  }
+
+  &__attachment {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.25em 0.5em;
+    border-radius: var(--bs-border-radius);
+    transition: background-color 300ms ease-in-out;
+
+    &--highlighted {
+      background-color: var(--bs-warning-bg-subtle);
+      box-shadow: inset 0 0 0 1px var(--bs-warning-border-subtle);
+    }
+  }
+
+  &__attachment-icon {
+    font-size: 1.2em;
+    color: var(--bs-secondary-color);
+    flex-shrink: 0;
+  }
 }

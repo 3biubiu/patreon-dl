@@ -7,11 +7,29 @@
   flex-wrap: wrap;
   gap: var(--media-gallery-gap);
 
-  &__thumbnail-wrapper {
-    flex-grow: 1;
-    width: auto;
+  // Flex child of the gallery. Holds the thumbnail / file card plus the
+  // overlay link back to the post or product the item came from.
+  &__item {
     position: relative;
+    flex-shrink: 1;
+    min-width: 0;
     height: var(--media-gallery-row-height);
+    border-radius: var(--bs-border-radius);
+    overflow: hidden;
+
+    // File cards stack the download card above an always-visible source link.
+    &--file {
+      display: flex;
+      flex-direction: column;
+      flex-grow: 0 !important;
+    }
+  }
+
+  &__thumbnail-wrapper {
+    display: block;
+    width: 100%;
+    height: 100%;
+    position: relative;
     border: var(--media-gallery-thumbnail-border) solid var(--bs-border-color);
     border-radius: var(--bs-border-radius);
     overflow: hidden;
@@ -33,16 +51,135 @@
     &--video:hover::before {
       opacity: 1;
     }
-
-    &--empty {
-      width: var(--media-gallery-row-height);
-    }
   }
 
   &__thumbnail {
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  // Download card shown for media that has no preview (archives, 3D
+  // models, documents...).
+  &__file {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 0.35em;
+    width: 100%;
+    height: 100%;
+    padding: 0.75em;
+    text-align: center;
+    text-decoration: none;
+    color: var(--bs-body-color);
+    background-color: var(--bs-tertiary-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    transition: background-color 150ms ease-in-out, border-color 150ms ease-in-out;
+
+    &:hover {
+      color: var(--bs-body-color);
+      background-color: var(--bs-secondary-bg);
+      border-color: var(--bs-primary-border-subtle);
+    }
+  }
+
+  &__file-icon {
+    font-size: 3.2em;
+    line-height: 1;
+    color: var(--bs-secondary-color);
+  }
+
+  &__file-name {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-all;
+    font-size: 0.8rem;
+    line-height: 1.25;
+  }
+
+  &__file-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-size: 0.75rem;
+    color: var(--bs-secondary-color);
+  }
+
+  &__file-ext {
+    padding: 0 0.4em;
+    border-radius: var(--bs-border-radius-sm);
+    background-color: var(--bs-secondary-bg);
+    font-weight: 600;
+  }
+
+  &__file-download {
+    font-size: 1.1em;
+  }
+
+  // Overlay link back to the source post / product.
+  &__source {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.35em;
+    padding: 0.6em 0.5em 0.35em;
+    color: #fff;
+    font-size: 0.75rem;
+    text-decoration: none;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
+    opacity: 0;
+    transition: opacity 150ms ease-in-out;
+
+    &:hover,
+    &:focus-visible {
+      color: #fff;
+      text-decoration: underline;
+    }
+  }
+
+  &__item:hover &__source,
+  &__source:focus-visible {
+    opacity: 1;
+  }
+
+  &__item--file &__file {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+  }
+
+  // File cards have no imagery to obscure, so keep the link always visible.
+  &__item--file &__source {
+    position: static;
+    justify-content: center;
+    padding: 0.25em 0.5em 0.5em;
+    color: var(--bs-secondary-color);
+    background: none;
+    opacity: 1;
+
+    &:hover,
+    &:focus-visible {
+      color: var(--bs-link-hover-color);
+    }
+  }
+
+  &__source-icon {
+    font-size: 1.1em;
+    flex-shrink: 0;
+  }
+
+  &__source-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   &__source-link {

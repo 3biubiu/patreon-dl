@@ -6,20 +6,23 @@ import fs from 'fs';
 import Basehandler from './BaseHandler.js';
 import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
+import type VideoThumbnailer from '../VideoThumbnailer.js';
 
 export default class MediaRequestHandler extends Basehandler {
   name = 'MediaRequestHandler';
 
   #db: DBInstance;
   #dataDir: string;
+  #videoThumbnailer: VideoThumbnailer;
 
-  constructor(db: DBInstance, dataDir: string, logger?: Logger | null) {
+  constructor(db: DBInstance, dataDir: string, videoThumbnailer: VideoThumbnailer, logger?: Logger | null) {
     super(logger);
     this.#db = db;
     this.#dataDir = dataDir;
+    this.#videoThumbnailer = videoThumbnailer;
   }
 
-  handleMediaRequest(req: Request, res: Response, id: string) {
+  async handleMediaRequest(req: Request, res: Response, id: string) {
     const { t: isRequestingThumbnail } = req.query;
     const { lapid } = req.query; // Linked attachment parent post Id
     const isDownloadRequest = req.query.dl === '1' && !isRequestingThumbnail;
@@ -44,6 +47,16 @@ export default class MediaRequestHandler extends Basehandler {
       mediaFilePath = downloaded?.path ? path.resolve(this.#dataDir, downloaded.path) : null;
     }
     if (isRequestingThumbnail && mediaFilePath && !isThumbnail && downloaded?.mimeType && !downloaded.mimeType.startsWith('image/')) {
+        // No stored thumbnail. For videos we can still produce one locally by
+        // grabbing a frame, which is the only option when Patreon supplied no
+        // cover image for the post.
+        if (downloaded.mimeType.startsWith('video/') && fs.existsSync(mediaFilePath)) {
+          const generated = await this.#videoThumbnailer.getThumbnail(mediaFilePath);
+          if (generated) {
+            res.sendFile(generated, { headers: { 'Content-Type': 'image/jpeg' }, dotfiles: 'allow' });
+            return;
+          }
+        }
         this.log('warn', `Thumbnail for media file "${mediaFilePath}" unavailable`);
         res.status(404).send('Media not found');
         return;

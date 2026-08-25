@@ -13,6 +13,11 @@ export const DEFAULT_WEB_SERVER_PORT = 3000;
 export interface WebServerConfig {
   dataDir?: string;
   port?: number | null;
+  /**
+   * Path to the FFmpeg executable. Used to generate poster frames for videos
+   * that have no downloaded thumbnail. Falls back to FFmpeg on PATH.
+   */
+  pathToFFmpeg?: string | null;
   logger?: Logger | null;
 }
 
@@ -55,7 +60,7 @@ export class WebServer {
     }
     const db = await DB.getInstance(dbFile, false, this.#config.logger);
     const api = API.getInstance(db, this.#config.logger);
-    const router = getRouter(db, api, dataDir, this.#config.logger);
+    const router = getRouter(db, api, dataDir, this.#config.pathToFFmpeg, this.#config.logger);
 
     this.#app.use(express.json());
     this.#app.use(express.urlencoded({ extended: true }));

@@ -8,6 +8,7 @@ import ContentAPIRequestHandler from './handler/ContentAPIRequestHandler.js';
 import MediaRequestHandler from './handler/MediaRequestHandler.js';
 import SettingsAPIRequestHandler from './handler/SettingsAPIRequestHandler.js';
 import MediaAPIRequestHandler from './handler/MediaAPIRequestHandler.js';
+import VideoThumbnailer from './VideoThumbnailer.js';
 
 interface RequestHandlers {
   campaignAPI: CampaignAPIRequestHandler;
@@ -127,12 +128,14 @@ export function getRouter(
   db: DBInstance,
   api: APIInstance,
   dataDir: string,
+  pathToFFmpeg?: string | null,
   logger?: Logger | null
 ) {
+  const videoThumbnailer = new VideoThumbnailer(dataDir, pathToFFmpeg, logger);
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
-    media: new MediaRequestHandler(db, dataDir, logger),
+    media: new MediaRequestHandler(db, dataDir, videoThumbnailer, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger)
   }).router;

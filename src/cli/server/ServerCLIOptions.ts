@@ -24,6 +24,7 @@ export function getServerCLIOptions(): ServerCLIOptions {
   const options: ServerCLIOptions = {
     dataDir: CLIOptionValidator.validateString(commandLineOptions.dataDir),
     port: CLIOptionValidator.validateNumber(commandLineOptions.port),
+    pathToFFmpeg: CLIOptionValidator.validateString(commandLineOptions.pathToFFmpeg),
     consoleLogger,
     fileLogger
   };

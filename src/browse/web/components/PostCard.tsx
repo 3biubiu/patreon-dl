@@ -120,6 +120,19 @@ function PostCard(props: PostCardProps) {
     }
   }, [post, highlightMediaId]);
 
+  // Videos and embeds often have no downloaded poster of their own, because
+  // Patreon only supplies one when the post has a cover image. Reuse the post's
+  // cover so the player doesn't fall back to a bare placeholder.
+  const fallbackThumbnailURL = useMemo(() => {
+    if (post.thumbnail?.downloaded?.path) {
+      return `/media/${post.thumbnail.id}`;
+    }
+    if (post.coverImage?.downloaded?.path) {
+      return `/media/${post.coverImage.id}`;
+    }
+    return undefined;
+  }, [post]);
+
   const audio = useMemo(() => {
     const audio =
       post.audio?.downloaded?.path ? post.audio
@@ -276,7 +289,12 @@ function PostCard(props: PostCardProps) {
           </Card.Header>
         ) : null
       }
-      <MediaGrid items={mediaItems} title={post.title || ''} noGallery />
+      <MediaGrid
+        items={mediaItems}
+        title={post.title || ''}
+        fallbackThumbnailURL={fallbackThumbnailURL}
+        noGallery
+      />
       { externalEmbed }
       <Card.Body>
         {body}

@@ -52,6 +52,7 @@ export default class ServerCLI {
       server = new WebServer({
         dataDir: options.dataDir,
         port: options.port,
+        pathToFFmpeg: options.pathToFFmpeg,
         logger
       });
     } catch (error) {

@@ -16,7 +16,8 @@ const COMMAND_LINE_ARGS = {
   dataDir: 'data-dir',
   port: 'port',
   logLevel: 'log-level',
-  logFile: 'log-file'
+  logFile: 'log-file',
+  ffmpeg: 'ffmpeg'
 } as const;
 
 const OPT_DEFS = [
@@ -52,6 +53,13 @@ const OPT_DEFS = [
     alias: 'f',
     type: String,
     typeLabel: '<file>'
+  },
+  {
+    name: COMMAND_LINE_ARGS.ffmpeg,
+    description: 'Path to the FFmpeg executable, used to generate poster frames for videos ' +
+      'that have no downloaded thumbnail. Default: FFmpeg found on PATH',
+    type: String,
+    typeLabel: '<path>'
   }
 ];
 
@@ -93,7 +101,8 @@ export default class ServerCommandLineParser {
       dataDir: __getValue(COMMAND_LINE_ARGS.dataDir),
       port: __getValue(COMMAND_LINE_ARGS.port),
       logLevel: __getValue(COMMAND_LINE_ARGS.logLevel),
-      logFile: __getValue(COMMAND_LINE_ARGS.logFile)
+      logFile: __getValue(COMMAND_LINE_ARGS.logFile),
+      pathToFFmpeg: __getValue(COMMAND_LINE_ARGS.ffmpeg)
     };
   }
 

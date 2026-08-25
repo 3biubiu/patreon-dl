@@ -51,6 +51,12 @@
     &--video:hover::before {
       opacity: 1;
     }
+
+    // Without a thumbnail behind it the white play glyph is invisible against
+    // the placeholder card, which already shows a video icon.
+    &--video#{&}--empty::before {
+      content: none;
+    }
   }
 
   &__thumbnail {

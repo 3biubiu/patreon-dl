@@ -3,6 +3,7 @@ import { Link, Outlet } from "react-router";
 import Sidebar from "../components/Sidebar";
 import { ScrollProvider } from "../contexts/MainContentScrollProvider";
 import SidebarTrigger from "../components/SidebarTrigger";
+import { APP_NAME } from "../utils/Misc";
 
 function MainLayout() {
   return (
@@ -16,7 +17,7 @@ function MainLayout() {
             <Stack direction="horizontal" className="d-lg-none sticky-top bg-body py-2">
               <SidebarTrigger />
               <div className="fs-5">
-                <Link className="text-body" to="/">patreon-dl</Link>
+                <Link className="text-body" to="/">{APP_NAME}</Link>
               </div>
             </Stack>
             <Outlet />

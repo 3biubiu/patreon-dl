@@ -1,4 +1,5 @@
 import "../assets/styles/LightGalleryItem.scss";
+import { useEffect, useState } from "react";
 import { Badge, Card } from "react-bootstrap";
 
 export interface LightGalleryItemProps {
@@ -28,8 +29,14 @@ function LightGalleryItem(props: LightGalleryItemProps) {
     style,
     badge
   } = props;
+  // The poster can 404 - e.g. a video whose thumbnail was never downloaded and
+  // for which the server could not generate a frame either.
+  const [posterFailed, setPosterFailed] = useState(false);
+  useEffect(() => setPosterFailed(false), [thumbnailURL]);
+  const showPoster = !!thumbnailURL && !posterFailed;
+
   let extraClassName = dataVideo ? `${classNamePrefix}__thumbnail-wrapper--video` : '';
-  if (!thumbnailURL) {
+  if (!showPoster) {
     extraClassName += ` ${classNamePrefix}__thumbnail-wrapper--empty`;
   }
   return (
@@ -43,10 +50,11 @@ function LightGalleryItem(props: LightGalleryItemProps) {
       data-sub-html={dataSubHTML}
       style={style}
     > {
-        thumbnailURL ? (
+        showPoster ? (
           <img
             src={thumbnailURL}
             className={`${classNamePrefix}__thumbnail`}
+            onError={() => setPosterFailed(true)}
           />
         )
         : (

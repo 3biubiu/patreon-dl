@@ -57,7 +57,11 @@ function MediaGrid(props: MediaGridProps) {
     const thumbnailURL =
       hasThumbnail ? `${mediaURL}?t=1`
       : isImage ? mediaURL
-      : fallbackThumbnailURL;
+      // Prefer the post's own cover when there is one; otherwise ask for the
+      // thumbnail anyway, which lets the server grab a frame from the video.
+      : fallbackThumbnailURL ? fallbackThumbnailURL
+      : isVideo ? `${mediaURL}?t=1`
+      : undefined;
     const dataImage = isImage ? mediaURL : undefined;
     const dataVideo = isVideo ? JSON.stringify({
       source: [

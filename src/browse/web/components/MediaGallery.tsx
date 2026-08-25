@@ -97,6 +97,11 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
       thumbnailURL = `/media/${img.id}`;
     }
   }
+  // Nothing to show for a video: ask anyway, so the server can grab a frame
+  // from the video file itself.
+  if (!thumbnailURL && isVideo) {
+    thumbnailURL = `${mediaURL}?t=1`;
+  }
 
   const dataAV = isVideo || isAudio ? JSON.stringify({
     source: [

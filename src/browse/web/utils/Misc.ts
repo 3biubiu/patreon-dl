@@ -1,6 +1,8 @@
 import type { Campaign, Post, Product } from "../../../entities";
 import { ProductType } from "../../../entities/Product";
 
+export const APP_NAME = 'BIUBIUUP';
+
 export function getCampaignBaseUrl(campaign: Campaign) {
   return campaign.creator?.vanity ?
     `/${encodeURIComponent(campaign.creator.vanity)}` :
@@ -95,4 +97,28 @@ export function getContentUrlForMedia(entity: Post | Product, mediaId: string) {
   const url = new URL(getContentUrl(entity), window.location.href);
   url.searchParams.set('media', mediaId);
   return `${url.pathname}${url.search}`;
+}
+
+/**
+ * Best available thumbnail for a post, preferring the images the downloader
+ * stored specifically as thumbnail / cover. Returns `null` when the post has
+ * no locally-stored imagery at all.
+ */
+export function getPostThumbnailURL(post: Post): string | null {
+  if (post.thumbnail?.downloaded?.path) {
+    return `/media/${post.thumbnail.id}`;
+  }
+  if (post.coverImage?.downloaded?.path) {
+    return `/media/${post.coverImage.id}`;
+  }
+  const image = post.images.find((img) => img.downloaded?.path);
+  if (image) {
+    return `/media/${image.id}${image.downloaded?.thumbnail?.path ? '?t=1' : ''}`;
+  }
+  const withPoster = [ post.video, post.videoPreview, post.embed ]
+    .find((item) => item?.downloaded?.thumbnail?.path);
+  if (withPoster) {
+    return `/media/${withPoster.id}?t=1`;
+  }
+  return null;
 }

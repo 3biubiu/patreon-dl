@@ -51,6 +51,9 @@ function BrowseSettingsProvider(props: SettingsProviderProps) {
     if (values.maxContentWidth) {
       newSettings.maxContentWidth = values.maxContentWidth;
     }
+    if (values.postListLayout) {
+      newSettings.postListLayout = values.postListLayout;
+    }
     void (async () => {
       if (!deepEqual(settings, newSettings)) {
         await api.saveBrowseSettings(newSettings);

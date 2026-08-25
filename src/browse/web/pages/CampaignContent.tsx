@@ -10,11 +10,14 @@ import PageNav from "../components/PageNav";
 import deepEqual from "deep-equal";
 import copy from 'fast-copy';
 import { useScroll } from "../contexts/MainContentScrollProvider";
-import { type BrowseSettings } from "../../types/Settings";
+import { type BrowseSettings, type PostListLayout } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { type Filter, type FilterData, type PostFilterSearchParams } from "../../types/Filter";
 import FilterModalButton from "../components/FilterModalButton";
 import ProductList from "../components/ProductList";
+import PostGrid from "../components/PostGrid";
+import PostList from "../components/PostList";
+import PostLayoutSwitch from "../components/PostLayoutSwitch";
 import SearchInputBox, { type SearchInputBoxHandle } from "../components/SearchInputBox";
 import { type Collection } from "../../../entities/Post";
 import { useDocument } from "../contexts/DocumentProvider";
@@ -72,7 +75,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
 
   const { api } = useAPI();
   const { setTitle } = useDocument();
-  const { settings } = useBrowseSettings();
+  const { settings, updateSettings } = useBrowseSettings();
   const { scrollTo } = useScroll();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [collection, setCollection] = useState<Collection | null>(null);
@@ -282,25 +285,39 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
     setContextQS(params.toString());
   }, [viewParams.filter, isCollection, collection]);
 
+  const postListLayout = settings.postListLayout;
+
+  const setPostListLayout = useCallback((layout: PostListLayout) => {
+    updateSettings({ postListLayout: layout });
+  }, [updateSettings]);
+
   const listEl = useMemo(() => {
     if (!list || list.items.length === 0) {
       return null;
     }
     if (list.items.every((item) => item.type === 'post')) {
-      return (
-        <Stack className="mb-4" gap={4}>
-          {
-            (list as ContentList<'post'>).items.map((item) => (
-              <PostCard
-                key={`post-card-${item.id}`}
-                post={item}
-                useShowMore
-                contextQS={contextQS}
-              />
-            ))
-          }
-        </Stack>
-      )
+      const posts = (list as ContentList<'post'>).items;
+      switch (postListLayout) {
+        case 'grid':
+          return <PostGrid posts={posts} contextQS={contextQS} />;
+        case 'list':
+          return <PostList posts={posts} contextQS={contextQS} />;
+        default:
+          return (
+            <Stack className="mb-4" gap={4}>
+              {
+                posts.map((item) => (
+                  <PostCard
+                    key={`post-card-${item.id}`}
+                    post={item}
+                    useShowMore
+                    contextQS={contextQS}
+                  />
+                ))
+              }
+            </Stack>
+          );
+      }
     }
     if (list.items.every((item) => item.type === 'product')) {
       return (
@@ -308,23 +325,32 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
       )
     }
     return null;
-  }, [list, contextQS]);
+  }, [list, contextQS, postListLayout]);
 
   if (!campaign || !filterOptions) {
     return;
   }
 
   return (
-    <div className={`campaign-content campaign-content--${contentType} mw-${settings.maxContentWidth.toLowerCase()}`}>
+    <div className={
+      `campaign-content campaign-content--${contentType} ` +
+      `campaign-content--layout-${contentType === 'post' ? postListLayout : 'card'} ` +
+      `mw-${settings.maxContentWidth.toLowerCase()}`
+    }>
       <Container fluid className="p-0">
         <Row className="mb-3 g-0 align-items-center">
-          <Col className="w-auto d-flex justify-content-end">
+          <Col className="w-auto d-flex justify-content-end align-items-center">
             <SearchInputBox ref={searchInputBoxRef} placeholder={searchInputBoxPlaceholder} />
             <FilterModalButton
               options={filterOptions}
               onFilter={applyFilter}
               searchInputBox={searchInputBoxRef}
             />
+            {
+              contentType === 'post' ? (
+                <PostLayoutSwitch value={postListLayout} onChange={setPostListLayout} />
+              ) : null
+            }
           </Col>
         </Row>
         <Row className="mb-2 g-0">

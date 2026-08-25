@@ -1,5 +1,4 @@
 import "../assets/styles/Sidebar.scss";
-import GithubIcon from "../assets/images/brands-github.svg?react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, Stack } from "react-bootstrap";
 import { type Campaign } from "../../../entities";
@@ -8,7 +7,7 @@ import { Link } from "react-router";
 import { useGlobalModals } from "../contexts/GlobalModalsProvider";
 import CustomScrollbars from "./CustomScrollbars";
 import MediaImage from "./MediaImage";
-import { getCampaignBaseUrl } from "../utils/Misc";
+import { APP_NAME, getCampaignBaseUrl } from "../utils/Misc";
 
 interface SidebarProps {
   closeButton?: boolean;
@@ -82,7 +81,7 @@ function Sidebar(props: SidebarProps) {
                 to="/"
                 onClick={handleLinkClick}
               >
-                patreon-dl
+                {APP_NAME}
               </Link>
             </div>
             {
@@ -105,14 +104,6 @@ function Sidebar(props: SidebarProps) {
                   <span className="material-icons me-2">settings</span>
                   <span className="sidebar__link-text">Settings</span>
                 </a>
-                <Link
-                  to="https://github.com/patrickkfkan/patreon-dl"
-                  className="sidebar__link"
-                  onClick={handleLinkClick}
-                >
-                  <GithubIcon className="sidebar__link-icon sidebar__link-icon--svg me-2" />
-                  <span className="sidebar__link-text">Project homepage</span>
-                </Link>
               </Stack>
             </Stack>
           </CustomScrollbars>

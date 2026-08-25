@@ -209,7 +209,6 @@ function PostCard(props: PostCardProps) {
 
   let body = (
     <Stack>
-      {tagsEl}
       <Stack direction="horizontal" className="mb-3 justify-content-between gap-4">
         <Card.Title className="m-0">{titleEl}</Card.Title>
         {
@@ -218,7 +217,7 @@ function PostCard(props: PostCardProps) {
           ) : null
         }
       </Stack>
-      <Stack direction="horizontal" className="mb-3 text-body-secondary" gap={4}>
+      <Stack direction="horizontal" className="mb-2 text-body-secondary" gap={4}>
         {
           post.publishedAt ? (
             <span>
@@ -235,6 +234,7 @@ function PostCard(props: PostCardProps) {
           ) : null
         }
       </Stack>
+      {tagsEl}
       { audio }
       <Card.Text
         ref={contentRef}

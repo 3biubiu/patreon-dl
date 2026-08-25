@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useRef } from "react";
+import { APP_NAME } from "../utils/Misc";
 
 interface DocumentProviderProps {
   children: React.ReactNode;
@@ -24,7 +25,7 @@ function DocumentProvider(props: DocumentProviderProps) {
       if (title) {
         parts.push(title);
       }
-      parts.push('patreon-dl');
+      parts.push(APP_NAME);
       document.title = parts.join(' | ');
     };
     // Empty title usually means page is still loading.

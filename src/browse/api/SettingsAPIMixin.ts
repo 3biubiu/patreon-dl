@@ -1,5 +1,5 @@
 import { type APIConstructor } from ".";
-import { type BrowseSettingOptions, type BrowseSettings, type BrowseTheme } from "../types/Settings.js";
+import { type BrowseSettingOptions, type BrowseSettings, type BrowseTheme, type PostListLayout } from "../types/Settings.js";
 
 const BROWSE_SETTINGS_ENV_KEY = 'browse_settings';
 
@@ -43,11 +43,14 @@ const THEMES: BrowseTheme[] = [
   }))
 ]
 
+const POST_LIST_LAYOUTS: PostListLayout[] = [ 'card', 'grid', 'list' ];
+
 const DEFAULT_BROWSE_SETTINGS: BrowseSettings = {
   theme: THEMES[0].value,
   listItemsPerPage: 20,
   galleryItemsPerPage: 100,
-  maxContentWidth: 'Standard'
+  maxContentWidth: 'Standard',
+  postListLayout: 'card'
 };
 
 export function SettingsAPIMixin<TBase extends APIConstructor>(Base: TBase) {
@@ -72,7 +75,8 @@ export function SettingsAPIMixin<TBase extends APIConstructor>(Base: TBase) {
         themes: THEMES,
         listItemsPerPage: [10, 20, 30, 50],
         galleryItemsPerPage: [50, 100, 150, 200],
-        maxContentWidth: ['Narrower', 'Standard', 'Wider']
+        maxContentWidth: ['Narrower', 'Standard', 'Wider'],
+        postListLayout: POST_LIST_LAYOUTS
       };
     }
   }

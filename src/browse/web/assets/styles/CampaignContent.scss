@@ -1,7 +1,9 @@
 .campaign-content {
   width: 100%;
 
-  &--post {
+  // The reading-width cap only makes sense for the full post cards. Grid and
+  // list layouts exist to fit more on screen, so they use the full width.
+  &--post.campaign-content--layout-card {
     &.mw-narrower {
       max-width: 40.5em;
     }
@@ -12,4 +14,13 @@
       max-width: 54.5em;
     }
   }
+}
+
+// The reading-width column that the campaign layouts wrap their pages in.
+// Grid and list layouts exist to fit more posts on screen, so they take over
+// the full width instead of the default lg-8 column.
+.content-column:has(> .campaign-content--layout-grid),
+.content-column:has(> .campaign-content--layout-list) {
+  flex: 0 0 100%;
+  max-width: 100%;
 }

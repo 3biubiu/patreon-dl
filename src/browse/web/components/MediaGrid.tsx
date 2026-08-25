@@ -11,6 +11,11 @@ import lgThumbnail from 'lightgallery/plugins/thumbnail';
 import lgZoom from 'lightgallery/plugins/zoom';
 import lgVideo from 'lightgallery/plugins/video';
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
+import path from "path";
+
+const VIDEO_EXTENSIONS = [
+  '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
+];
 
 interface MediaGridProps {
   items: Downloadable[];
@@ -45,8 +50,17 @@ function MediaGrid(props: MediaGridProps) {
   const { items: _mi, title, noGallery = false, fallbackThumbnailURL } = props;
   const mediaItems = _mi.filter((mi) => mi.downloaded?.path);
   const lgItemProps = mediaItems.reduce<MediaGridItemProps[]>((result, mi) => {
-    const isImage = !mi.downloaded?.mimeType || mi.downloaded.mimeType.startsWith('image/');
-    const isVideo = mi.downloaded?.mimeType?.startsWith('video/') ?? false;
+    // mimeType can be null when the downloader could not sniff the file, which
+    // happens with externally downloaded videos. Fall back to the extension so
+    // such files are not mistaken for images.
+    const mimeType = mi.downloaded?.mimeType;
+    const ext = path.extname(mi.downloaded?.path || mi.filename || '').toLowerCase();
+    const isVideo = mimeType ?
+      mimeType.startsWith('video/')
+      : VIDEO_EXTENSIONS.includes(ext);
+    const isImage = mimeType ?
+      mimeType.startsWith('image/')
+      : (!isVideo && !ext);
     const mediaURL = `/media/${mi.id}`;
     const href = isImage ? mediaURL : undefined;
     // Only ask for the stored thumbnail when there actually is one. The server

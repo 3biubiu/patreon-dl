@@ -8,6 +8,30 @@ import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
 import type VideoThumbnailer from '../VideoThumbnailer.js';
 
+const VIDEO_EXTENSIONS = [
+  '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
+];
+
+/**
+ * `mime_type` can be null when the downloader could not sniff the file - which
+ * happens often enough with externally downloaded videos (yt-dlp and friends).
+ * Fall back to the extension so such files are not mistaken for images.
+ */
+function looksLikeVideo(filePath: string, mimeType?: string | null) {
+  if (mimeType) {
+    return mimeType.startsWith('video/');
+  }
+  return VIDEO_EXTENSIONS.includes(path.extname(filePath).toLowerCase());
+}
+
+function looksLikeImage(filePath: string, mimeType?: string | null) {
+  if (mimeType) {
+    return mimeType.startsWith('image/');
+  }
+  return [ '.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.bmp', '.svg' ]
+    .includes(path.extname(filePath).toLowerCase());
+}
+
 export default class MediaRequestHandler extends Basehandler {
   name = 'MediaRequestHandler';
 
@@ -46,16 +70,20 @@ export default class MediaRequestHandler extends Basehandler {
     if (!mediaFilePath) {
       mediaFilePath = downloaded?.path ? path.resolve(this.#dataDir, downloaded.path) : null;
     }
-    if (isRequestingThumbnail && mediaFilePath && !isThumbnail && downloaded?.mimeType && !downloaded.mimeType.startsWith('image/')) {
+    if (isRequestingThumbnail && mediaFilePath && !isThumbnail && !looksLikeImage(mediaFilePath, downloaded?.mimeType)) {
         // No stored thumbnail. For videos we can still produce one locally by
         // grabbing a frame, which is the only option when Patreon supplied no
         // cover image for the post.
-        if (downloaded.mimeType.startsWith('video/') && fs.existsSync(mediaFilePath)) {
+        if (looksLikeVideo(mediaFilePath, downloaded?.mimeType) && fs.existsSync(mediaFilePath)) {
           const generated = await this.#videoThumbnailer.getThumbnail(mediaFilePath);
           if (generated) {
             res.sendFile(generated, { headers: { 'Content-Type': 'image/jpeg' }, dotfiles: 'allow' });
             return;
           }
+          this.log('warn',
+            `Could not generate a poster frame for "${mediaFilePath}" - ` +
+            `check that FFmpeg is installed, or pass its path with "--ffmpeg"`
+          );
         }
         this.log('warn', `Thumbnail for media file "${mediaFilePath}" unavailable`);
         res.status(404).send('Media not found');

@@ -165,7 +165,7 @@ function PostCard(props: PostCardProps) {
     }
     return (
       <div className="my-4">
-        <audio controls className="w-100 rounded">
+        <audio controls controlsList="nodownload" className="w-100 rounded">
           <source src={`/media/${audio.id}`} type={audio.downloaded?.mimeType || ''} />
           Your browser does not support the audio element.
         </audio>

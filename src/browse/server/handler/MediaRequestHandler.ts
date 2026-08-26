@@ -7,6 +7,7 @@ import Basehandler from './BaseHandler.js';
 import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
 import type VideoThumbnailer from '../VideoThumbnailer.js';
+import { isMediaElementRequest } from '../MediaAccessGuard.js';
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
@@ -109,6 +110,17 @@ export default class MediaRequestHandler extends Basehandler {
         this.log('warn', `Media file "${mediaFilePath}" is missing or empty`);
       }
       res.status(404).send('Media not found');
+      return;
+    }
+    const isPlayable =
+      looksLikeVideo(mediaFilePath, downloaded.mimeType) ||
+      !!downloaded.mimeType?.startsWith('audio/');
+    // A video or audio file is there to be played. Asking for one outside a
+    // player - a tab navigation, a download manager, an extension replaying
+    // the URL - is not something the app ever does.
+    if (isPlayable && !isThumbnail && !isDownloadRequest && !isMediaElementRequest(req)) {
+      this.log('debug', `Refused non-player request for media file "${mediaFilePath}"`);
+      res.status(403).send('Forbidden');
       return;
     }
     // Force a "Save as" instead of letting the browser render the file inline.

@@ -1,4 +1,5 @@
 import { Segmented } from "antd";
+import { AppstoreOutlined, ProfileOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { type PostListLayout } from "../../types/Settings";
 
 interface PostLayoutSwitchProps {
@@ -6,10 +7,13 @@ interface PostLayoutSwitchProps {
   onChange: (layout: PostListLayout) => void;
 }
 
-const LAYOUTS: { value: PostListLayout; icon: string; label: string; }[] = [
-  { value: 'card', icon: 'view_agenda', label: 'Card view' },
-  { value: 'grid', icon: 'grid_view', label: 'Grid view' },
-  { value: 'list', icon: 'view_list', label: 'List view' }
+// antd's own icons rather than the Material font used elsewhere: a
+// `.material-icons` span carries its own font-size and line-height, which do
+// not line up inside a Segmented item and left the glyphs sitting off-centre.
+const LAYOUTS: { value: PostListLayout; icon: React.ReactNode; label: string; }[] = [
+  { value: 'card', icon: <ProfileOutlined />, label: 'Card view' },
+  { value: 'grid', icon: <AppstoreOutlined />, label: 'Grid view' },
+  { value: 'list', icon: <UnorderedListOutlined />, label: 'List view' }
 ];
 
 function PostLayoutSwitch(props: PostLayoutSwitchProps) {
@@ -23,12 +27,7 @@ function PostLayoutSwitch(props: PostLayoutSwitchProps) {
       options={LAYOUTS.map((layout) => ({
         value: layout.value,
         label: (
-          <span
-            className="material-icons"
-            style={{ fontSize: '1.1rem', display: 'block' }}
-            title={layout.label}
-            aria-label={layout.label}
-          >
+          <span title={layout.label} aria-label={layout.label}>
             {layout.icon}
           </span>
         )

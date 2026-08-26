@@ -10,12 +10,13 @@ import { Select } from "antd";
 import CollectionCard from "../components/CollectionCard";
 import ShowingText from "../components/ShowingText";
 import PageNav from "../components/PageNav";
-import { useOutletContext, useSearchParams } from "react-router";
+import { useLocation, useOutletContext, useSearchParams } from "react-router";
 import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import SearchInputBox from "../components/SearchInputBox";
 import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
 import { LoadingBlock, LoadingOverlay } from "../components/Loading";
+import { readViewCache, writeViewCache } from "../utils/viewCache";
 
 interface ViewParams {
   search: string;
@@ -61,7 +62,11 @@ function CollectionList() {
   const { api } = useAPI();
   const { settings } = useBrowseSettings();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
-  const [list, setList] = useState<CollectionList | null>(null);
+  const location = useLocation();
+  const cacheKey = `collection-list:${location.key}`;
+  const [list, setList] = useState<CollectionList | null>(
+    () => readViewCache<CollectionList>(cacheKey)?.data ?? null
+  );
   const [loading, setLoading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const { campaign } = useOutletContext<CampaignLayoutOutletContext>();
@@ -77,6 +82,14 @@ function CollectionList() {
     if (!campaign || sortBy === null || page === null) {
       return;
     }
+    const signature = JSON.stringify({ viewParams, campaignId: campaign.id });
+    const cached = readViewCache<CollectionList>(cacheKey);
+    if (cached?.signature === signature) {
+      // Back navigation onto a list we already hold - see `viewCache`.
+      setList(cached.data);
+      setLoading(false);
+      return;
+    }
     const abortController = new AbortController();
     setLoading(true);
     void (async () => {
@@ -88,6 +101,7 @@ function CollectionList() {
           page
         });
         if (!abortController.signal.aborted) {
+          writeViewCache(cacheKey, signature, _list);
           setList(_list);
         }
       }
@@ -99,7 +113,7 @@ function CollectionList() {
     })();
 
     return () => abortController.abort();
-  }, [api, viewParams]);
+  }, [api, viewParams, cacheKey]);
 
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;

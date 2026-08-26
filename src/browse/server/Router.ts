@@ -9,6 +9,7 @@ import MediaRequestHandler from './handler/MediaRequestHandler.js';
 import SettingsAPIRequestHandler from './handler/SettingsAPIRequestHandler.js';
 import MediaAPIRequestHandler from './handler/MediaAPIRequestHandler.js';
 import VideoThumbnailer from './VideoThumbnailer.js';
+import { checkMediaAccess, issueMediaAccessCookie } from './MediaAccessGuard.js';
 
 interface RequestHandlers {
   campaignAPI: CampaignAPIRequestHandler;
@@ -29,6 +30,15 @@ class _Router {
   }
 
   initializeRoutes() {
+    // Every request that is not itself for media renews the access cookie, so
+    // it stays valid for as long as the app is being used.
+    this.#router.use((req, res, next) => {
+      if (!req.path.startsWith('/media/')) {
+        issueMediaAccessCookie(res);
+      }
+      next();
+    });
+
     this.#router.get([
       '/api/campaigns/:id/posts/filter_options',
       '/api/campaigns/:id/products/filter_options',
@@ -107,9 +117,14 @@ class _Router {
       this.#handlers.settingsAPI.handleSaveBrowseSettingsRequest(req, res)
     );
 
-    this.#router.get('/media/:id', (req, res) =>
-      this.#handlers.media.handleMediaRequest(req, res, req.params.id)
-    );
+    this.#router.get('/media/:id', (req, res) => {
+      const denied = checkMediaAccess(req);
+      if (denied) {
+        res.status(403).send('Forbidden');
+        return;
+      }
+      return this.#handlers.media.handleMediaRequest(req, res, req.params.id);
+    });
 
     this.#router.get(/(.*)/, (_req, res) => {
       res.sendFile(

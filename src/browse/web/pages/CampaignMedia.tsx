@@ -3,7 +3,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useAPI } from "../contexts/APIProvider";
 import { Container, Row, Card } from "react-bootstrap";
 import ShowingText from "../components/ShowingText";
-import { NavigationType, useNavigationType, useOutletContext, useSearchParams } from "react-router";
+import { NavigationType, useLocation, useNavigationType, useOutletContext, useSearchParams } from "react-router";
 import PageNav from "../components/PageNav";
 import deepEqual from "deep-equal";
 import copy from 'fast-copy';
@@ -15,6 +15,7 @@ import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
 import { LoadingBlock, LoadingOverlay } from "../components/Loading";
+import { readViewCache, writeViewCache } from "../utils/viewCache";
 
 interface ViewParams {
   filter: Filter<MediaFilterSearchParams> | null;
@@ -57,7 +58,11 @@ function CampaignMedia() {
   const { settings } = useBrowseSettings();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const { campaign } = useOutletContext<CampaignLayoutOutletContext>();
-  const [list, setList] = useState<MediaList<any> | null>(null);
+  const location = useLocation();
+  const cacheKey = `campaign-media:${location.key}`;
+  const [list, setList] = useState<MediaList<any> | null>(
+    () => readViewCache<MediaList<any>>(cacheKey)?.data ?? null
+  );
   const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState<FilterData<MediaFilterSearchParams> | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -102,10 +107,19 @@ function CampaignMedia() {
 
   useEffect(() => {
     const { filter, page } = viewParams;
+    const cached = readViewCache<MediaList<any>>(cacheKey);
     if (!campaign || !filter || page === null) {
       // The filter has yet to be applied, so what is on screen - if anything -
-      // does not answer to the current parameters. Keep the spinner up.
-      setLoading(true);
+      // does not answer to the current parameters. Keep the spinner up, unless
+      // this is a back navigation and the cached gallery is already there.
+      setLoading(!cached);
+      return;
+    }
+    const signature = JSON.stringify({ viewParams, campaignId: campaign.id });
+    if (cached?.signature === signature) {
+      // Same history entry, same parameters - see `viewCache`.
+      setList(cached.data);
+      setLoading(false);
       return;
     }
     const abortController = new AbortController();
@@ -119,6 +133,7 @@ function CampaignMedia() {
           page
         });
         if (!abortController.signal.aborted) {
+          writeViewCache(cacheKey, signature, _list);
           setList(_list);
         }
       }
@@ -130,7 +145,7 @@ function CampaignMedia() {
     })();
 
     return () => abortController.abort();
-  }, [api, campaign, viewParams]);
+  }, [api, campaign, viewParams, cacheKey]);
 
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;

@@ -87,7 +87,11 @@ function MediaGrid(props: MediaGridProps) {
       attributes: {
         preload: false,
         controls: true,
-        playsInline: true
+        playsInline: true,
+        // Drops the download entry from the player's own menu, and the
+        // picture-in-picture window that would put the stream outside the page.
+        controlsList: 'nodownload',
+        disablePictureInPicture: true
       }
     }) : undefined;
     const dataPoster = isVideo? thumbnailURL : undefined;

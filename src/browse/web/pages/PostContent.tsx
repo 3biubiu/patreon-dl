@@ -1,9 +1,11 @@
 import "../assets/styles/PostContent.scss";
 import { forwardRef, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { NavLink, useParams } from "react-router";
-import { Container, Row, Col, Stack } from "react-bootstrap";
+import { Container, Row, Col } from "react-bootstrap";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useAPI } from "../contexts/APIProvider";
 import PostCard from "../components/PostCard";
+import PostThumbnail from "../components/PostThumbnail";
 import CommentsPanel from "../components/CommentsPanel";
 import { type PostWithComments } from "../../types/Content";
 import { type PostFilterSearchParams } from "../../types/Filter";
@@ -103,7 +105,7 @@ function PostContent() {
     if (!postNav.previous && !postNav.next) {
       return;
     }
-    let h = 72;  // Assumed nav height
+    let h = 88;  // Assumed nav height
     const viewportHeight = window.innerHeight;
     if (contentRef.current) {
       const rect = contentRef.current.getBoundingClientRect();
@@ -124,50 +126,46 @@ function PostContent() {
 
   const nav = useMemo(() => {
     const { previous, next } = postNav;
-    const contextQS = getContextQS();
-    const previousLink = previous ? (
-      <NavLink
-        to={`${getContentUrl(previous)}${contextQS ? '?' + contextQS : ''}`}
-        className={`post-nav__previous ${ !next ? 'post-nav__previous--fill' : ''}`}
-        onClick={() => {
-          setPostNav({ previous: null, next: null });
-          scrollTo(0, 0);
-          setContent(previous);
-        }}
-      >
-        <div className="post-nav__previous-label">{previous.title}</div>
-      </NavLink>
-    ) : null;
-    const nextLink = next ? (
-      <NavLink
-        to={`${getContentUrl(next)}${contextQS ? '?' + contextQS : ''}`}
-        className={`post-nav__next ${ !previous ? 'post-nav__next--fill' : ''}`}
-        onClick={() => {
-          setPostNav({ previous: null, next: null });
-          scrollTo(0, 0);
-          setContent(next);
-        }}
-      >
-        <div className="post-nav__next-label">{next.title}</div>
-      </NavLink>
-    ) : null;
-    if (previousLink || nextLink) {
-      const justify = 
-        previous && next ? 'justify-content-between'
-        : next ? 'justify-content-end'
-        : '';
-      const fixed = stickyNav ? 'fixed' : '';
-      return (
-        <ContentColumn ref={navRef} settings={settings} className={`post-nav__wrapper ${fixed}`}>
-          <Stack direction="horizontal" className={`post-nav mt-2 mb-3 ${justify}`}>
-            { previousLink }
-            { nextLink }
-          </Stack>
-        </ContentColumn>
-      );
+    if (!previous && !next) {
+      return null;
     }
-    return null;
-  }, [postNav, scrollTo, stickyNav]);
+    const contextQS = getContextQS();
+    const buildLink = (target: PostWithComments, direction: 'previous' | 'next') => (
+      <NavLink
+        to={`${getContentUrl(target)}${contextQS ? '?' + contextQS : ''}`}
+        className={`post-nav__item post-nav__item--${direction}`}
+        onClick={() => {
+          setPostNav({ previous: null, next: null });
+          scrollTo(0, 0);
+          setContent(target);
+        }}
+      >
+        <span className="post-nav__arrow">
+          {direction === 'previous' ? <LeftOutlined /> : <RightOutlined />}
+        </span>
+        <span className="post-nav__thumbnail-wrapper">
+          <PostThumbnail post={target} classNamePrefix="post-nav" />
+        </span>
+        <span className="post-nav__text">
+          <span className="post-nav__direction">
+            {direction === 'previous' ? 'Previous' : 'Next'}
+          </span>
+          <span className="post-nav__title">{target.title}</span>
+        </span>
+      </NavLink>
+    );
+    // One neighbour gets the whole row rather than half of it, which is what
+    // used to squeeze the titles hard enough to wrap.
+    const single = !previous || !next;
+    return (
+      <ContentColumn ref={navRef} settings={settings} className={`post-nav__wrapper ${stickyNav ? 'fixed' : ''}`}>
+        <div className={`post-nav mt-2 mb-3 ${single ? 'post-nav--single' : ''}`}>
+          { previous ? buildLink(previous, 'previous') : null }
+          { next ? buildLink(next, 'next') : null }
+        </div>
+      </ContentColumn>
+    );
+  }, [postNav, scrollTo, stickyNav, settings]);
 
   if (!post) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;

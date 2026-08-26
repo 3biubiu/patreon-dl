@@ -35,6 +35,19 @@ function App() {
     document.documentElement.setAttribute('data-bs-theme', dark ? 'dark' : 'light');
   }, [dark]);
 
+  // Right-clicking a player offers "Save video as", which is the one way out
+  // that `controlsList="nodownload"` leaves open.
+  useEffect(() => {
+    const blockPlayerContextMenu = (e: MouseEvent) => {
+      const tagName = (e.target as HTMLElement | null)?.tagName;
+      if (tagName === 'VIDEO' || tagName === 'AUDIO') {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('contextmenu', blockPlayerContextMenu);
+    return () => document.removeEventListener('contextmenu', blockPlayerContextMenu);
+  }, []);
+
   const campaignSubRoutes = (
     <>
       <Route index element={<CampaignHome />} />

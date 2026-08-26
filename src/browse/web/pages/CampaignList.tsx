@@ -10,11 +10,12 @@ import { Select } from "antd";
 import CampaignCard from "../components/CampaignCard";
 import ShowingText from "../components/ShowingText";
 import PageNav from "../components/PageNav";
-import { useSearchParams } from "react-router";
+import { useLocation, useSearchParams } from "react-router";
 import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock, LoadingOverlay } from "../components/Loading";
+import { readViewCache, writeViewCache } from "../utils/viewCache";
 
 interface ViewParams {
   sortBy: CampaignListSortBy;
@@ -56,7 +57,11 @@ function CampaignList() {
   const { setTitle } = useDocument();
   const { settings } = useBrowseSettings();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
-  const [list, setList] = useState<CampaignList | null>(null);
+  const location = useLocation();
+  const cacheKey = `campaign-list:${location.key}`;
+  const [list, setList] = useState<CampaignList | null>(
+    () => readViewCache<CampaignList>(cacheKey)?.data ?? null
+  );
   const [loading, setLoading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -69,6 +74,15 @@ function CampaignList() {
     if (sortBy === null || page === null) {
       return;
     }
+    const signature = JSON.stringify(viewParams);
+    const cached = readViewCache<CampaignList>(cacheKey);
+    if (cached?.signature === signature) {
+      // Same history entry, same parameters: a back navigation onto a list we
+      // already hold, so keep it instead of fetching it again.
+      setList(cached.data);
+      setLoading(false);
+      return;
+    }
     const abortController = new AbortController();
     setLoading(true);
     void (async () => {
@@ -79,6 +93,7 @@ function CampaignList() {
           page
         });
         if (!abortController.signal.aborted) {
+          writeViewCache(cacheKey, signature, _list);
           setList(_list);
         }
       }
@@ -90,7 +105,7 @@ function CampaignList() {
     })();
 
     return () => abortController.abort();
-  }, [api, viewParams]);
+  }, [api, viewParams, cacheKey]);
 
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;

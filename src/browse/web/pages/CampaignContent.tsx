@@ -5,7 +5,7 @@ import { useAPI } from "../contexts/APIProvider";
 import { Container, Row, Card, Stack } from "react-bootstrap";
 import ShowingText from "../components/ShowingText";
 import { type ContentType, type ContentList } from "../../types/Content";
-import { NavigationType, useNavigationType, useOutletContext, useParams, useSearchParams } from "react-router";
+import { NavigationType, useLocation, useNavigationType, useOutletContext, useParams, useSearchParams } from "react-router";
 import PostCard from "../components/PostCard";
 import PageNav from "../components/PageNav";
 import deepEqual from "deep-equal";
@@ -24,6 +24,7 @@ import { useDocument } from "../contexts/DocumentProvider";
 import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
 import { type Campaign } from "../../../entities";
 import { LoadingBlock, LoadingOverlay } from "../components/Loading";
+import { readViewCache, writeViewCache } from "../utils/viewCache";
 
 interface CampaignContentProps<T extends ContentType> {
   type: T;
@@ -79,7 +80,11 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   const { settings, updateSettings } = useBrowseSettings();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [collection, setCollection] = useState<Collection | null>(null);
-  const [list, setList] = useState<ContentList<T> | null>(null);
+  const location = useLocation();
+  const cacheKey = `campaign-content:${location.key}`;
+  const [list, setList] = useState<ContentList<T> | null>(
+    () => readViewCache<ContentList<T>>(cacheKey)?.data ?? null
+  );
   const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState<FilterData<PostFilterSearchParams> | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -200,11 +205,31 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
 
   useEffect(() => {
     const { filter, page } = viewParams;
+    const cached = readViewCache<ContentList<T>>(cacheKey);
     if (!campaign || !filter || page === null || (isCollection && !collection)) {
-      setList(null);
-      // Nothing to show and nothing settled yet - the filter is still being
-      // applied - so keep the spinner up rather than flashing an empty view.
-      setLoading(true);
+      if (cached) {
+        // Back navigation: the cached list is already on screen. Hold it while
+        // the filter re-applies rather than blanking the page under a spinner.
+        setLoading(false);
+      }
+      else {
+        setList(null);
+        // Nothing to show and nothing settled yet - the filter is still being
+        // applied - so keep the spinner up rather than flashing an empty view.
+        setLoading(true);
+      }
+      return;
+    }
+    const signature = JSON.stringify({
+      viewParams,
+      campaignId: campaign.id,
+      contentType,
+      collectionId: collection?.id
+    });
+    if (cached?.signature === signature) {
+      // Same history entry, same parameters - see `viewCache`.
+      setList(cached.data);
+      setLoading(false);
       return;
     }
     const abortController = new AbortController();
@@ -220,6 +245,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
           page
         });
         if (!abortController.signal.aborted) {
+          writeViewCache(cacheKey, signature, _list);
           setList(_list);
         }
       }
@@ -231,7 +257,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
     })();
 
     return () => abortController.abort();
-  }, [api, campaign, contentType, isCollection, collection, viewParams]);
+  }, [api, campaign, contentType, isCollection, collection, viewParams, cacheKey]);
 
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;

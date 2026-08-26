@@ -81,6 +81,12 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
   if (mi.thumbnail) {
     thumbnailURL = `${mediaURL}?t=1`;
   }
+  // An image with no stored thumbnail is its own best preview - the server
+  // serves the full file for "?t=1" in that case. Borrowing the post's cover
+  // here showed the wrong picture in the gallery.
+  else if (isImage) {
+    thumbnailURL = mediaURL;
+  }
   // Use post / product image if media has no thumbnail (notably PDFs)
   else if (mi.source.type === 'post') {
     if (mi.source.thumbnail?.downloaded?.path) {

@@ -149,8 +149,13 @@ export function ContentAPIMixin<TBase extends APIConstructor>(Base: TBase) {
         });
         if (replacedMediaIds.length > 0) {
           hasModified = true;
-          // Remove images that have been inlined
-          post.images = post.images.filter((img) => !replacedMediaIds.includes(img.id));
+          // Record - but don't remove - the images that have been inlined.
+          // Dropping them here left posts whose every image sits in the body
+          // with nothing to show as a cover in the grid / list views.
+          post.inlinedImageIds = [
+            ...(post.inlinedImageIds || []),
+            ...replacedMediaIds
+          ];
         }
       }
 

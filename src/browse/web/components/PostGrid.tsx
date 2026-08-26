@@ -1,7 +1,8 @@
 import "../assets/styles/PostGrid.scss";
 import { Link } from "react-router";
 import { type Post } from "../../../entities";
-import { getContentUrl, getPostThumbnailURL } from "../utils/Misc";
+import { getContentUrl } from "../utils/Misc";
+import PostThumbnail from "./PostThumbnail";
 
 interface PostGridProps {
   posts: Post[];
@@ -24,7 +25,6 @@ function PostGrid(props: PostGridProps) {
     <div className="post-grid mb-4">
       {
         posts.map((post) => {
-          const thumbnailURL = getPostThumbnailURL(post);
           return (
             <Link
               key={`post-grid-item-${post.id}`}
@@ -33,15 +33,7 @@ function PostGrid(props: PostGridProps) {
               title={post.title || undefined}
             >
               <div className="post-grid__thumbnail-wrapper">
-                {
-                  thumbnailURL ?
-                    <img className="post-grid__thumbnail" src={thumbnailURL} loading="lazy" alt="" />
-                    : (
-                      <span className="material-icons-outlined post-grid__thumbnail-placeholder">
-                        article
-                      </span>
-                    )
-                }
+                <PostThumbnail post={post} classNamePrefix="post-grid" />
                 {
                   !post.isViewable ? (
                     <span className="material-icons post-grid__lock">lock</span>

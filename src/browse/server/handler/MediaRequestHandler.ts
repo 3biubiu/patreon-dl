@@ -24,6 +24,21 @@ function looksLikeVideo(filePath: string, mimeType?: string | null) {
   return VIDEO_EXTENSIONS.includes(path.extname(filePath).toLowerCase());
 }
 
+/**
+ * A download that failed part-way can leave a zero-byte file behind, which the
+ * DB still records as present. Serving one gives the browser a 200 with
+ * nothing to render, collapsing whatever tile it was meant to fill - so treat
+ * empty files as if they were never downloaded.
+ */
+function isUsableFile(filePath: string) {
+  try {
+    return fs.statSync(filePath).size > 0;
+  }
+  catch {
+    return false;
+  }
+}
+
 function looksLikeImage(filePath: string, mimeType?: string | null) {
   if (mimeType) {
     return mimeType.startsWith('image/');
@@ -62,7 +77,7 @@ export default class MediaRequestHandler extends Basehandler {
     let mediaFilePath: string | null = null, isThumbnail = false;
     if (isRequestingThumbnail && downloaded?.thumbnail?.path) {
       const thumbnailFilePath = path.resolve(this.#dataDir, downloaded.thumbnail.path);
-      if (fs.existsSync(thumbnailFilePath)) {
+      if (isUsableFile(thumbnailFilePath)) {
         mediaFilePath = thumbnailFilePath;
         isThumbnail = true;
       }
@@ -74,7 +89,7 @@ export default class MediaRequestHandler extends Basehandler {
         // No stored thumbnail. For videos we can still produce one locally by
         // grabbing a frame, which is the only option when Patreon supplied no
         // cover image for the post.
-        if (looksLikeVideo(mediaFilePath, downloaded?.mimeType) && fs.existsSync(mediaFilePath)) {
+        if (looksLikeVideo(mediaFilePath, downloaded?.mimeType) && isUsableFile(mediaFilePath)) {
           const generated = await this.#videoThumbnailer.getThumbnail(mediaFilePath);
           if (generated) {
             res.sendFile(generated, { headers: { 'Content-Type': 'image/jpeg' }, dotfiles: 'allow' });
@@ -89,9 +104,9 @@ export default class MediaRequestHandler extends Basehandler {
         res.status(404).send('Media not found');
         return;
     }
-    if (!downloaded || !mediaFilePath || !fs.existsSync(mediaFilePath)) {
+    if (!downloaded || !mediaFilePath || !isUsableFile(mediaFilePath)) {
       if (mediaFilePath) {
-        this.log('warn', `Media file "${mediaFilePath}" not found`);
+        this.log('warn', `Media file "${mediaFilePath}" is missing or empty`);
       }
       res.status(404).send('Media not found');
       return;

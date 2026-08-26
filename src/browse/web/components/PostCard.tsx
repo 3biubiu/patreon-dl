@@ -65,25 +65,47 @@ function PostCard(props: PostCardProps) {
     el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [highlightMediaId, post.id]);
 
-  const mediaItems: Downloadable<any> = [];
-  if (post.video) {
-    mediaItems.push(post.video);
-  }
-  else if (post.embed) {
-    mediaItems.push(post.embed);
-  }
-  else if (post.videoPreview) {
-    mediaItems.push(post.videoPreview);
-  }
-  else if (post.images.length > 0) {
-    mediaItems.push(...post.images);
-  }
-  else if (post.coverImage?.downloaded?.path) {
-    mediaItems.push(post.coverImage);
-  }
-  else if (post.thumbnail?.downloaded?.path) {
-    mediaItems.push(post.thumbnail);
-  }
+  // Only YouTube embeds are playable inline; see `externalEmbed` below. When
+  // one is shown there is no need for a cover in the media grid as well.
+  const showsExternalEmbed = !!(
+    post.embed && !post.embed.downloaded?.path && post.embed.html &&
+    post.embed.provider?.toLowerCase() === 'youtube'
+  );
+
+  const mediaItems = useMemo(() => {
+    const isDownloaded = (item?: Downloadable<any> | null) => !!item?.downloaded?.path;
+    // Images the server has already placed in the post body; showing them in
+    // the grid too would just duplicate them.
+    const inlinedImageIds = post.inlinedImageIds || [];
+    const images = post.images.filter(
+      (img) => isDownloaded(img) && !inlinedImageIds.includes(img.id)
+    );
+    // Each candidate must be checked for a downloaded file of its own,
+    // otherwise an undownloaded embed (Streamable and friends) shadows the
+    // cover image that is sitting right there.
+    if (isDownloaded(post.video)) {
+      return [ post.video! ];
+    }
+    if (isDownloaded(post.embed)) {
+      return [ post.embed! ];
+    }
+    if (isDownloaded(post.videoPreview)) {
+      return [ post.videoPreview! ];
+    }
+    if (images.length > 0) {
+      return images;
+    }
+    if (showsExternalEmbed) {
+      return [];
+    }
+    if (isDownloaded(post.coverImage)) {
+      return [ post.coverImage! ];
+    }
+    if (isDownloaded(post.thumbnail)) {
+      return [ post.thumbnail! ];
+    }
+    return [];
+  }, [post, showsExternalEmbed]);
 
   const attachments = useMemo(() => {
     const links = post.attachments.reduce<{id: string; title: string; url: string}[]>((result, att) => {
@@ -168,7 +190,7 @@ function PostCard(props: PostCardProps) {
   const externalEmbed = useMemo(() => {
     // Only YouTube embeds for now
     // Vimeo can't be reliably embedded due to CORS restrictions
-    if (post.embed && !post.embed.downloaded?.path && post.embed.html && post.embed.provider?.toLowerCase() === 'youtube') {
+    if (showsExternalEmbed && post.embed?.html) {
       const parser = new DOMParser();
       const doc = parser.parseFromString(post.embed.html, 'text/html');
       // Select the iframe and get attributes
@@ -198,7 +220,7 @@ function PostCard(props: PostCardProps) {
       )
     }
     return null;
-  }, [post]);
+  }, [post, showsExternalEmbed]);
 
   const inlineMediaRegex = /class=".*?\s*?lightgallery-item.*?\s*?"/gm;
   const hasInlineMedia = inlineMediaRegex.test(post.content || '');

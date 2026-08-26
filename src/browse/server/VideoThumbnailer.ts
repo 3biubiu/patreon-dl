@@ -85,7 +85,7 @@ export default class VideoThumbnailer {
       .digest('hex');
     const cacheFile = path.resolve(this.#cacheDir, `${key}.jpg`);
 
-    if (fs.existsSync(cacheFile)) {
+    if (this.#isUsable(cacheFile)) {
       return cacheFile;
     }
     if (this.#failed.has(key)) {
@@ -115,7 +115,7 @@ export default class VideoThumbnailer {
       for (const seek of SEEK_POSITIONS) {
         try {
           await this.#extractFrame(videoPath, cacheFile, seek);
-          if (fs.existsSync(cacheFile)) {
+          if (this.#isUsable(cacheFile)) {
             this.log('debug', `Generated poster frame for "${videoPath}" at ${seek}`);
             return cacheFile;
           }
@@ -141,6 +141,16 @@ export default class VideoThumbnailer {
     }
     finally {
       this.#releaseSlot();
+    }
+  }
+
+  /** ffmpeg can leave a zero-byte file behind when it fails to decode a frame. */
+  #isUsable(file: string) {
+    try {
+      return fs.statSync(file).size > 0;
+    }
+    catch {
+      return false;
     }
   }
 

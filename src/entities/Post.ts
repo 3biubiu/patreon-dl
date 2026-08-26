@@ -107,6 +107,14 @@ export interface Post {
 
   /**
    * @privateRemarks
+   * Ids of `images` that the browse API has already placed into `content`.
+   * They remain in `images` so that callers can still pick one as a cover,
+   * but must not be shown a second time alongside the post body.
+   */
+  inlinedImageIds?: string[];
+
+  /**
+   * @privateRemarks
    * Not included in `data.relationships`
    * Converted from `data.attributes.video_preview`
    */

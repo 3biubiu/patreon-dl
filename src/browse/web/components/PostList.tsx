@@ -2,7 +2,8 @@ import "../assets/styles/PostList.scss";
 import { Badge, Stack } from "react-bootstrap";
 import { Link } from "react-router";
 import { type Post } from "../../../entities";
-import { getCampaignBaseUrl, getContentUrl, getPostThumbnailURL } from "../utils/Misc";
+import { getCampaignBaseUrl, getContentUrl } from "../utils/Misc";
+import PostThumbnail from "./PostThumbnail";
 
 interface PostListProps {
   posts: Post[];
@@ -23,7 +24,6 @@ function PostList(props: PostListProps) {
     <div className="post-list mb-4">
       {
         posts.map((post) => {
-          const thumbnailURL = getPostThumbnailURL(post);
           return (
             <div key={`post-list-item-${post.id}`} className="post-list__item">
               <Link
@@ -32,15 +32,7 @@ function PostList(props: PostListProps) {
                 tabIndex={-1}
                 aria-hidden="true"
               >
-                {
-                  thumbnailURL ?
-                    <img className="post-list__thumbnail" src={thumbnailURL} loading="lazy" alt="" />
-                    : (
-                      <span className="material-icons-outlined post-list__thumbnail-placeholder">
-                        article
-                      </span>
-                    )
-                }
+                <PostThumbnail post={post} classNamePrefix="post-list" />
               </Link>
               <div className="post-list__body">
                 <Stack direction="horizontal" className="align-items-start gap-2">

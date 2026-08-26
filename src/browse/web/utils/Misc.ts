@@ -100,25 +100,37 @@ export function getContentUrlForMedia(entity: Post | Product, mediaId: string) {
 }
 
 /**
- * Best available thumbnail for a post, preferring the images the downloader
- * stored specifically as thumbnail / cover. Returns `null` when the post has
- * no locally-stored imagery at all.
+ * Candidate thumbnails for a post, in descending order of preference:
+ *
+ * 1. the images the downloader stored specifically as thumbnail / cover;
+ * 2. the post's own images - including ones that have been inlined into the
+ *    body, which is all a post without a cover usually has;
+ * 3. its videos, which the server turns into poster frames when no thumbnail
+ *    was downloaded alongside them.
+ *
+ * More than one is returned because a candidate can still fail to load: a
+ * download interrupted part-way leaves a file the DB believes in but the
+ * server rejects. Callers should fall through the list on error.
  */
-export function getPostThumbnailURL(post: Post): string | null {
+export function getPostThumbnailURLs(post: Post): string[] {
+  const urls: string[] = [];
   if (post.thumbnail?.downloaded?.path) {
-    return `/media/${post.thumbnail.id}`;
+    urls.push(`/media/${post.thumbnail.id}`);
   }
   if (post.coverImage?.downloaded?.path) {
-    return `/media/${post.coverImage.id}`;
+    urls.push(`/media/${post.coverImage.id}`);
   }
-  const image = post.images.find((img) => img.downloaded?.path);
-  if (image) {
-    return `/media/${image.id}${image.downloaded?.thumbnail?.path ? '?t=1' : ''}`;
+  for (const image of post.images) {
+    if (image.downloaded?.path) {
+      urls.push(`/media/${image.id}${image.downloaded.thumbnail?.path ? '?t=1' : ''}`);
+    }
   }
-  const withPoster = [ post.video, post.videoPreview, post.embed ]
-    .find((item) => item?.downloaded?.thumbnail?.path);
-  if (withPoster) {
-    return `/media/${withPoster.id}?t=1`;
+  // Ask for the thumbnail whether or not one was downloaded: for a video the
+  // server falls back to grabbing a frame from the file itself.
+  for (const video of [ post.video, post.videoPreview, post.embed ]) {
+    if (video?.downloaded?.path) {
+      urls.push(`/media/${video.id}?t=1`);
+    }
   }
-  return null;
+  return urls;
 }

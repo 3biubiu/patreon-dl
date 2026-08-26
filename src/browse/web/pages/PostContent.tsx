@@ -1,5 +1,5 @@
 import "../assets/styles/PostContent.scss";
-import { forwardRef, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useReducer, useState } from "react";
 import { NavLink, useParams } from "react-router";
 import { Container, Row, Col } from "react-bootstrap";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
@@ -74,10 +74,6 @@ function PostContent() {
   const { scrollTo } = useScroll();
   const [post, setContent] = useReducer(contentReducer, null);;
   const [postNav, setPostNav] = useState<PostNav>({ previous: null, next: null });
-  const contentRef = useRef<HTMLDivElement>(null);
-  const commentsRef = useRef<HTMLDivElement>(null);
-  const navRef = useRef<HTMLDivElement>(null);
-  const [stickyNav, setStickyNav] = useState(false);
 
   useEffect(() => {
     // Check if postId is in format <slug>-<id>. If so, extract the id part.
@@ -100,29 +96,6 @@ function PostContent() {
   useEffect(() => {
     setTitle(post?.title || null);
   }, [setTitle, post]);
-
-  const updateNavStickiness = useCallback(() => {
-    if (!postNav.previous && !postNav.next) {
-      return;
-    }
-    let h = 88;  // Assumed nav height
-    const viewportHeight = window.innerHeight;
-    if (contentRef.current) {
-      const rect = contentRef.current.getBoundingClientRect();
-      h += rect.bottom;
-    }
-    if (commentsRef.current) {
-      h += commentsRef.current.scrollHeight;
-    }
-    setStickyNav(h > viewportHeight);
-  }, [postNav, postId]);
-
-  useEffect(() => {
-    updateNavStickiness();
-    window.addEventListener("resize", updateNavStickiness);
-
-    return () => window.removeEventListener("resize", updateNavStickiness);
-  }, [updateNavStickiness]);
 
   const nav = useMemo(() => {
     const { previous, next } = postNav;
@@ -158,14 +131,14 @@ function PostContent() {
     // used to squeeze the titles hard enough to wrap.
     const single = !previous || !next;
     return (
-      <ContentColumn ref={navRef} settings={settings} className={`post-nav__wrapper ${stickyNav ? 'fixed' : ''}`}>
+      <ContentColumn settings={settings}>
         <div className={`post-nav mt-2 mb-3 ${single ? 'post-nav--single' : ''}`}>
           { previous ? buildLink(previous, 'previous') : null }
           { next ? buildLink(next, 'next') : null }
         </div>
       </ContentColumn>
     );
-  }, [postNav, scrollTo, stickyNav, settings]);
+  }, [postNav, scrollTo, settings]);
 
   if (!post) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;
@@ -173,21 +146,20 @@ function PostContent() {
 
   return (
     <>
-      <ContentColumn ref={contentRef} settings={settings}>
-        <div className={!nav || stickyNav ? 'py-4' : 'pt-4'}>
+      <ContentColumn settings={settings}>
+        <div className={nav ? 'pt-4' : 'py-4'}>
           <PostCard post={post} showCampaign />
         </div>
       </ContentColumn>
-      { !stickyNav && nav }
+      { nav }
       {
         post.comments && (
-          <ContentColumn ref={commentsRef} settings={settings} className="pt-2 pb-4 px-4">
+          <ContentColumn settings={settings} className="pt-2 pb-4 px-4">
             <h5 className="mb-3">{post.commentCount} {post.comments.length > 1 ? 'comments' : 'comment'}</h5>
             <CommentsPanel comments={post.comments} />
           </ContentColumn>
         )
       }
-      { stickyNav && nav }
     </>
   )
 }

@@ -10,20 +10,12 @@
     grid-template-columns: 1fr;
   }
 
-  &__wrapper.fixed {
-    position: sticky;
-    bottom: 0;
-    border-top: 1px solid var(--bs-border-color);
-    padding-top: 0.5rem;
-    background: var(--bs-body-bg);
-  }
-
   &__item {
     display: flex;
     align-items: center;
     gap: 0.6rem;
     min-width: 0;
-    padding: 0.55rem 0.7rem;
+    padding: 0.45rem 0.6rem;
     border: 1px solid var(--bs-border-color);
     border-radius: var(--bs-border-radius);
     color: var(--bs-body-color);
@@ -51,7 +43,7 @@
   &__thumbnail-wrapper {
     position: relative;
     flex: 0 0 auto;
-    width: 4.5rem;
+    width: 3.75rem;
     aspect-ratio: 16 / 9;
     display: flex;
     align-items: center;

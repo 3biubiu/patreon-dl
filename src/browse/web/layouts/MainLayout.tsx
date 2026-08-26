@@ -29,6 +29,9 @@ function MainLayout() {
             collapsible
             collapsed={collapsed}
             onCollapse={setCollapsed}
+            // Replaced by an entry in the sidebar's own footer menu, so the
+            // collapse control is the same height as the rows beside it.
+            trigger={null}
             width={SIDER_WIDTH}
             collapsedWidth={SIDER_COLLAPSED_WIDTH}
             style={{
@@ -36,7 +39,10 @@ function MainLayout() {
               borderInlineEnd: `1px solid ${token.colorBorderSecondary}`
             }}
           >
-            <Sidebar collapsed={collapsed} />
+            <Sidebar
+              collapsed={collapsed}
+              onToggleCollapse={() => setCollapsed(!collapsed)}
+            />
           </Sider>
         ) : null
       }

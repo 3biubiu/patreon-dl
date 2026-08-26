@@ -1,7 +1,14 @@
 import "../assets/styles/Sidebar.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar, Menu, type MenuProps } from "antd";
-import { HomeOutlined, LogoutOutlined, SettingOutlined, TeamOutlined } from "@ant-design/icons";
+import {
+  HomeOutlined,
+  LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  SettingOutlined,
+  TeamOutlined
+} from "@ant-design/icons";
 import { type Campaign } from "../../../entities";
 import { useAPI } from "../contexts/APIProvider";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -17,14 +24,17 @@ interface SidebarProps {
   collapsed?: boolean;
   /** Called after a destination is picked, so the mobile drawer can close. */
   onNavigate?: () => void;
+  /** Given only where collapsing applies, which is the desktop rail. */
+  onToggleCollapse?: () => void;
 }
 
 const SETTINGS_KEY = 'settings';
 const USERS_KEY = '/users';
 const SIGN_OUT_KEY = 'sign-out';
+const COLLAPSE_KEY = 'collapse';
 
 function Sidebar(props: SidebarProps) {
-  const { collapsed = false, onNavigate } = props;
+  const { collapsed = false, onNavigate, onToggleCollapse } = props;
   const { api } = useAPI();
   const { showBrowseSettingsModal } = useGlobalModals();
   const { user, signOut } = useAuth();
@@ -97,8 +107,15 @@ function Sidebar(props: SidebarProps) {
       { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' },
       { key: SIGN_OUT_KEY, icon: <LogoutOutlined />, label: 'Sign out' }
     );
+    if (onToggleCollapse) {
+      items.push({
+        key: COLLAPSE_KEY,
+        icon: collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />,
+        label: collapsed ? 'Expand' : 'Collapse'
+      });
+    }
     return items;
-  }, [user?.role]);
+  }, [user?.role, collapsed, onToggleCollapse]);
 
   // A campaign stays selected while any of its sub-pages is open.
   const selectedKeys = useMemo(() => {
@@ -113,6 +130,11 @@ function Sidebar(props: SidebarProps) {
   }, [location.pathname, campaignItems]);
 
   const handleClick = useCallback<NonNullable<MenuProps['onClick']>>(({ key }) => {
+    if (key === COLLAPSE_KEY) {
+      // Stays put rather than closing anything - there is nothing to navigate.
+      onToggleCollapse?.();
+      return;
+    }
     if (key === SETTINGS_KEY) {
       showBrowseSettingsModal();
     }
@@ -125,7 +147,7 @@ function Sidebar(props: SidebarProps) {
     if (onNavigate) {
       onNavigate();
     }
-  }, [navigate, showBrowseSettingsModal, signOut, onNavigate]);
+  }, [navigate, showBrowseSettingsModal, signOut, onToggleCollapse, onNavigate]);
 
   return (
     <div className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>

@@ -78,9 +78,3 @@
     min-width: 22px;
   }
 }
-
-// Sider draws its collapse trigger over the bottom of the panel, so the footer
-// has to stop short of it. The drawer has no trigger and no gap.
-.ant-layout-sider .sidebar__footer {
-  margin-bottom: 48px;
-}

@@ -162,6 +162,9 @@ function MediaGrid(props: MediaGridProps) {
       speed={500}
       plugins={[lgThumbnail, lgZoom, lgVideo]}
       videojs
+      // lightgallery defaults this to true, which puts a download icon in
+      // the lightbox toolbar - nothing to do with the player's own controls.
+      download={false}
       selector=".lightgallery-item"
     >
       {contents}

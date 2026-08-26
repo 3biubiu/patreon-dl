@@ -11,6 +11,7 @@ import lgThumbnail from 'lightgallery/plugins/thumbnail';
 import lgZoom from 'lightgallery/plugins/zoom';
 import lgVideo from 'lightgallery/plugins/video';
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
+import PdfViewerModal, { type PdfViewerTarget } from "./PdfViewerModal";
 import { formatFileSize, getContentUrlForMedia, getFileExtension, getFileIcon } from "../utils/Misc";
 
 interface MediaGalleryProps {
@@ -45,6 +46,8 @@ interface GalleryTile {
   sourceURL: string;
   lg?: LGProps;
   file?: FileProps;
+  /** Opens in the in-page reader instead of the lightbox. */
+  pdf?: PdfViewerTarget;
 }
 
 function buildTile(mi: MediaListItem<any>): GalleryTile {
@@ -143,11 +146,11 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
       dataSrc: isImage ? mediaURL : undefined,
       dataVideo: dataAV,
       dataPoster: isVideo || isAudio ? thumbnailURL : undefined,
-      dataIframe: isPDF,
       dataSubHTML,
       thumbnailURL,
       badge: isPDF ? 'PDF' : undefined
-    }
+    },
+    pdf: isPDF ? { url: mediaURL, filename: mi.filename || mi.id } : undefined
   };
 }
 
@@ -174,6 +177,7 @@ function MediaGallery(props: MediaGalleryProps) {
   const { items } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const [pdfTarget, setPdfTarget] = useState<PdfViewerTarget | null>(null);
 
    useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -231,7 +235,11 @@ function MediaGallery(props: MediaGalleryProps) {
           >
             {
               tile.lg ?
-                <LightGalleryItem {...tile.lg} classNamePrefix="media-gallery" />
+                <LightGalleryItem
+                  {...tile.lg}
+                  classNamePrefix="media-gallery"
+                  onClick={tile.pdf ? () => setPdfTarget(tile.pdf!) : undefined}
+                />
                 : tile.file ? <FileTile file={tile.file} /> : null
             }
             {
@@ -257,6 +265,9 @@ function MediaGallery(props: MediaGalleryProps) {
     <LightGallery
       speed={500}
       plugins={[lgThumbnail, lgZoom, lgVideo]}
+      // lightgallery defaults this to true, which puts a download icon in
+      // the lightbox toolbar - nothing to do with the player's own controls.
+      download={false}
       selector=".lightgallery-item"
     >
       <div
@@ -270,6 +281,7 @@ function MediaGallery(props: MediaGalleryProps) {
       >
         {renderedTiles}
       </div>
+      <PdfViewerModal target={pdfTarget} onClose={() => setPdfTarget(null)} />
     </LightGallery>
   )
 }

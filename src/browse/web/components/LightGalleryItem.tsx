@@ -14,6 +14,11 @@ export interface LightGalleryItemProps {
   classNamePrefix: string;
   style?: React.CSSProperties;
   badge?: string;
+  /**
+   * When given, the tile is handled here instead of by lightgallery - it keeps
+   * the same look but is no longer picked up as a slide.
+   */
+  onClick?: () => void;
 }
 
 function LightGalleryItem(props: LightGalleryItemProps) {
@@ -27,7 +32,8 @@ function LightGalleryItem(props: LightGalleryItemProps) {
     thumbnailURL,
     classNamePrefix,
     style,
-    badge
+    badge,
+    onClick
   } = props;
   // The poster can 404 - e.g. a video whose thumbnail was never downloaded and
   // for which the server could not generate a frame either.
@@ -42,7 +48,8 @@ function LightGalleryItem(props: LightGalleryItemProps) {
   return (
     <a
       href={href}
-      className={`lightgallery-item ${classNamePrefix}__thumbnail-wrapper ${extraClassName}`}
+      className={`${onClick ? '' : 'lightgallery-item'} ${classNamePrefix}__thumbnail-wrapper ${extraClassName}`}
+      onClick={onClick ? (e) => { e.preventDefault(); onClick(); } : undefined}
       data-src={dataSrc}
       data-video={dataVideo}
       data-poster={dataPoster}

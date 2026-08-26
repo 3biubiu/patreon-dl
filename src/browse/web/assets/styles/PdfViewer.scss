@@ -1,0 +1,51 @@
+.pdf-viewer {
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-right: 1.5rem;
+  }
+
+  &__filename {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  &__page-count {
+    min-width: 4.5rem;
+    text-align: center;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    opacity: 0.75;
+  }
+
+  &__body {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    // Tall pages and zoomed-in ones scroll inside the dialog rather than
+    // pushing it past the viewport.
+    max-height: 78vh;
+    overflow: auto;
+    padding: 1rem;
+    background-color: var(--bs-tertiary-bg);
+    border-radius: var(--bs-border-radius);
+    scrollbar-width: thin;
+  }
+
+  &__error {
+    padding: 3rem 1rem;
+    color: var(--bs-secondary-color);
+  }
+
+  .react-pdf__Page__canvas {
+    // Keeps the page readable against the tray behind it.
+    box-shadow: 0 2px 12px rgb(0 0 0 / 25%);
+  }
+}

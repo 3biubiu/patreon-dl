@@ -1,4 +1,4 @@
-import { Button, ButtonGroup } from "react-bootstrap";
+import { Segmented } from "antd";
 import { type PostListLayout } from "../../types/Settings";
 
 interface PostLayoutSwitchProps {
@@ -16,23 +16,24 @@ function PostLayoutSwitch(props: PostLayoutSwitchProps) {
   const { value, onChange } = props;
 
   return (
-    <ButtonGroup className="ms-2" aria-label="Post layout">
-      {
-        LAYOUTS.map((layout) => (
-          <Button
-            key={`post-layout-${layout.value}`}
-            variant={value === layout.value ? 'primary' : 'outline-primary'}
-            active={value === layout.value}
+    <Segmented
+      aria-label="Post layout"
+      value={value}
+      onChange={(layout) => onChange(layout as PostListLayout)}
+      options={LAYOUTS.map((layout) => ({
+        value: layout.value,
+        label: (
+          <span
+            className="material-icons"
+            style={{ fontSize: '1.1rem', display: 'block' }}
             title={layout.label}
             aria-label={layout.label}
-            aria-pressed={value === layout.value}
-            onClick={() => onChange(layout.value)}
           >
-            <span className="material-icons d-flex" style={{ fontSize: '1.1rem' }}>{layout.icon}</span>
-          </Button>
-        ))
-      }
-    </ButtonGroup>
+            {layout.icon}
+          </span>
+        )
+      }))}
+    />
   );
 }
 

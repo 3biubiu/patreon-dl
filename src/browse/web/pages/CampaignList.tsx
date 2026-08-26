@@ -1,10 +1,12 @@
 import "../assets/styles/CampaignList.scss";
+import "../assets/styles/Toolbar.scss";
 import { useEffect, useReducer, useState } from "react";
 import copy from 'fast-copy';
 import deepEqual from "deep-equal";
 import { useAPI } from "../contexts/APIProvider";
 import { type CampaignList, type CampaignListSortBy } from "../../types/Campaign";
-import { Container, Row, Col, Form } from "react-bootstrap";
+import { Container, Row, Col } from "react-bootstrap";
+import { Select } from "antd";
 import CampaignCard from "../components/CampaignCard";
 import ShowingText from "../components/ShowingText";
 import PageNav from "../components/PageNav";
@@ -138,17 +140,19 @@ function CampaignList() {
                   }} /> : null }
               </Col>
               <Col className="w-auto d-flex justify-content-end">
-                <Form.Select
-                  size="sm"
-                  className="w-auto"
-                  onChange={(e) => setViewParams({ sortBy: e.currentTarget.value as any })}
-                >
-                  <option value="a-z" selected={viewParams.sortBy === 'a-z'}>A-Z</option>
-                  <option value="z-a" selected={viewParams.sortBy === 'z-a'}>Z-A</option>
-                  <option value="most_media" selected={viewParams.sortBy === 'most_media'}>Most media</option>
-                  <option value="most_content" selected={viewParams.sortBy === 'most_content'}>Most content</option>
-                  <option value="last_downloaded" selected={viewParams.sortBy === 'last_downloaded'}>Last downloaded</option>
-                </Form.Select>
+                <Select
+                  className="content-toolbar__sort"
+                  aria-label="Sort"
+                  value={viewParams.sortBy}
+                  onChange={(sortBy: CampaignListSortBy) => setViewParams({ sortBy })}
+                  options={[
+                    { value: 'a-z', label: 'A-Z' },
+                    { value: 'z-a', label: 'Z-A' },
+                    { value: 'most_media', label: 'Most media' },
+                    { value: 'most_content', label: 'Most content' },
+                    { value: 'last_downloaded', label: 'Last downloaded' }
+                  ]}
+                />
               </Col>
             </Row>
           </Container>

@@ -1,19 +1,25 @@
-import "../assets/styles/FilterModal.scss";
-import "../assets/styles/FilterModalButton.scss";
+import "../assets/styles/FilterPanel.scss";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import copy from 'fast-copy';
 import deepEqual from 'deep-equal';
 import { type Filter, type FilterOption, type FilterSearchParams, type FilterSection, type FilterData } from "../../types/Filter";
-import { Button, Modal, Form, Stack, ToggleButton } from "react-bootstrap";
+import { Badge, Button, Drawer, Radio, Space, Tag } from "antd";
+import { ClearOutlined, FilterOutlined } from "@ant-design/icons";
 import { useSearchParams } from "react-router";
-import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { type SearchInputBoxHandle } from "./SearchInputBox";
+import SortSelect from "./SortSelect";
 
 interface FilterModalButtonProps<S extends FilterSearchParams> {
   options: FilterData<S>;
   onFilter: (filter: Filter<S>) => void;
   searchInputBox?: React.RefObject<SearchInputBoxHandle | null>;
 }
+
+/** Shown in the toolbar instead of inside the panel - see `SortSelect`. */
+const SORT_PARAM = 'sort_by';
+
+/** Has a box of its own in the toolbar, so it is not counted as a filter. */
+const SEARCH_PARAM = 'search';
 
 function getFilterValuesFromSearchParams<S extends FilterSearchParams>(searchParams: URLSearchParams): Filter<S>['options'] {
   const values: Filter<S>['options'] = [];
@@ -52,13 +58,8 @@ function getInitialFilterValues<S extends FilterSearchParams>(options: FilterDat
   return result;
 }
 
-function isSelected<S extends FilterSearchParams>(filter: Filter<S>, section: FilterSection<S>, option: FilterOption) {
-  const filterValue = filter.options.find((fo) =>
-    fo.searchParam === section.searchParam)?.value;
-  if (filterValue === undefined) {
-    return false;
-  }
-  return filterValue === option.value;
+function getSectionValue<S extends FilterSearchParams>(filter: Filter<S>, searchParam: S) {
+  return filter.options.find((o) => o.searchParam === searchParam)?.value ?? null;
 }
 
 const contentFilterReducer = <S extends FilterSearchParams>(currentFilter: Filter<S> | null, options: Filter<S>['options']) => {
@@ -81,11 +82,10 @@ const contentFilterReducer = <S extends FilterSearchParams>(currentFilter: Filte
 
 function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButtonProps<S>) {
   const { options: filterOptions, onFilter, searchInputBox } = props;
-  const { settings } = useBrowseSettings();
   const [ searchParams, setSearchParams ] = useSearchParams();
   const [modalFilter, setModalFilterValues] = useReducer(contentFilterReducer, null);
   const [appliedFilter, setAppliedFilterValues] = useReducer(contentFilterReducer, null);
-  const [modalVisible, setModalVisible] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const initialFilterValuesRef = useRef<Filter<S>['options'] | null>(null);
 
   useEffect(() => {
@@ -116,7 +116,7 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
     const box = searchInputBox.current;
     box.onConfirm((value) => {
       setAppliedFilterValues([
-        {searchParam: 'search', value: value || null}
+        {searchParam: SEARCH_PARAM, value: value || null}
       ]);
     });
 
@@ -144,7 +144,7 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
       return params;
     });
     if (searchInputBox?.current) {
-      const q = appliedFilter.options.find((opt) => opt.searchParam === 'search')?.value || '';
+      const q = appliedFilter.options.find((opt) => opt.searchParam === SEARCH_PARAM)?.value || '';
       searchInputBox.current.setInput(q);
     }
   }, [searchInputBox, appliedFilter]);
@@ -156,25 +156,13 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
     }
   }, [appliedFilter, onFilter]);
 
-  const handleFilterValueSelect = useCallback((
-    section: FilterSection<S>,
-    option: FilterOption,
-    isToggleable = false
-  ) => {
+  const setSectionValue = useCallback((searchParam: S, value: string | null) => {
     if (!modalFilter) {
       return;
     }
-    const modalValue = modalFilter.options.find((mv) => mv.searchParam === section.searchParam);
-    if (modalValue) {
-      const value = isToggleable ?
-        (option.value === modalValue.value ? null : option.value)
-        : option.value;
-      if (modalValue.value !== value) {
-        setModalFilterValues([{
-          searchParam: modalValue.searchParam,
-          value
-        }]);
-      }
+    const modalValue = modalFilter.options.find((mv) => mv.searchParam === searchParam);
+    if (modalValue && modalValue.value !== value) {
+      setModalFilterValues([{ searchParam, value }]);
     }
   }, [modalFilter]);
 
@@ -199,84 +187,118 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
     if (!modalFilter || !filterOptions) {
       return null;
     }
-    return filterOptions.sections.map((section) => {
-      let mainContentEl: React.ReactElement;
-      switch (section.displayHint) {
-        case 'list': {
-          const optionEls = section.options.map((option) => (
-            <Form.Check
-              key={`${section.searchParam}:${option.value}`}
-              type="radio"
-              id={`filter-select-${section.searchParam}:${option.value}`}
-              name={section.searchParam}
-              label={option.title}
-              checked={isSelected(modalFilter, section, option)}
-              onClick={() => handleFilterValueSelect(section, option)}
-            />
-          ));
-          mainContentEl = (
-            <Stack gap={2}>{...optionEls}</Stack>
-          )
-          break;
-        }
-        case 'pill':
-        case 'pill_small': {
-          // 'outline-primary' in Vapor theme sticks to the background - need to use secondary
-          const variant = settings.theme.toLowerCase() === 'vapor' ? 'outline-secondary' : 'outline-primary';
-          const size = section.displayHint === 'pill_small' ? 'sm' : undefined;
-          const optionEls = section.options.map((option) => (
-            <div>
-              <ToggleButton
-                key={`${section.searchParam}:${option.value}`}
-                type="checkbox"
-                size={size}
-                id={`filter-select-${section.searchParam}:${option.value}`}
-                checked={isSelected(modalFilter, section, option)}
-                value={option.value || ''}
-                variant={variant}
-                onChange={() => handleFilterValueSelect(section, option, true)}
+    return filterOptions.sections
+      // Sorting lives in the toolbar now, and a section its condition rules
+      // out has nothing to offer.
+      .filter((section) => section.searchParam !== SORT_PARAM && !isSectionDisabled(section))
+      .map((section) => {
+        const currentValue = getSectionValue(modalFilter, section.searchParam);
+        let mainContentEl: React.ReactElement;
+        switch (section.displayHint) {
+          case 'list': {
+            mainContentEl = (
+              <Radio.Group
+                value={currentValue ?? ''}
+                onChange={(e) => setSectionValue(section.searchParam, e.target.value || null)}
               >
-                {option.title}
-              </ToggleButton>
-            </div>
-          ));
-          mainContentEl = (
-            <Stack direction="horizontal" gap={2} className="flex-wrap">
-              {...optionEls}
-            </Stack>
-          )
-          break;
+                <Space direction="vertical" size={8}>
+                  {
+                    section.options.map((option: FilterOption) => (
+                      <Radio
+                        key={`${section.searchParam}:${option.value}`}
+                        value={option.value ?? ''}
+                      >
+                        {option.title}
+                      </Radio>
+                    ))
+                  }
+                </Space>
+              </Radio.Group>
+            );
+            break;
+          }
+          case 'pill':
+          case 'pill_small':
+          default: {
+            mainContentEl = (
+              <Space size={[8, 8]} wrap>
+                {
+                  section.options.map((option: FilterOption) => {
+                    const checked = currentValue === option.value;
+                    return (
+                      <Tag.CheckableTag
+                        key={`${section.searchParam}:${option.value}`}
+                        className="filter-panel__pill"
+                        checked={checked}
+                        // Picking the selected pill again clears the section.
+                        onChange={() => setSectionValue(
+                          section.searchParam, checked ? null : option.value
+                        )}
+                      >
+                        {option.title}
+                      </Tag.CheckableTag>
+                    );
+                  })
+                }
+              </Space>
+            );
+            break;
+          }
         }
-      }
-      const titleEl = section.title ? <h5 style={{paddingBottom: '0.5em'}}>{section.title}</h5> : null;
-      const contentClassName = section.title ? '' : 'py-4 border-top border-bottom';
-      const sectionClassName = isSectionDisabled(section) ? 'filter-modal__section--hidden' : '';
-      return (
-        <div
-          key={`filter-modal-section-${section.searchParam}`}
-          className={`filter-modal__section ${sectionClassName}`}
-        >
-          <Stack
-            className={contentClassName}
+        return (
+          <div
+            key={`filter-panel-section-${section.searchParam}`}
+            className="filter-panel__section"
           >
-            {titleEl}
+            {
+              section.title ? (
+                <div className="filter-panel__section-title">{section.title}</div>
+              ) : null
+            }
             {mainContentEl}
-          </Stack>
-        </div>
-      )
-    })
-  }, [modalFilter, filterOptions, handleFilterValueSelect, isSectionDisabled, settings.theme]);
+          </div>
+        )
+      })
+  }, [modalFilter, filterOptions, setSectionValue, isSectionDisabled]);
 
-  const showModal = useCallback(() => {
-    setModalVisible(true);
+  const sortSection = useMemo(
+    () => filterOptions?.sections.find((section) => section.searchParam === SORT_PARAM) || null,
+    [filterOptions]
+  );
+
+  // Everything the visitor moved away from the defaults, not counting the two
+  // controls that sit in the toolbar with a state of their own.
+  const activeCount = useMemo(() => {
+    const initialValues = initialFilterValuesRef.current;
+    if (!appliedFilter || !initialValues) {
+      return 0;
+    }
+    return appliedFilter.options.filter((option) => {
+      if (option.searchParam === SORT_PARAM || option.searchParam === SEARCH_PARAM) {
+        return false;
+      }
+      const iv = initialValues.find((o) => o.searchParam === option.searchParam);
+      return (option.value || null) !== (iv?.value || null);
+    }).length;
+  }, [appliedFilter]);
+
+  const showPanel = useCallback(() => {
+    setPanelOpen(true);
   }, []);
 
-  const hideModal = useCallback(() => {
-    setModalVisible(false);
+  const hidePanel = useCallback(() => {
+    setPanelOpen(false);
     if (appliedFilter) {
       setModalFilterValues(appliedFilter.options);
     }
   }, [appliedFilter]);
+
+  const handleSortChange = useCallback((value: string | null) => {
+    // Sorting takes effect straight away: there is no "apply" step for a
+    // control that is already in front of the visitor.
+    setModalFilterValues([{ searchParam: SORT_PARAM, value }]);
+    setAppliedFilterValues([{ searchParam: SORT_PARAM, value }]);
+  }, []);
 
   const handleApply = useCallback(() => {
     const initialValues = initialFilterValuesRef.current;
@@ -296,8 +318,8 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
       }
     }
     setAppliedFilterValues(sanitizedOptions);
-    setModalVisible(false);
-  }, [modalFilter, setSearchParams, filterOptions, isSectionDisabled]);
+    setPanelOpen(false);
+  }, [modalFilter, filterOptions, isSectionDisabled]);
 
   const handleClear = useCallback(() => {
     const initialValues = initialFilterValuesRef.current;
@@ -313,66 +335,66 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
       setModalFilterValues(initialValues);
       setAppliedFilterValues(initialValues);
     }
-    setModalVisible(false);
+    setPanelOpen(false);
   }, [setSearchParams]);
 
-  if (!sectionEls) {
+  if (!modalFilter || !sectionEls) {
     return null;
   }
 
-  const hasCustomSelection = appliedFilter && initialFilterValuesRef.current ? 
-    !deepEqual(appliedFilter.options, initialFilterValuesRef.current) : false;
+  const sortValue = appliedFilter ? getSectionValue(appliedFilter, SORT_PARAM) : null;
 
   return (
-    <Stack direction="horizontal" gap={2}>
-      <Button
-        className="filter-modal-button filter-modal-button--show"
-        variant={hasCustomSelection ? 'primary' : 'outline-primary'}
-        onClick={showModal}
-      >
-        Filters
-      </Button>
+    <Space className="filter-toolbar" size={8} wrap>
       {
-        hasCustomSelection ? (
-          <Button
-            className="filter-modal-button filter-modal-button--clear"
-            variant="secondary"
-            onClick={handleClear}
-          >
-            Clear filters
-          </Button>
-        ): null
+        sectionEls.length > 0 ? (
+          <Badge count={activeCount} size="small" offset={[-4, 2]}>
+            <Button
+              icon={<FilterOutlined />}
+              type={activeCount > 0 ? 'primary' : 'default'}
+              onClick={showPanel}
+            >
+              Filters
+            </Button>
+          </Badge>
+        ) : null
       }
-      <Modal
-        show={modalVisible}
-        onHide={hideModal}
-        centered
-        scrollable
-      >
-        <Modal.Header closeButton />
-
-        <Modal.Body>
-          <Stack>
-            {...sectionEls}
-          </Stack>
-        </Modal.Body>
-
-        <Modal.Footer className="justify-content-between">
+      {
+        activeCount > 0 ? (
           <Button
-            variant="secondary"
+            icon={<ClearOutlined />}
             onClick={handleClear}
           >
-            Clear all
+            Clear
           </Button>
-          <Button
-            variant="primary"
-            onClick={handleApply}
-          >
-            Apply
-          </Button>
-        </Modal.Footer>
-      </Modal>
-    </Stack>
+        ) : null
+      }
+      {
+        sortSection ? (
+          <SortSelect
+            section={sortSection}
+            value={sortValue}
+            onChange={handleSortChange}
+          />
+        ) : null
+      }
+      <Drawer
+        title="Filters"
+        placement="right"
+        width={360}
+        rootClassName="filter-panel"
+        open={panelOpen}
+        onClose={hidePanel}
+        footer={
+          <div className="filter-panel__footer">
+            <Button onClick={handleClear}>Clear all</Button>
+            <Button type="primary" onClick={handleApply}>Apply</Button>
+          </div>
+        }
+      >
+        {sectionEls}
+      </Drawer>
+    </Space>
   )
 }
 

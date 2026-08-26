@@ -1,0 +1,43 @@
+.filter-panel {
+  &__section {
+    padding-block: 1.25rem;
+
+    &:first-child {
+      padding-top: 0;
+    }
+
+    &:not(:last-child) {
+      border-bottom: 1px solid var(--bs-border-color);
+    }
+  }
+
+  &__section-title {
+    margin-bottom: 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.65;
+  }
+
+  // CheckableTag ships almost bare; these are the pills the sections had.
+  &__pill.ant-tag {
+    margin-inline-end: 0;
+    padding: 0.2rem 0.75rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 999px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    user-select: none;
+  }
+
+  &__pill.ant-tag-checkable-checked {
+    border-color: transparent;
+  }
+
+  &__footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+}

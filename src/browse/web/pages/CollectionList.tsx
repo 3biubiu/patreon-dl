@@ -1,10 +1,12 @@
 import "../assets/styles/CollectionList.scss";
+import "../assets/styles/Toolbar.scss";
 import { useCallback, useEffect, useReducer, useState } from "react";
 import copy from 'fast-copy';
 import deepEqual from "deep-equal";
 import { useAPI } from "../contexts/APIProvider";
 import { type CollectionList, type CollectionListSortBy } from "../../types/Content";
-import { Container, Row, Col, Form } from "react-bootstrap";
+import { Container, Row, Col } from "react-bootstrap";
+import { Select } from "antd";
 import CollectionCard from "../components/CollectionCard";
 import ShowingText from "../components/ShowingText";
 import PageNav from "../components/PageNav";
@@ -161,16 +163,18 @@ function CollectionList() {
                   subject={subject} /> }
               </Col>
               <Col className="w-auto d-flex justify-content-end">
-                <Form.Select
-                  size="sm"
-                  className="w-auto"
-                  onChange={(e) => setViewParams({ sortBy: e.currentTarget.value as any })}
-                >
-                  <option value="a-z" selected={viewParams.sortBy === 'a-z'}>A-Z</option>
-                  <option value="z-a" selected={viewParams.sortBy === 'z-a'}>Z-A</option>
-                  <option value="last_created" selected={viewParams.sortBy === 'last_created'}>Last created</option>
-                  <option value="last_updated" selected={viewParams.sortBy === 'last_updated'}>Last updated</option>
-                </Form.Select>
+                <Select
+                  className="content-toolbar__sort"
+                  aria-label="Sort"
+                  value={viewParams.sortBy}
+                  onChange={(sortBy: CollectionListSortBy) => setViewParams({ sortBy })}
+                  options={[
+                    { value: 'a-z', label: 'A-Z' },
+                    { value: 'z-a', label: 'Z-A' },
+                    { value: 'last_created', label: 'Last created' },
+                    { value: 'last_updated', label: 'Last updated' }
+                  ]}
+                />
               </Col>
             </Row>
           </Container>

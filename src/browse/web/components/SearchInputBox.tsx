@@ -1,5 +1,6 @@
+import "../assets/styles/SearchInputBox.scss";
 import { forwardRef, useCallback, useImperativeHandle, useState } from "react";
-import { Button, Form, InputGroup } from "react-bootstrap";
+import { Input } from "antd";
 
 export type SearchInputBoxOnConfirmListener = (value: string) => void;
 
@@ -15,7 +16,7 @@ interface SearchInputBoxProps {
 
 const SearchInputBox = forwardRef<SearchInputBoxHandle, SearchInputBoxProps>((props, ref) => {
   const [ onConfirm, setOnConfirmListener ] = useState<SearchInputBoxOnConfirmListener | null>(() => props.onConfirm || null);
-  const [input, setInput] = useState('');
+  const [ input, setInput ] = useState('');
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -24,21 +25,13 @@ const SearchInputBox = forwardRef<SearchInputBoxHandle, SearchInputBoxProps>((pr
     []
   );
 
-  const confirm = useCallback(() => {
-    if (!onConfirm) {
-      return;
+  // Takes the value from the event rather than from state: clearing the box
+  // fires this in the same tick as the change, before state has caught up.
+  const handleSearch = useCallback((value: string) => {
+    if (onConfirm) {
+      onConfirm(value);
     }
-    onConfirm(input);
-  }, [input, onConfirm]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        confirm();
-      }
-    },
-    [confirm]
-  );
+  }, [onConfirm]);
 
   useImperativeHandle(ref, () => ({
     onConfirm: (listener: SearchInputBoxOnConfirmListener | null) => {
@@ -50,22 +43,14 @@ const SearchInputBox = forwardRef<SearchInputBoxHandle, SearchInputBoxProps>((pr
   }));
 
   return (
-    <InputGroup className="me-2">
-      <Form.Control
-        type="search"
-        placeholder={props.placeholder}
-        value={input}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-      />
-      <Button
-        className="d-flex align-items-center"
-        variant="primary"
-        onClick={confirm}
-      >
-        <span className="material-icons">search</span>
-      </Button>
-    </InputGroup>
+    <Input.Search
+      className="search-input-box"
+      allowClear
+      placeholder={props.placeholder}
+      value={input}
+      onChange={handleChange}
+      onSearch={handleSearch}
+    />
   )
 });
 

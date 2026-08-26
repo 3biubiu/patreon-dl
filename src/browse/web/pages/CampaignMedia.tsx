@@ -1,6 +1,7 @@
+import "../assets/styles/Toolbar.scss";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useAPI } from "../contexts/APIProvider";
-import { Container, Row, Col, Card } from "react-bootstrap";
+import { Container, Row, Card } from "react-bootstrap";
 import ShowingText from "../components/ShowingText";
 import { NavigationType, useNavigationType, useOutletContext, useSearchParams } from "react-router";
 import PageNav from "../components/PageNav";
@@ -180,20 +181,20 @@ function CampaignMedia() {
   return (
     <div className="w-100">
       <Container fluid className="p-0">
-        <Row className="mb-2 g-0 justify-content-center align-items-center">
-          <Col className="w-auto flex-fill">
-            { list && list.items.length > 0 && viewParams.page ? <ShowingText
-              total={list.total}
-              page={viewParams.page}
-              itemsPerPage={viewParams.itemsPerPage}
-              subject={subject} /> : null }
-          </Col>
-          <Col className="w-auto d-flex justify-content-end">
+        <div className="content-toolbar">
+          <div className="content-toolbar__group">
             <FilterModalButton
               options={filterOptions}
               onFilter={applyFilter}
             />
-          </Col>
+          </div>
+        </div>
+        <Row className="mb-2 g-0">
+          { list && list.items.length > 0 && viewParams.page ? <ShowingText
+            total={list.total}
+            page={viewParams.page}
+            itemsPerPage={viewParams.itemsPerPage}
+            subject={subject} /> : null }
         </Row>
       </Container>
       <LoadingOverlay loading={loading} minHeight={!list ? '16em' : undefined}>

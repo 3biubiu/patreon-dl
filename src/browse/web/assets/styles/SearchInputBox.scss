@@ -1,0 +1,12 @@
+.search-input-box {
+  // A search box does not need to swallow the toolbar; it only ever holds a
+  // few words.
+  width: 16rem;
+  max-width: 100%;
+}
+
+@media (max-width: 575.98px) {
+  .search-input-box {
+    width: 100%;
+  }
+}

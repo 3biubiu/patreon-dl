@@ -1,0 +1,13 @@
+.sort-select {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  &__icon {
+    color: var(--bs-secondary-color);
+  }
+
+  &__control {
+    min-width: 9rem;
+  }
+}

@@ -1,7 +1,8 @@
 import "../assets/styles/CampaignContent.scss";
+import "../assets/styles/Toolbar.scss";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useAPI } from "../contexts/APIProvider";
-import { Container, Row, Col, Card, Stack } from "react-bootstrap";
+import { Container, Row, Card, Stack } from "react-bootstrap";
 import ShowingText from "../components/ShowingText";
 import { type ContentType, type ContentList } from "../../types/Content";
 import { NavigationType, useNavigationType, useOutletContext, useParams, useSearchParams } from "react-router";
@@ -348,21 +349,23 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
       `mw-${settings.maxContentWidth.toLowerCase()}`
     }>
       <Container fluid className="p-0">
-        <Row className="mb-3 g-0 align-items-center">
-          <Col className="w-auto d-flex justify-content-end align-items-center">
-            <SearchInputBox ref={searchInputBoxRef} placeholder={searchInputBoxPlaceholder} />
+        <div className="content-toolbar">
+          <div className="content-toolbar__group">
             <FilterModalButton
               options={filterOptions}
               onFilter={applyFilter}
               searchInputBox={searchInputBoxRef}
             />
+          </div>
+          <div className="content-toolbar__group">
+            <SearchInputBox ref={searchInputBoxRef} placeholder={searchInputBoxPlaceholder} />
             {
               contentType === 'post' ? (
                 <PostLayoutSwitch value={postListLayout} onChange={setPostListLayout} />
               ) : null
             }
-          </Col>
-        </Row>
+          </div>
+        </div>
         <Row className="mb-2 g-0">
           {list && list.items.length > 0 && viewParams.page ? <ShowingText
             total={list.total}

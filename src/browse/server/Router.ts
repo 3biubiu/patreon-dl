@@ -13,6 +13,8 @@ import { checkMediaAccess } from './MediaAccessGuard.js';
 import AuthAPIRequestHandler from './handler/AuthAPIRequestHandler.js';
 import type AuthStore from './AuthStore.js';
 import { getSessionUser, refreshSessionIfStale, type AuthenticatedRequest } from './AuthGuard.js';
+import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHandler.js';
+import { createTranscriptionServices, type TranscriptionConfig } from './transcription/Config.js';
 
 interface RequestHandlers {
   campaignAPI: CampaignAPIRequestHandler;
@@ -21,6 +23,7 @@ interface RequestHandlers {
   settingsAPI: SettingsAPIRequestHandler;
   mediaAPI: MediaAPIRequestHandler;
   auth: AuthAPIRequestHandler;
+  transcription: TranscriptionAPIRequestHandler;
 }
 
 class _Router {
@@ -94,6 +97,42 @@ class _Router {
 
     this.#router.delete('/api/auth/users/:id', requireAdmin, (req, res) =>
       this.#handlers.auth.handleDeleteUserRequest(req, res, req.params.id)
+    );
+
+    // Making captions is an administrator's job; reading them is not, so an
+    // ordinary viewer's player can still list and load what is already there.
+    this.#router.post('/api/media/:id/transcribe', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleTranscribeRequest(req, res, req.params.id)
+    );
+
+    this.#router.delete('/api/media/:id/transcribe', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleCancelRequest(req, res, req.params.id)
+    );
+
+    this.#router.get('/api/transcriptions', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleListJobsRequest(req, res)
+    );
+
+    this.#router.get('/api/transcription/status', (req, res) =>
+      this.#handlers.transcription.handleStatusRequest(req, res)
+    );
+
+    this.#router.get('/api/media/:id/transcription', (req, res) =>
+      this.#handlers.transcription.handleJobRequest(req, res, req.params.id)
+    );
+
+    // Registered before the per-video route below so the intent is obvious;
+    // they cannot collide in any case, having different segment counts.
+    this.#router.get('/api/media/subtitles', (req, res) =>
+      this.#handlers.transcription.handleBatchSubtitleRequest(req, res)
+    );
+
+    this.#router.get('/api/media/:id/subtitles', (req, res) =>
+      this.#handlers.transcription.handleSubtitleListRequest(req, res, req.params.id)
+    );
+
+    this.#router.get('/api/media/:id/subtitles/:filename', (req, res) =>
+      this.#handlers.transcription.handleSubtitleRequest(req, res, req.params.id, req.params.filename)
     );
 
     this.#router.get([
@@ -202,15 +241,20 @@ export function getRouter(
   dataDir: string,
   authStore: AuthStore,
   pathToFFmpeg?: string | null,
+  transcriptionConfig?: TranscriptionConfig | null,
   logger?: Logger | null
 ) {
   const videoThumbnailer = new VideoThumbnailer(dataDir, pathToFFmpeg, logger);
+  const transcription = createTranscriptionServices(dataDir, transcriptionConfig, pathToFFmpeg, logger);
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
     media: new MediaRequestHandler(db, dataDir, videoThumbnailer, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
-    auth: new AuthAPIRequestHandler(authStore, logger)
+    auth: new AuthAPIRequestHandler(authStore, logger),
+    transcription: new TranscriptionAPIRequestHandler(
+      db, dataDir, transcription.index, transcription.queue, transcription.vad, logger
+    )
   }, authStore).router;
 }

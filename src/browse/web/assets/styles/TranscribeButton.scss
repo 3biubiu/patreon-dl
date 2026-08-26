@@ -1,0 +1,54 @@
+.transcribe-button {
+  position: absolute;
+  right: 0.6em;
+  bottom: 0.6em;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.2em 0.5em;
+  border: 0;
+  border-radius: 0.8em;
+  font-size: 0.8em;
+  line-height: 1.4;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.65);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3);
+  transition: background-color 150ms ease-in-out;
+  // Same reasoning as the tile's own badge: this only has to clear the
+  // thumbnail, and a larger value would compete with antd's overlays.
+  z-index: 1;
+
+  &:hover:not(:disabled) {
+    background-color: rgba(0, 0, 0, 0.85);
+  }
+
+  &:disabled {
+    // Still legible: while a job runs this is showing its progress, not
+    // sitting greyed out with nothing to say.
+    opacity: 1;
+    cursor: default;
+  }
+
+  .material-icons,
+  .material-icons-outlined {
+    font-size: 1.2em;
+  }
+
+  &--done {
+    background-color: rgba(25, 105, 60, 0.8);
+  }
+
+  &--error {
+    background-color: rgba(140, 30, 30, 0.85);
+  }
+
+  /**
+   * The tile is one big anchor that opens the lightbox. The label inside the
+   * button must not swallow the click before the button's own handler stops
+   * it from reaching that anchor.
+   */
+  &__label {
+    pointer-events: none;
+    white-space: nowrap;
+  }
+}

@@ -18,7 +18,8 @@
       "src/types"
     ],
     "paths": {
-      "argv-split": ["./src/types/argv-split"]
+      "argv-split": ["./src/types/argv-split"],
+      "sherpa-onnx-node": ["./src/types/sherpa-onnx-node"]
     }
   },
   "exclude": [

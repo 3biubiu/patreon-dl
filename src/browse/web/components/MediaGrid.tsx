@@ -13,10 +13,30 @@ import lgVideo from 'lightgallery/plugins/video';
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
 import path from "path";
 import Icon from "./Icon";
+import TranscribeButton from "./TranscribeButton";
+import { useAuth } from "../contexts/AuthProvider";
+import { useAPI } from "../contexts/APIProvider";
+import { useEffect, useMemo, useState } from "react";
+import { type SubtitleFile } from "../../types/Transcription";
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
 ];
+
+/**
+ * mimeType can be null when the downloader could not sniff the file, which
+ * happens with externally downloaded videos. Fall back to the extension so
+ * such files are not mistaken for images.
+ */
+function isVideoItem(mi: Downloadable) {
+  const mimeType = mi.downloaded?.mimeType;
+  if (mimeType) {
+    return mimeType.startsWith('video/');
+  }
+  return VIDEO_EXTENSIONS.includes(
+    path.extname(mi.downloaded?.path || (mi as { filename?: string }).filename || '').toLowerCase()
+  );
+}
 
 interface MediaGridProps {
   items: Downloadable[];
@@ -49,7 +69,42 @@ function MediaGridItem(props: MediaGridItemProps) {
 
 function MediaGrid(props: MediaGridProps) {
   const { items: _mi, title, noGallery = false, fallbackThumbnailURL } = props;
+  const { user } = useAuth();
+  // Making subtitles costs money and writes into the library, so the control
+  // is only drawn for the people allowed to do it. The server enforces this
+  // too - this just keeps the button out of everyone else's way.
+  const canTranscribe = user?.role === 'admin';
+  const { api } = useAPI();
   const mediaItems = _mi.filter((mi) => mi.downloaded?.path);
+
+  const videoIds = useMemo(
+    () => mediaItems.filter(isVideoItem).map((mi) => mi.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ mediaItems.map((mi) => mi.id).join(',') ]
+  );
+  const [ subtitles, setSubtitles ] = useState<Record<string, SubtitleFile[]>>({});
+
+  // One index lookup for the whole grid rather than a directory read per
+  // tile. Captions added by hand are not in the index and so do not appear
+  // here; the player's own picker is what finds those.
+  useEffect(() => {
+    if (videoIds.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await api.getSubtitlesBatch(videoIds);
+        if (!cancelled) {
+          setSubtitles(result);
+        }
+      }
+      catch {
+        // Captions are an extra; a grid that cannot fetch them still works.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [ api, videoIds ]);
   const lgItemProps = mediaItems.reduce<MediaGridItemProps[]>((result, mi) => {
     // mimeType can be null when the downloader could not sniff the file, which
     // happens with externally downloaded videos. Fall back to the extension so
@@ -85,6 +140,16 @@ function MediaGrid(props: MediaGridProps) {
             type: mi.downloaded?.mimeType as string,
         },
       ],
+      // `<track>` only reads WebVTT, so these point at the endpoint that
+      // converts on the way out rather than at the .srt itself. Rebuilt when
+      // the fetch above lands, which is well before anyone opens a video.
+      tracks: (subtitles[mi.id] || []).map((subtitle, index) => ({
+        kind: 'captions',
+        src: api.getSubtitleURL(mi.id, subtitle.filename),
+        srclang: subtitle.language || 'und',
+        label: subtitle.label,
+        ...(index === 0 ? { default: true } : {})
+      })),
       attributes: {
         preload: false,
         controls: true,
@@ -105,7 +170,8 @@ function MediaGrid(props: MediaGridProps) {
         dataVideo,
         dataPoster,
         dataSubHTML,
-        thumbnailURL
+        thumbnailURL,
+        overlay: isVideo && canTranscribe ? <TranscribeButton mediaId={mi.id} /> : undefined
       });
     }
     return result;

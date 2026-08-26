@@ -7,6 +7,7 @@ import { type Filter, type FilterSearchParams, type FilterData, type MediaFilter
 import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
+import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionJob, type TranscriptionRecord } from '../../types/Transcription';
 
 interface APIProviderProps {
   children: React.ReactNode;
@@ -299,6 +300,64 @@ class API {
 
   async deleteUser(id: string): Promise<void> {
     await readJSON(await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE' }));
+  }
+
+  async getTranscriptionAvailability(): Promise<TranscriptionAvailability> {
+    return await readJSON(await apiFetch('/api/transcription/status')) as TranscriptionAvailability;
+  }
+
+  async startTranscription(mediaId: string): Promise<TranscriptionJob> {
+    const data = await readJSON(await apiFetch(
+      `/api/media/${mediaId}/transcribe`, { method: 'POST' }
+    ));
+    return data.job as TranscriptionJob;
+  }
+
+  async cancelTranscription(mediaId: string): Promise<boolean> {
+    const data = await readJSON(await apiFetch(
+      `/api/media/${mediaId}/transcribe`, { method: 'DELETE' }
+    ));
+    return !!data.cancelled;
+  }
+
+  /**
+   * `job` is the run happening now, `record` what the index remembers. A video
+   * transcribed before the last restart has a record but no job.
+   */
+  async getTranscription(mediaId: string): Promise<{
+    job: TranscriptionJob | null;
+    record: TranscriptionRecord | null;
+  }> {
+    const data = await readJSON(await apiFetch(`/api/media/${mediaId}/transcription`));
+    return {
+      job: (data.job || null) as TranscriptionJob | null,
+      record: (data.record || null) as TranscriptionRecord | null
+    };
+  }
+
+  /**
+   * Captions for many videos at once, answered from the index. Cheap enough
+   * to call for a whole page of tiles - unlike `getSubtitles`, which looks in
+   * a video's own directory and is meant for one video at a time.
+   */
+  async getSubtitlesBatch(mediaIds: string[]): Promise<Record<string, SubtitleFile[]>> {
+    if (mediaIds.length === 0) {
+      return {};
+    }
+    const url = new URL('/api/media/subtitles', window.location.origin);
+    url.searchParams.set('ids', mediaIds.join(','));
+    const data = await readJSON(await apiFetch(url.toString()));
+    return (data.subtitles || {}) as Record<string, SubtitleFile[]>;
+  }
+
+  async getSubtitles(mediaId: string): Promise<SubtitleFile[]> {
+    const data = await readJSON(await apiFetch(`/api/media/${mediaId}/subtitles`));
+    return (data.subtitles || []) as SubtitleFile[];
+  }
+
+  /** URL of a subtitle as WebVTT, for a `<track>` element to load. */
+  getSubtitleURL(mediaId: string, filename: string) {
+    return `/api/media/${mediaId}/subtitles/${encodeURIComponent(filename)}`;
   }
 
   #setPaginationParams(

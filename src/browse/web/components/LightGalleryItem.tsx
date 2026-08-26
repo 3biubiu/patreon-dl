@@ -16,6 +16,12 @@ export interface LightGalleryItemProps {
   style?: React.CSSProperties;
   badge?: string;
   /**
+   * Drawn on top of the tile. Anything interactive put here has to stop its
+   * own events: the tile is an anchor that lightgallery opens the lightbox
+   * from, and a click that reaches it plays the video.
+   */
+  overlay?: React.ReactNode;
+  /**
    * When given, the tile is handled here instead of by lightgallery - it keeps
    * the same look but is no longer picked up as a slide.
    */
@@ -34,6 +40,7 @@ function LightGalleryItem(props: LightGalleryItemProps) {
     classNamePrefix,
     style,
     badge,
+    overlay,
     onClick
   } = props;
   // The poster can 404 - e.g. a video whose thumbnail was never downloaded and
@@ -83,6 +90,7 @@ function LightGalleryItem(props: LightGalleryItemProps) {
           </Badge>
         ) : null
       }
+      {overlay}
     </a>
   )
 }

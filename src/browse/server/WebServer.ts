@@ -8,6 +8,7 @@ import { type Logger } from '../../utils/logging/index.js';
 import { getRouter } from './Router.js';
 import API from '../api/index.js';
 import AuthStore from './AuthStore.js';
+import { type TranscriptionConfig } from './transcription/Config.js';
 
 export const DEFAULT_WEB_SERVER_PORT = 3000;
 
@@ -16,9 +17,15 @@ export interface WebServerConfig {
   port?: number | null;
   /**
    * Path to the FFmpeg executable. Used to generate poster frames for videos
-   * that have no downloaded thumbnail. Falls back to FFmpeg on PATH.
+   * that have no downloaded thumbnail, and to prepare audio for transcription.
+   * Falls back to FFmpeg on PATH.
    */
   pathToFFmpeg?: string | null;
+  /**
+   * Subtitle generation. Left out, the feature stays off and only subtitles
+   * already sitting beside a video are served.
+   */
+  transcription?: TranscriptionConfig | null;
   logger?: Logger | null;
 }
 
@@ -67,7 +74,12 @@ export class WebServer {
       path.resolve(dataDir, '.patreon-dl', 'auth.json'),
       this.#config.logger
     );
-    const router = getRouter(db, api, dataDir, authStore, this.#config.pathToFFmpeg, this.#config.logger);
+    const router = getRouter(
+      db, api, dataDir, authStore,
+      this.#config.pathToFFmpeg,
+      this.#config.transcription,
+      this.#config.logger
+    );
 
     this.#app.use(express.json());
     this.#app.use(express.urlencoded({ extended: true }));

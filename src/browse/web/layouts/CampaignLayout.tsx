@@ -6,6 +6,7 @@ import CampaignHeader from "../components/CampaignHeader";
 import { type CampaignWithCounts } from "../../types/Campaign";
 import { useDocument } from "../contexts/DocumentProvider";
 import { getCampaignBaseUrl } from "../utils/Misc";
+import { LoadingBlock } from "../components/Loading";
 
 export interface CampaignLayoutOutletContext {
   campaign: (CampaignWithCounts & { baseUrl: string; }) | null;
@@ -47,7 +48,7 @@ function CampaignLayout() {
   }, [setTitle, campaign]);
 
   if (!campaign) {
-    return null;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   const outletContext: CampaignLayoutOutletContext = {

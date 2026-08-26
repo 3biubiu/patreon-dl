@@ -19,6 +19,7 @@
   }
 
   &__thumbnail-wrapper {
+    position: relative;
     flex: 0 0 var(--post-list-thumbnail-width);
     aspect-ratio: 16 / 9;
     display: flex;
@@ -39,6 +40,10 @@
   &__thumbnail-placeholder {
     font-size: 2rem;
     color: var(--bs-secondary-color);
+  }
+
+  &__play {
+    @include mixins.play-badge(2.5rem);
   }
 
   &__body {

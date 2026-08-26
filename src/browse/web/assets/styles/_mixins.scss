@@ -4,3 +4,30 @@
   -webkit-line-clamp: $lines;
   overflow: hidden;
 }
+/**
+ * Play badge drawn over the cover of a post that has a video. Sits in the
+ * middle of the thumbnail, which must be positioned by its own block.
+ */
+@mixin play-badge($size: 3rem) {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: $size;
+  height: $size;
+  border-radius: 50%;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  transition: background-color 200ms ease-in-out;
+
+  .material-icons {
+    font-size: $size * 0.7;
+    // Optically centre the triangle, which is lighter on its right.
+    margin-left: $size * 0.04;
+  }
+}

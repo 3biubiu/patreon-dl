@@ -14,6 +14,7 @@ import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import SearchInputBox from "../components/SearchInputBox";
 import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
+import { LoadingBlock, LoadingOverlay } from "../components/Loading";
 
 interface ViewParams {
   search: string;
@@ -61,6 +62,7 @@ function CollectionList() {
   const { scrollTo } = useScroll();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [list, setList] = useState<CollectionList | null>(null);
+  const [loading, setLoading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const { campaign } = useOutletContext<CampaignLayoutOutletContext>();
 
@@ -76,15 +78,23 @@ function CollectionList() {
       return;
     }
     const abortController = new AbortController();
+    setLoading(true);
     void (async () => {
-      const _list = await api.getCollectionList({
-        ...viewParams,
-        campaign: campaign.id,
-        sortBy,
-        page
-      });
-      if (!abortController.signal.aborted) {
-        setList(_list);
+      try {
+        const _list = await api.getCollectionList({
+          ...viewParams,
+          campaign: campaign.id,
+          sortBy,
+          page
+        });
+        if (!abortController.signal.aborted) {
+          setList(_list);
+        }
+      }
+      finally {
+        if (!abortController.signal.aborted) {
+          setLoading(false);
+        }
       }
     })();
 
@@ -119,7 +129,7 @@ function CollectionList() {
   }, [list, gotoPage]);
 
   if (!list) {
-    return;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   const subject = {
@@ -167,17 +177,18 @@ function CollectionList() {
               </Col>
             </Row>
           </Container>
-          <div className="mb-4">
+          <LoadingOverlay loading={loading} className="mb-4">
             {
               list.collections.map((collection) => (
-                <CollectionCard collection={collection} />
+                <CollectionCard key={`collection-card-${collection.id}`} collection={collection} />
               ))
             }
-          </div>
+          </LoadingOverlay>
           <PageNav
             totalItems={list.total}
             itemsPerPage={viewParams.itemsPerPage}
             onChange={gotoPage}
+            disabled={loading}
           />
         </Col>
       </Row>

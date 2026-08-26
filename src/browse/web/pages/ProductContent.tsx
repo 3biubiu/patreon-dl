@@ -5,6 +5,7 @@ import { useAPI } from "../contexts/APIProvider";
 import { type Product } from "../../../entities";
 import ProductCard from "../components/ProductCard";
 import { useDocument } from "../contexts/DocumentProvider";
+import { LoadingBlock } from "../components/Loading";
 
 function ProductContent() {
   const {id: productId} = useParams();
@@ -34,7 +35,7 @@ function ProductContent() {
   }, [setTitle, product]);
 
   if (!product) {
-    return null;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   return (

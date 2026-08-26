@@ -1,16 +1,28 @@
+import "../assets/styles/MainLayout.scss";
 import { Container, Row, Col, Stack } from "react-bootstrap";
 import { Link, Outlet } from "react-router";
 import Sidebar from "../components/Sidebar";
 import { ScrollProvider } from "../contexts/MainContentScrollProvider";
 import SidebarTrigger from "../components/SidebarTrigger";
+import { useSidebar } from "../contexts/SidebarProvider";
 import { APP_NAME } from "../utils/Misc";
 
 function MainLayout() {
+  const { collapsed } = useSidebar();
+
   return (
     <Container fluid className="p-0 vh-100">
       <Row className="g-0 h-100">
-        <Col lg={3} className="p-0 sticky-top d-none d-lg-block" style={{ maxWidth: '18em' }}>
-          <Sidebar />
+        <Col
+          xs="auto"
+          className="p-0 sticky-top d-none d-lg-block main-layout__sidebar"
+          // Inline, because Bootstrap's own `.col-auto { width: auto }` is
+          // just as specific as anything this stylesheet could say.
+          style={{
+            width: collapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)'
+          }}
+        >
+          <Sidebar collapsible />
         </Col>
         <Col className="p-0">
           <ScrollProvider>

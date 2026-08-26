@@ -1,0 +1,13 @@
+.main-layout {
+  &__sidebar {
+    // Width is set inline; this only smooths the change, so collapsing reads
+    // as the panel narrowing rather than the whole page jumping.
+    transition: width 200ms ease-in-out;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .main-layout__sidebar {
+    transition: none;
+  }
+}

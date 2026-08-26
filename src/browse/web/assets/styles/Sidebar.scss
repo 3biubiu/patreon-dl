@@ -7,16 +7,53 @@
 
   &__header {
     background: var(--bs-card-bg);
+    min-height: 3.75em;
   }
 
   &__brand a {
     color: inherit;
   }
 
+  &__brand-home {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--bs-body-color);
+
+    &:hover {
+      color: var(--bs-link-hover-color);
+    }
+
+    transition: color 150ms;
+  }
+
+  &__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--bs-border-radius);
+    color: var(--bs-secondary-color);
+    background: transparent;
+    transition: color 150ms, background-color 150ms;
+
+    &:hover {
+      color: var(--bs-link-hover-color);
+      background-color: var(--bs-tertiary-bg);
+    }
+  }
+
+  &__section {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
   &__section-title {
     color: var(--bs-body-color);
     font-weight: bold;
     font-size: 0.9em;
+    white-space: nowrap;
   }
 
   &__main {
@@ -27,16 +64,19 @@
   &__link {
     display: flex;
     align-items: center;
+    gap: 0.5rem;
     color: var(--bs-body-color);
+    border-radius: var(--bs-border-radius);
 
     &:hover {
       color: var(--bs-link-hover-color);
     }
 
-    transition: color 150ms;
+    transition: color 150ms, background-color 150ms;
   }
 
   &__link-icon {
+    flex: 0 0 auto;
     width: 1.5em;
     height: 1.5em;
     object-fit: cover;
@@ -50,5 +90,43 @@
     @include mixins.line-clamp();
 
     font-size: 0.9em;
+  }
+
+  // Icon rail: avatars and glyphs only, everything that needs room to read is
+  // dropped and moved into a tooltip instead.
+  &--collapsed {
+    .sidebar__header {
+      align-items: center;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+
+    .sidebar__section {
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
+
+    .sidebar__section-title {
+      display: none;
+    }
+
+    .sidebar__link {
+      justify-content: center;
+      padding: 0.4rem 0;
+
+      &:hover {
+        background-color: var(--bs-tertiary-bg);
+      }
+    }
+
+    .sidebar__link-icon {
+      width: 1.75em;
+      height: 1.75em;
+      margin: 0;
+    }
+
+    .sidebar__link-text {
+      display: none;
+    }
   }
 }

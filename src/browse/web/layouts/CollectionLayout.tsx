@@ -7,6 +7,7 @@ import { type CampaignWithCounts } from "../../types/Campaign";
 import CollectionBanner from "../components/CollectionBanner";
 import { type Collection } from "../../../entities/Post";
 import { getCampaignBaseUrl } from "../utils/Misc";
+import { LoadingBlock } from "../components/Loading";
 
 function CollectionLayout() {
   const { id: collectionId } = useParams();
@@ -36,7 +37,7 @@ function CollectionLayout() {
   }, [api, collectionId]);
 
   if (!campaign) {
-    return null;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   return (

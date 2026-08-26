@@ -6,6 +6,8 @@ interface PageNavProps {
   totalItems: number;
   itemsPerPage: number;
   onChange: (page: number) => void;
+  /** Blocks further paging while the page being switched to is still loading. */
+  disabled?: boolean;
 }
 
 interface PageNavLink {
@@ -173,7 +175,7 @@ function getPageNavLinks(
 }
 
 function PageNav(props: PageNavProps) {
-  const { totalItems, itemsPerPage, onChange } = props;
+  const { totalItems, itemsPerPage, onChange, disabled = false } = props;
 
   const pageNavData = getPageNavData(totalItems, itemsPerPage);
 
@@ -191,7 +193,17 @@ function PageNav(props: PageNavProps) {
   const els: React.ReactElement[] = [];
 
   if (pageNavData.previousPage) {
-    els.push(<Button variant='outline-primary' onClick={handleNavLinkClick} data-page={pageNavData.previousPage}>&lt;</Button>);
+    els.push((
+      <Button
+        key="page-nav-previous"
+        variant='outline-primary'
+        disabled={disabled}
+        onClick={handleNavLinkClick}
+        data-page={pageNavData.previousPage}
+      >
+        &lt;
+      </Button>
+    ));
   }
 
   for (let i = 0; i < pageNavData.sections.length; i++) {
@@ -200,7 +212,13 @@ function PageNav(props: PageNavProps) {
       const onClick = link.isCurrent ? undefined : handleNavLinkClick;
       const variant = link.isCurrent ? "primary" : "outline-primary";
       return (
-        <Button variant={variant} onClick={onClick} data-page={link.page}>
+        <Button
+          key={`page-nav-${link.page}`}
+          variant={variant}
+          disabled={disabled && !link.isCurrent}
+          onClick={onClick}
+          data-page={link.page}
+        >
           {link.page}
         </Button>
       )
@@ -208,6 +226,7 @@ function PageNav(props: PageNavProps) {
     if (i < pageNavData.sections.length - 1) {
       els.push((
         <PageInputButton
+          key={`page-nav-input-${i}`}
           currentPage={pageNavData.currentPage}
           totalPages={pageNavData.totalPages}
           onChange={onChange}
@@ -218,7 +237,15 @@ function PageNav(props: PageNavProps) {
 
   if (pageNavData.nextPage) {
     els.push((
-      <Button variant='outline-primary' onClick={handleNavLinkClick} data-page={pageNavData.nextPage}>&gt;</Button>
+      <Button
+        key="page-nav-next"
+        variant='outline-primary'
+        disabled={disabled}
+        onClick={handleNavLinkClick}
+        data-page={pageNavData.nextPage}
+      >
+        &gt;
+      </Button>
     ));
   }
 

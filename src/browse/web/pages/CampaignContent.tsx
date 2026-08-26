@@ -23,6 +23,7 @@ import { type Collection } from "../../../entities/Post";
 import { useDocument } from "../contexts/DocumentProvider";
 import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
 import { type Campaign } from "../../../entities";
+import { LoadingBlock, LoadingOverlay } from "../components/Loading";
 
 interface CampaignContentProps<T extends ContentType> {
   type: T;
@@ -80,6 +81,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [collection, setCollection] = useState<Collection | null>(null);
   const [list, setList] = useState<ContentList<T> | null>(null);
+  const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState<FilterData<PostFilterSearchParams> | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigationType = useNavigationType();
@@ -201,20 +203,31 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
     const { filter, page } = viewParams;
     if (!campaign || !filter || page === null || (isCollection && !collection)) {
       setList(null);
+      // Nothing to show and nothing settled yet - the filter is still being
+      // applied - so keep the spinner up rather than flashing an empty view.
+      setLoading(true);
       return;
     }
     const abortController = new AbortController();
+    setLoading(true);
     void (async () => {
-      const _list = await api.getContentList({
-        campaign,
-        type: contentType,
-        ...viewParams,
-        collectionId: collection?.id,
-        filter,
-        page
-      });
-      if (!abortController.signal.aborted) {
-        setList(_list);
+      try {
+        const _list = await api.getContentList({
+          campaign,
+          type: contentType,
+          ...viewParams,
+          collectionId: collection?.id,
+          filter,
+          page
+        });
+        if (!abortController.signal.aborted) {
+          setList(_list);
+        }
+      }
+      finally {
+        if (!abortController.signal.aborted) {
+          setLoading(false);
+        }
       }
     })();
 
@@ -328,7 +341,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   }, [list, contextQS, postListLayout]);
 
   if (!campaign || !filterOptions) {
-    return;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   return (
@@ -361,20 +374,23 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
             subject={subject}/> : null}
         </Row>
       </Container>
-      {listEl}
-      {
-        list && list.items.length === 0 ? (
-          <Card className="my-4" style={{ height: "10em" }}>
-            <Card.Body className="d-flex justify-content-center align-items-center">
-              No {contentType === 'post' ? 'posts' : 'products'}
-            </Card.Body>
-          </Card>
-        ) : null
-      }
+      <LoadingOverlay loading={loading} minHeight={!list ? '16em' : undefined}>
+        {listEl}
+        {
+          list && list.items.length === 0 ? (
+            <Card className="my-4" style={{ height: "10em" }}>
+              <Card.Body className="d-flex justify-content-center align-items-center">
+                No {contentType === 'post' ? 'posts' : 'products'}
+              </Card.Body>
+            </Card>
+          ) : null
+        }
+      </LoadingOverlay>
       {list ? <PageNav
         totalItems={list.total}
         itemsPerPage={viewParams.itemsPerPage}
         onChange={gotoPage}
+        disabled={loading}
       /> : null}
     </div>
   )

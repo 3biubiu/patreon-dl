@@ -14,6 +14,7 @@ import MediaGallery from "../components/MediaGallery";
 import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
+import { LoadingBlock, LoadingOverlay } from "../components/Loading";
 
 interface ViewParams {
   filter: Filter<MediaFilterSearchParams> | null;
@@ -58,6 +59,7 @@ function CampaignMedia() {
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const { campaign } = useOutletContext<CampaignLayoutOutletContext>();
   const [list, setList] = useState<MediaList<any> | null>(null);
+  const [loading, setLoading] = useState(false);
   const [filterOptions, setFilterOptions] = useState<FilterData<MediaFilterSearchParams> | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigationType = useNavigationType();
@@ -102,18 +104,29 @@ function CampaignMedia() {
   useEffect(() => {
     const { filter, page } = viewParams;
     if (!campaign || !filter || page === null) {
+      // The filter has yet to be applied, so what is on screen - if anything -
+      // does not answer to the current parameters. Keep the spinner up.
+      setLoading(true);
       return;
     }
     const abortController = new AbortController();
+    setLoading(true);
     void (async () => {
-      const _list = await api.getMediaList({
-        campaign,
-        ...viewParams,
-        filter,
-        page
-      });
-      if (!abortController.signal.aborted) {
-        setList(_list);
+      try {
+        const _list = await api.getMediaList({
+          campaign,
+          ...viewParams,
+          filter,
+          page
+        });
+        if (!abortController.signal.aborted) {
+          setList(_list);
+        }
+      }
+      finally {
+        if (!abortController.signal.aborted) {
+          setLoading(false);
+        }
       }
     })();
 
@@ -164,7 +177,7 @@ function CampaignMedia() {
   }, [viewParams, gotoPage]);
 
   if (!campaign || !filterOptions) {
-    return;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   return (
@@ -186,24 +199,27 @@ function CampaignMedia() {
           </Col>
         </Row>
       </Container>
-      {
-        list && list.items.length > 0 ?
-          <MediaGallery items={list.items} />
-          : null
-      }
-      {
-        list && list.items.length === 0 ? (
-          <Card className="my-4" style={{ height: "10em" }}>
-            <Card.Body className="d-flex justify-content-center align-items-center">
-              No media
-            </Card.Body>
-          </Card>
-        ) : null
-      }
+      <LoadingOverlay loading={loading} minHeight={!list ? '16em' : undefined}>
+        {
+          list && list.items.length > 0 ?
+            <MediaGallery items={list.items} />
+            : null
+        }
+        {
+          list && list.items.length === 0 ? (
+            <Card className="my-4" style={{ height: "10em" }}>
+              <Card.Body className="d-flex justify-content-center align-items-center">
+                No media
+              </Card.Body>
+            </Card>
+          ) : null
+        }
+      </LoadingOverlay>
       { list ? <PageNav
         totalItems={list.total}
         itemsPerPage={viewParams.itemsPerPage}
         onChange={gotoPage}
+        disabled={loading}
       /> : null }
     </div>
   )

@@ -23,6 +23,10 @@
     &:hover .post-grid__thumbnail {
       transform: scale(1.04);
     }
+
+    &:hover .post-grid__play {
+      background-color: rgba(var(--bs-primary-rgb), 0.85);
+    }
   }
 
   &__thumbnail-wrapper {
@@ -47,6 +51,10 @@
   &__thumbnail-placeholder {
     font-size: 2.5rem;
     color: var(--bs-secondary-color);
+  }
+
+  &__play {
+    @include mixins.play-badge(3rem);
   }
 
   &__lock {

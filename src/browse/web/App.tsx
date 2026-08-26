@@ -17,6 +17,7 @@ import ProductContent from "./pages/ProductContent";
 import CollectionList from "./pages/CollectionList";
 import CollectionLayout from "./layouts/CollectionLayout";
 import { DocumentProvider } from "./contexts/DocumentProvider";
+import { SidebarProvider } from "./contexts/SidebarProvider";
 
 function App() {
   const campaignSubRoutes = (
@@ -35,23 +36,25 @@ function App() {
         <Theme />
         <GlobalModalsProvider>
           <DocumentProvider>
-            <Routes>
-              <Route path="/" element={<MainLayout />} >
-                <Route index element={<CampaignList />} />
-                <Route path="creators" element={<CampaignList />} />
-                <Route path="campaigns/:id" element={<CampaignLayout />}>
-                  {campaignSubRoutes}
+            <SidebarProvider>
+              <Routes>
+                <Route path="/" element={<MainLayout />} >
+                  <Route index element={<CampaignList />} />
+                  <Route path="creators" element={<CampaignList />} />
+                  <Route path="campaigns/:id" element={<CampaignLayout />}>
+                    {campaignSubRoutes}
+                  </Route>
+                  <Route path="posts/:id" element={<PostContent />} />
+                  <Route path="products/:id" element={<ProductContent />} />
+                  <Route path="collections/:id" element={<CollectionLayout />}>
+                    <Route index element={<CampaignContent type="post" collection />} />
+                  </Route>
+                  <Route path=":vanity" element={<CampaignLayout />}>
+                    {campaignSubRoutes}
+                  </Route>
                 </Route>
-                <Route path="posts/:id" element={<PostContent />} />
-                <Route path="products/:id" element={<ProductContent />} />
-                <Route path="collections/:id" element={<CollectionLayout />}>
-                  <Route index element={<CampaignContent type="post" collection />} />
-                </Route>
-                <Route path=":vanity" element={<CampaignLayout />}>
-                  {campaignSubRoutes}
-                </Route>
-              </Route>
-            </Routes>
+              </Routes>
+            </SidebarProvider>
           </DocumentProvider>
         </GlobalModalsProvider>
       </BrowseSettingsProvider>

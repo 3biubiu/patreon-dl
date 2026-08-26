@@ -13,6 +13,7 @@ import { useScroll } from "../contexts/MainContentScrollProvider";
 import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { useDocument } from "../contexts/DocumentProvider";
+import { LoadingBlock, LoadingOverlay } from "../components/Loading";
 
 interface ViewParams {
   sortBy: CampaignListSortBy;
@@ -56,6 +57,7 @@ function CampaignList() {
   const { scrollTo } = useScroll();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [list, setList] = useState<CampaignList | null>(null);
+  const [loading, setLoading] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
@@ -68,14 +70,22 @@ function CampaignList() {
       return;
     }
     const abortController = new AbortController();
+    setLoading(true);
     void (async () => {
-      const _list = await api.getCampaignList({
-        ...viewParams,
-        sortBy,
-        page
-      });
-      if (!abortController.signal.aborted) {
-        setList(_list);
+      try {
+        const _list = await api.getCampaignList({
+          ...viewParams,
+          sortBy,
+          page
+        });
+        if (!abortController.signal.aborted) {
+          setList(_list);
+        }
+      }
+      finally {
+        if (!abortController.signal.aborted) {
+          setLoading(false);
+        }
       }
     })();
 
@@ -110,7 +120,7 @@ function CampaignList() {
   }, [list, gotoPage]);
 
   if (!list) {
-    return;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   return (
@@ -145,17 +155,18 @@ function CampaignList() {
               </Col>
             </Row>
           </Container>
-          <div className="mb-4">
+          <LoadingOverlay loading={loading} className="mb-4">
             {
               list.campaigns.map((campaign) => (
-                <CampaignCard campaign={campaign} />
+                <CampaignCard key={`campaign-card-${campaign.id}`} campaign={campaign} />
               ))
             }
-          </div>
+          </LoadingOverlay>
           <PageNav
             totalItems={list.total}
             itemsPerPage={viewParams.itemsPerPage}
             onChange={gotoPage}
+            disabled={loading}
           />
         </Col>
       </Row>

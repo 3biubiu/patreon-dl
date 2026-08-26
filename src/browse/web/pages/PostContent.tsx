@@ -13,6 +13,7 @@ import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { type BrowseSettings } from "../../types/Settings";
 import { useDocument } from "../contexts/DocumentProvider";
 import { getContentUrl } from "../utils/Misc";
+import { LoadingBlock } from "../components/Loading";
 
 interface PostNav {
   previous: PostWithComments | null;
@@ -169,7 +170,7 @@ function PostContent() {
   }, [postNav, scrollTo, stickyNav]);
 
   if (!post) {
-    return null;
+    return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
   return (

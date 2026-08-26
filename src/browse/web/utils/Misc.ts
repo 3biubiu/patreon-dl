@@ -100,6 +100,41 @@ export function getContentUrlForMedia(entity: Post | Product, mediaId: string) {
 }
 
 /**
+ * A thumbnail the post can be represented by. `isVideo` marks the ones that
+ * are a frame pulled out of a video rather than a still of its own, so callers
+ * can tell a video cover apart from a plain image.
+ */
+export interface PostThumbnailCandidate {
+  url: string;
+  isVideo: boolean;
+}
+
+/**
+ * Videos of a post that were actually downloaded, in the order the post card
+ * would play them.
+ */
+function getPostVideos(post: Post) {
+  return [ post.video, post.videoPreview, post.embed ].filter(
+    (video) => !!video?.downloaded?.path
+  );
+}
+
+/**
+ * Whether the post plays a video - either one stored locally, or a YouTube
+ * embed the post card renders inline. Used to decide whether a cover gets a
+ * play badge: a video post's cover is a video cover even when the image on it
+ * is the separately downloaded poster rather than a grabbed frame.
+ */
+export function postHasVideo(post: Post): boolean {
+  if (getPostVideos(post).length > 0) {
+    return true;
+  }
+  return !!(
+    post.embed?.html && post.embed.provider?.toLowerCase() === 'youtube'
+  );
+}
+
+/**
  * Candidate thumbnails for a post, in descending order of preference:
  *
  * 1. the images the downloader stored specifically as thumbnail / cover;
@@ -112,25 +147,26 @@ export function getContentUrlForMedia(entity: Post | Product, mediaId: string) {
  * download interrupted part-way leaves a file the DB believes in but the
  * server rejects. Callers should fall through the list on error.
  */
-export function getPostThumbnailURLs(post: Post): string[] {
-  const urls: string[] = [];
+export function getPostThumbnailCandidates(post: Post): PostThumbnailCandidate[] {
+  const candidates: PostThumbnailCandidate[] = [];
   if (post.thumbnail?.downloaded?.path) {
-    urls.push(`/media/${post.thumbnail.id}`);
+    candidates.push({ url: `/media/${post.thumbnail.id}`, isVideo: false });
   }
   if (post.coverImage?.downloaded?.path) {
-    urls.push(`/media/${post.coverImage.id}`);
+    candidates.push({ url: `/media/${post.coverImage.id}`, isVideo: false });
   }
   for (const image of post.images) {
     if (image.downloaded?.path) {
-      urls.push(`/media/${image.id}${image.downloaded.thumbnail?.path ? '?t=1' : ''}`);
+      candidates.push({
+        url: `/media/${image.id}${image.downloaded.thumbnail?.path ? '?t=1' : ''}`,
+        isVideo: false
+      });
     }
   }
   // Ask for the thumbnail whether or not one was downloaded: for a video the
   // server falls back to grabbing a frame from the file itself.
-  for (const video of [ post.video, post.videoPreview, post.embed ]) {
-    if (video?.downloaded?.path) {
-      urls.push(`/media/${video.id}?t=1`);
-    }
+  for (const video of getPostVideos(post)) {
+    candidates.push({ url: `/media/${video!.id}?t=1`, isVideo: true });
   }
-  return urls;
+  return candidates;
 }

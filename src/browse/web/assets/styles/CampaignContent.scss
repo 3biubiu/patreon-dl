@@ -17,6 +17,21 @@
 }
 
 // The reading-width column that the campaign layouts wrap their pages in.
+.content-column {
+  // Gutters of its own. The card layout used to borrow them from the grid
+  // column it sat in, which left the full-width layouts below flush against
+  // the window edge.
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+@media (min-width: 768px) {
+  .content-column {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
 // Grid and list layouts exist to fit more posts on screen, so they take over
 // the full width instead of the default lg-8 column.
 .content-column:has(> .campaign-content--layout-grid),

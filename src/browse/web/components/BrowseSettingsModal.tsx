@@ -51,25 +51,6 @@ function BrowseSettingsModal(props: BrowseSettingsModalProps) {
         <Form>
           <Form.Group as={Row} className="mb-3">
             <Form.Label column sm={5}>
-              Theme:
-            </Form.Label>
-            <Col sm={7}>
-              <Form.Select
-                data-setting="theme"
-                value={settings.theme}
-                onChange={handleSelectChange}
-              >
-                {
-                  options.themes.map((theme) => (
-                    <option key={`theme-${theme.value}`} value={theme.value}>{theme.name}</option>
-                  ))
-                }
-              </Form.Select>
-            </Col>
-          </Form.Group>
-
-          <Form.Group as={Row} className="mb-3">
-            <Form.Label column sm={5}>
               List items per page:
             </Form.Label>
             <Col sm={7}>

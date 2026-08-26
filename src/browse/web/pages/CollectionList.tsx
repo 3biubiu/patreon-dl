@@ -9,7 +9,6 @@ import CollectionCard from "../components/CollectionCard";
 import ShowingText from "../components/ShowingText";
 import PageNav from "../components/PageNav";
 import { useOutletContext, useSearchParams } from "react-router";
-import { useScroll } from "../contexts/MainContentScrollProvider";
 import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import SearchInputBox from "../components/SearchInputBox";
@@ -59,7 +58,6 @@ const viewParamsReducer = (
 function CollectionList() {
   const { api } = useAPI();
   const { settings } = useBrowseSettings();
-  const { scrollTo } = useScroll();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [list, setList] = useState<CollectionList | null>(null);
   const [loading, setLoading] = useState(false);
@@ -104,8 +102,7 @@ function CollectionList() {
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;
     setViewParams({ page });
-    scrollTo(0, 0);
-  }, [searchParams, scrollTo]);
+  }, [searchParams]);
 
   useEffect(() => {
     setViewParams({
@@ -185,7 +182,8 @@ function CollectionList() {
             }
           </LoadingOverlay>
           <PageNav
-            totalItems={list.total}
+            total={list.total}
+            current={viewParams.page || 1}
             itemsPerPage={viewParams.itemsPerPage}
             onChange={gotoPage}
             disabled={loading}

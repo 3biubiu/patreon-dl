@@ -1,13 +1,14 @@
 .main-layout {
-  &__sidebar {
-    // Width is set inline; this only smooths the change, so collapsing reads
-    // as the panel narrowing rather than the whole page jumping.
-    transition: width 200ms ease-in-out;
-  }
-}
+  height: 100vh;
 
-@media (prefers-reduced-motion: reduce) {
-  .main-layout__sidebar {
-    transition: none;
+  &__body {
+    // Lets the scrollport below the header own all the leftover height.
+    min-height: 0;
+  }
+
+  &__brand {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: inherit;
   }
 }

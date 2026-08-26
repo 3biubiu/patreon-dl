@@ -9,7 +9,6 @@ import PostCard from "../components/PostCard";
 import PageNav from "../components/PageNav";
 import deepEqual from "deep-equal";
 import copy from 'fast-copy';
-import { useScroll } from "../contexts/MainContentScrollProvider";
 import { type BrowseSettings, type PostListLayout } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { type Filter, type FilterData, type PostFilterSearchParams } from "../../types/Filter";
@@ -77,7 +76,6 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   const { api } = useAPI();
   const { setTitle } = useDocument();
   const { settings, updateSettings } = useBrowseSettings();
-  const { scrollTo } = useScroll();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [collection, setCollection] = useState<Collection | null>(null);
   const [list, setList] = useState<ContentList<T> | null>(null);
@@ -237,8 +235,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;
     setViewParams({ page });
-    scrollTo(0, 0);
-  }, [searchParams, scrollTo]);
+  }, [searchParams]);
 
   const applyFilter = useCallback((filter: Filter<PostFilterSearchParams>) => {
     if (isFirstLoadRef.current) {
@@ -387,7 +384,8 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
         }
       </LoadingOverlay>
       {list ? <PageNav
-        totalItems={list.total}
+        total={list.total}
+        current={viewParams.page || 1}
         itemsPerPage={viewParams.itemsPerPage}
         onChange={gotoPage}
         disabled={loading}

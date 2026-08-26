@@ -6,7 +6,6 @@ import { NavigationType, useNavigationType, useOutletContext, useSearchParams } 
 import PageNav from "../components/PageNav";
 import deepEqual from "deep-equal";
 import copy from 'fast-copy';
-import { useScroll } from "../contexts/MainContentScrollProvider";
 import { type MediaList } from "../../types/Media";
 import { type Filter, type FilterData, type MediaFilterSearchParams } from "../../types/Filter";
 import FilterModalButton from "../components/FilterModalButton";
@@ -55,7 +54,6 @@ function CampaignMedia() {
   const subject = { singular: 'media item', plural: 'media items' };
   const { api } = useAPI();
   const { settings } = useBrowseSettings();
-  const { scrollTo } = useScroll();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const { campaign } = useOutletContext<CampaignLayoutOutletContext>();
   const [list, setList] = useState<MediaList<any> | null>(null);
@@ -136,8 +134,7 @@ function CampaignMedia() {
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;
     setViewParams({ page });
-    scrollTo(0, 0);
-  }, [searchParams, scrollTo]);
+  }, [searchParams]);
 
   const applyFilter = useCallback((filter: Filter<MediaFilterSearchParams>) => {
     if (isFirstLoadRef.current) {
@@ -216,7 +213,8 @@ function CampaignMedia() {
         }
       </LoadingOverlay>
       { list ? <PageNav
-        totalItems={list.total}
+        total={list.total}
+        current={viewParams.page || 1}
         itemsPerPage={viewParams.itemsPerPage}
         onChange={gotoPage}
         disabled={loading}

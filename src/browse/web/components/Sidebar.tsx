@@ -1,50 +1,32 @@
 import "../assets/styles/Sidebar.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, OverlayTrigger, Stack, Tooltip } from "react-bootstrap";
+import { Avatar, Menu, type MenuProps } from "antd";
+import { HomeOutlined, SettingOutlined } from "@ant-design/icons";
 import { type Campaign } from "../../../entities";
 import { useAPI } from "../contexts/APIProvider";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { useGlobalModals } from "../contexts/GlobalModalsProvider";
-import { useSidebar } from "../contexts/SidebarProvider";
-import CustomScrollbars from "./CustomScrollbars";
-import MediaImage from "./MediaImage";
 import { APP_NAME, getCampaignBaseUrl } from "../utils/Misc";
 
 interface SidebarProps {
-  closeButton?: boolean;
-  onClose?: () => void;
   /**
-   * Whether the sidebar can be reduced to an icon rail. Off inside the mobile
-   * offcanvas, which is dismissed rather than collapsed.
+   * Icon rail. Inside `Layout.Sider` the menu picks this up on its own; it is
+   * still needed here to decide what the parts around the menu look like.
    */
-  collapsible?: boolean;
+  collapsed?: boolean;
+  /** Called after a destination is picked, so the mobile drawer can close. */
+  onNavigate?: () => void;
 }
 
-/**
- * Wraps an entry in a tooltip carrying its label, which is the only way to
- * read it once the sidebar is down to icons.
- */
-function CollapsedLabel(props: { label: string; enabled: boolean; children: React.ReactElement }) {
-  const { label, enabled, children } = props;
-  if (!enabled) {
-    return children;
-  }
-  return (
-    <OverlayTrigger placement="right" overlay={<Tooltip>{label}</Tooltip>}>
-      {children}
-    </OverlayTrigger>
-  );
-}
+const SETTINGS_KEY = 'settings';
 
 function Sidebar(props: SidebarProps) {
-  const { closeButton = false, onClose, collapsible = false } = props;
+  const { collapsed = false, onNavigate } = props;
   const { api } = useAPI();
   const { showBrowseSettingsModal } = useGlobalModals();
-  const { collapsed: collapsedSetting, toggleCollapsed } = useSidebar();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
-  // The offcanvas always shows the full sidebar: there is no room to spare on
-  // a rail the visitor has to open in the first place.
-  const collapsed = collapsible && collapsedSetting;
 
   useEffect(() => {
     const abortController = new AbortController();
@@ -58,129 +40,90 @@ function Sidebar(props: SidebarProps) {
     return () => abortController.abort();
   }, [api]);
 
-  const handleLinkClick = useCallback(() => {
-    if (onClose) {
-      onClose();
-    }
-  }, [onClose]);
-
-  const handleSettingsLinkClick = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    if (onClose) {
-      onClose();
-    }
-    showBrowseSettingsModal();
-  }, [onClose, showBrowseSettingsModal]);
-
-  const campaignLinks = useMemo(() => {
-    if (!campaigns || campaigns.length === 0) {
-      return null;
-    }
-    const links = campaigns.map((campaign) => (
-      <CollapsedLabel
-        key={`sidebar-campaign-${campaign.id}`}
-        label={campaign.name || ''}
-        enabled={collapsed}
-      >
-        <Link
-          to={getCampaignBaseUrl(campaign)}
-          className="sidebar__link"
-          onClick={handleLinkClick}
-          title={collapsed ? undefined : campaign.name || undefined}
+  const campaignItems = useMemo(() => {
+    return (campaigns || []).map((campaign) => ({
+      key: getCampaignBaseUrl(campaign),
+      // On the rail this avatar is the whole entry, which is why it is the
+      // menu item's icon rather than something inside its label.
+      icon: (
+        <Avatar
+          shape="square"
+          size={22}
+          src={`/media/campaign:${campaign.id}:avatar`}
         >
-          <MediaImage
-            className="sidebar__link-icon"
-            mediaId={`campaign:${campaign.id}:avatar`}
-          />
-          <span className="sidebar__link-text">{campaign.name}</span>
-        </Link>
-      </CollapsedLabel>
-    ));
-    return (
-      <Stack className="sidebar__section mt-4 mb-5" gap={3}>
-        <h6 className="sidebar__section-title">Recently downloaded</h6>
-        {links}
-      </Stack>
-    )
-  }, [campaigns, collapsed, handleLinkClick]);
+          {campaign.name?.charAt(0) || '?'}
+        </Avatar>
+      ),
+      label: campaign.name
+    }));
+  }, [campaigns]);
+
+  const items = useMemo<MenuProps['items']>(() => {
+    const items: NonNullable<MenuProps['items']> = [
+      { key: '/', icon: <HomeOutlined />, label: 'Home' }
+    ];
+    if (campaignItems.length > 0) {
+      // A group heading has nowhere to be read on the rail, so there the
+      // campaigns are just separated off instead of titled.
+      if (collapsed) {
+        items.push({ type: 'divider' }, ...campaignItems);
+      }
+      else {
+        items.push({
+          type: 'group',
+          key: 'recently-downloaded',
+          label: 'Recently downloaded',
+          children: campaignItems
+        });
+      }
+    }
+    items.push(
+      { type: 'divider' },
+      { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' }
+    );
+    return items;
+  }, [campaignItems, collapsed]);
+
+  // A campaign stays selected while any of its sub-pages is open.
+  const selectedKeys = useMemo(() => {
+    const path = location.pathname;
+    const match = campaignItems.find(
+      ({ key }) => path === key || path.startsWith(`${key}/`)
+    );
+    if (match) {
+      return [ match.key ];
+    }
+    return path === '/' || path === '/creators' ? [ '/' ] : [];
+  }, [location.pathname, campaignItems]);
+
+  const handleClick = useCallback<NonNullable<MenuProps['onClick']>>(({ key }) => {
+    if (key === SETTINGS_KEY) {
+      showBrowseSettingsModal();
+    }
+    else {
+      void navigate(key);
+    }
+    if (onNavigate) {
+      onNavigate();
+    }
+  }, [navigate, showBrowseSettingsModal, onNavigate]);
 
   return (
-    <Card className={`sidebar p-0 ${collapsed ? 'sidebar--collapsed' : ''}`}>
-      <Stack className="overflow-hidden">
-        <Stack
-          // On the rail the two controls cannot sit side by side, so they
-          // stack instead of the name being dropped along with its link home.
-          direction={collapsed ? 'vertical' : 'horizontal'}
-          className="sidebar__header justify-content-between p-3"
-          gap={collapsed ? 2 : 0}
-        >
-          <div className="sidebar__brand fs-5 fw-bold">
-            {
-              collapsed ? (
-                <CollapsedLabel label={APP_NAME} enabled>
-                  <Link
-                    to="/"
-                    className="sidebar__brand-home"
-                    onClick={handleLinkClick}
-                    aria-label={APP_NAME}
-                  >
-                    <span className="material-icons">home</span>
-                  </Link>
-                </CollapsedLabel>
-              ) : (
-                <Link
-                  to="/"
-                  onClick={handleLinkClick}
-                >
-                  {APP_NAME}
-                </Link>
-              )
-            }
-          </div>
-          {
-            collapsible ? (
-              <CollapsedLabel label="Expand sidebar" enabled={collapsed}>
-                <button
-                  type="button"
-                  className="sidebar__toggle"
-                  onClick={toggleCollapsed}
-                  aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                  aria-expanded={!collapsed}
-                >
-                  <span className="material-icons">
-                    {collapsed ? 'chevron_right' : 'chevron_left'}
-                  </span>
-                </button>
-              </CollapsedLabel>
-            ) : null
-          }
-          {
-            closeButton ? (
-              <button className="btn-close" onClick={onClose ? () => onClose() : undefined}></button>
-            ) : null
-          }
-        </Stack>
-        <CustomScrollbars
-          viewClassName="sidebar__main"
-        >
-          <Stack className="flex-fill">
-            {campaignLinks}
-            <Stack className="sidebar__section justify-content-end pb-3" gap={3}>
-              <CollapsedLabel label="Settings" enabled={collapsed}>
-                <a
-                  href="#"
-                  className="sidebar__link"
-                  onClick={handleSettingsLinkClick}
-                >
-                  <span className="material-icons sidebar__link-icon">settings</span>
-                  <span className="sidebar__link-text">Settings</span>
-                </a>
-              </CollapsedLabel>
-            </Stack>
-          </Stack>
-        </CustomScrollbars>
-      </Stack>
-    </Card>
+    <div className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
+      <div className="sidebar__brand">
+        <Link to="/" onClick={onNavigate} aria-label={APP_NAME}>
+          {collapsed ? <HomeOutlined /> : APP_NAME}
+        </Link>
+      </div>
+      <div className="sidebar__menu">
+        <Menu
+          mode="inline"
+          items={items}
+          selectedKeys={selectedKeys}
+          onClick={handleClick}
+        />
+      </div>
+    </div>
   );
 };
 

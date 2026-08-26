@@ -1,10 +1,3 @@
-:root {
-  // Shared by the sidebar itself and by the space the layout reserves for it,
-  // so the rail and its column can never drift apart.
-  --sidebar-width: 18em;
-  --sidebar-collapsed-width: 4.5em;
-}
-
 a {
   text-decoration: none;
 }

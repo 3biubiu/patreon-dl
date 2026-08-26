@@ -1,29 +1,12 @@
 .loading-overlay {
   position: relative;
+  width: 100%;
 
-  &__content {
-    transition: opacity 150ms ease-in-out, filter 150ms ease-in-out;
-  }
-
-  &--active &__content {
-    opacity: 0.35;
-    filter: blur(1px);
-    // The page underneath is stale until the fetch lands; clicking through to
-    // an item that is about to be replaced would be misleading.
-    pointer-events: none;
-    user-select: none;
-  }
-
-  &__veil {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    // Follow the viewport when the list is taller than the screen, so the
-    // spinner is visible wherever the visitor happens to be scrolled to.
-    padding-top: clamp(2rem, 20vh, 10rem);
-    z-index: 5;
+  // Carry any min-height down to the element the spinner actually centres
+  // itself in, so a first load with no content yet still shows it mid-block.
+  > .ant-spin-nested-loading,
+  > .ant-spin-nested-loading > .ant-spin-container {
+    min-height: inherit;
   }
 }
 
@@ -32,10 +15,4 @@
   align-items: center;
   justify-content: center;
   width: 100%;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .loading-overlay__content {
-    transition: none;
-  }
 }

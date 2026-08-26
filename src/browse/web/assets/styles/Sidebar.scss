@@ -1,132 +1,45 @@
-@use "./mixins";
-
 .sidebar {
-  width: 100%;
-  height: 100vh;
-  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
 
-  &__header {
-    background: var(--bs-card-bg);
-    min-height: 3.75em;
-  }
-
-  &__brand a {
-    color: inherit;
-  }
-
-  &__brand-home {
+  &__brand {
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: var(--bs-body-color);
-
-    &:hover {
-      color: var(--bs-link-hover-color);
-    }
-
-    transition: color 150ms;
-  }
-
-  &__toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    border-radius: var(--bs-border-radius);
-    color: var(--bs-secondary-color);
-    background: transparent;
-    transition: color 150ms, background-color 150ms;
-
-    &:hover {
-      color: var(--bs-link-hover-color);
-      background-color: var(--bs-tertiary-bg);
-    }
-  }
-
-  &__section {
-    padding-left: 1rem;
-    padding-right: 1rem;
-  }
-
-  &__section-title {
-    color: var(--bs-body-color);
-    font-weight: bold;
-    font-size: 0.9em;
+    height: 3.5rem;
+    padding-inline: 1.5rem;
+    font-size: 1.15rem;
+    font-weight: 700;
     white-space: nowrap;
-  }
+    overflow: hidden;
 
-  &__main {
-    display: flex;
-    flex-direction: column;
-  }
-
-  &__link {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: var(--bs-body-color);
-    border-radius: var(--bs-border-radius);
-
-    &:hover {
-      color: var(--bs-link-hover-color);
-    }
-
-    transition: color 150ms, background-color 150ms;
-  }
-
-  &__link-icon {
-    flex: 0 0 auto;
-    width: 1.5em;
-    height: 1.5em;
-    object-fit: cover;
-
-    &--svg {
-      fill: var(--bs-body-color);
+    a {
+      color: inherit;
     }
   }
 
-  &__link-text {
-    @include mixins.line-clamp();
-
-    font-size: 0.9em;
+  &--collapsed &__brand {
+    justify-content: center;
+    padding-inline: 0;
   }
 
-  // Icon rail: avatars and glyphs only, everything that needs room to read is
-  // dropped and moved into a tooltip instead.
-  &--collapsed {
-    .sidebar__header {
-      align-items: center;
-      padding-left: 0 !important;
-      padding-right: 0 !important;
-    }
+  &__menu {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
 
-    .sidebar__section {
-      padding-left: 0.5rem;
-      padding-right: 0.5rem;
-    }
-
-    .sidebar__section-title {
-      display: none;
-    }
-
-    .sidebar__link {
-      justify-content: center;
-      padding: 0.4rem 0;
-
-      &:hover {
-        background-color: var(--bs-tertiary-bg);
-      }
-    }
-
-    .sidebar__link-icon {
-      width: 1.75em;
-      height: 1.75em;
-      margin: 0;
-    }
-
-    .sidebar__link-text {
-      display: none;
+    // The menu would otherwise draw the panel's own right-hand border again.
+    .ant-menu {
+      border-inline-end: 0;
     }
   }
+}
+
+// Sider draws its collapse trigger over the bottom of the panel, so the menu
+// needs room to scroll clear of it. The drawer has no trigger and no gap.
+.ant-layout-sider .sidebar__menu {
+  padding-bottom: 48px;
 }

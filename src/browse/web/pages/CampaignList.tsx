@@ -9,7 +9,6 @@ import CampaignCard from "../components/CampaignCard";
 import ShowingText from "../components/ShowingText";
 import PageNav from "../components/PageNav";
 import { useSearchParams } from "react-router";
-import { useScroll } from "../contexts/MainContentScrollProvider";
 import { type BrowseSettings } from "../../types/Settings";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { useDocument } from "../contexts/DocumentProvider";
@@ -54,7 +53,6 @@ function CampaignList() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
   const { settings } = useBrowseSettings();
-  const { scrollTo } = useScroll();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [list, setList] = useState<CampaignList | null>(null);
   const [loading, setLoading] = useState(false);
@@ -95,8 +93,7 @@ function CampaignList() {
   useEffect(() => {
     const page = Number(searchParams.get('p')) || 1;
     setViewParams({ page });
-    scrollTo(0, 0);
-  }, [searchParams, scrollTo]);
+  }, [searchParams]);
 
   useEffect(() => {
     setViewParams({
@@ -163,7 +160,8 @@ function CampaignList() {
             }
           </LoadingOverlay>
           <PageNav
-            totalItems={list.total}
+            total={list.total}
+            current={viewParams.page || 1}
             itemsPerPage={viewParams.itemsPerPage}
             onChange={gotoPage}
             disabled={loading}

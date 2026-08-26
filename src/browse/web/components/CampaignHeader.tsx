@@ -1,9 +1,10 @@
 import "../assets/styles/CampaignHeader.scss";
-import { NavLink } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { type CampaignWithCounts } from "../../types/Campaign";
 import { useMemo } from "react";
 import RawDataExtractor from "../utils/RawDataExtractor";
 import { Stack } from "react-bootstrap";
+import { Tabs } from "antd";
 import MediaImage from "./MediaImage";
 
 interface CampaignHeaderProps {
@@ -12,6 +13,8 @@ interface CampaignHeaderProps {
 
 function CampaignHeader(props: CampaignHeaderProps) {
   const { campaign } = props;
+  const navigate = useNavigate();
+  const location = useLocation();
   const coverMediaId = campaign.coverPhoto.downloaded?.path ? campaign.coverPhoto.id : null;
   const avatarMediaId = campaign.avatarImage.downloaded?.path ? campaign.avatarImage.id : null;
 
@@ -45,20 +48,18 @@ function CampaignHeader(props: CampaignHeaderProps) {
       title: 'About',
       url: `${campaign.baseUrl}/about`
     });
+    const activeKey = links.find(({ url }) => location.pathname === url)?.url;
     return (
-      <Stack
-        direction="horizontal"
-        className="campaign-header__nav justify-content-center mb-5"
-        gap={4}
-      >
-        {
-          links.map(({title, url}) => (
-            <NavLink to={url}>{title}</NavLink>
-          ))
-        }
-      </Stack>
+      <div className="campaign-header__nav">
+        <Tabs
+          activeKey={activeKey}
+          items={links.map(({ title, url }) => ({ key: url, label: title }))}
+          onChange={(key) => void navigate(key)}
+          centered
+        />
+      </div>
     )
-  }, [campaign])
+  }, [campaign, location.pathname, navigate])
 
   const coverPhoto = useMemo(() => {
     if (!coverMediaId) {

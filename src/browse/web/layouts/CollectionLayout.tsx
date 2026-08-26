@@ -41,19 +41,19 @@ function CollectionLayout() {
   }
 
   return (
-    <Container fluid className="p-0">
-      <Row className="g-0">
-        <Col>
-          <CampaignHeader campaign={campaign} />
-        </Col>
-      </Row>
-      <Row className="justify-content-center g-0">
-        <Col lg={8} md={10} sm={12} className="content-column px-3 px-md-0 d-flex flex-column align-items-center justify-content-center">
-          {collection && <CollectionBanner collection={collection} />}
-          <Outlet />
-        </Col>
-      </Row>
-    </Container>
+    <div className="campaign-layout">
+      {/* Outside the grid on purpose: the nav bar inside sticks to the top of
+          the page, and it can only do that while its wrapper spans the page. */}
+      <CampaignHeader campaign={campaign} />
+      <Container fluid className="p-0">
+        <Row className="justify-content-center g-0">
+          <Col lg={8} md={10} sm={12} className="content-column d-flex flex-column align-items-center justify-content-center">
+            {collection && <CollectionBanner collection={collection} />}
+            <Outlet />
+          </Col>
+        </Row>
+      </Container>
+    </div>
   )
 }
 

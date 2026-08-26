@@ -1,18 +1,17 @@
 import "../assets/styles/Loading.scss";
-import { Spinner } from "react-bootstrap";
+import { Spin } from "antd";
 
 interface LoadingOverlayProps {
   loading: boolean;
   children: React.ReactNode;
   className?: string;
-  /** Height the veil falls back to while there is no content behind it yet. */
+  /** Height the spinner falls back to while there is no content behind it yet. */
   minHeight?: string;
 }
 
 interface LoadingBlockProps {
   className?: string;
   minHeight?: string;
-  label?: string;
 }
 
 /**
@@ -27,21 +26,12 @@ function LoadingOverlay(props: LoadingOverlayProps) {
 
   return (
     <div
-      className={`loading-overlay ${loading ? 'loading-overlay--active' : ''} ${className}`}
+      className={`loading-overlay ${className}`}
       style={minHeight ? { minHeight } : undefined}
     >
-      <div className="loading-overlay__content" aria-busy={loading}>
+      <Spin spinning={loading}>
         {children}
-      </div>
-      {
-        loading ? (
-          <div className="loading-overlay__veil">
-            <Spinner animation="border" variant="primary" role="status">
-              <span className="visually-hidden">Loading...</span>
-            </Spinner>
-          </div>
-        ) : null
-      }
+      </Spin>
     </div>
   );
 }
@@ -51,12 +41,11 @@ function LoadingOverlay(props: LoadingOverlayProps) {
  * load isn't a blank screen.
  */
 function LoadingBlock(props: LoadingBlockProps) {
-  const { className = '', minHeight = '16em', label = 'Loading...' } = props;
+  const { className = '', minHeight = '16em' } = props;
 
   return (
-    <div className={`loading-block ${className}`} style={{ minHeight }} role="status">
-      <Spinner animation="border" variant="primary" />
-      <span className="visually-hidden">{label}</span>
+    <div className={`loading-block ${className}`} style={{ minHeight }}>
+      <Spin size="large" />
     </div>
   );
 }

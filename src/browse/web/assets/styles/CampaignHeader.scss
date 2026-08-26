@@ -24,17 +24,24 @@
     @include mixins.line-clamp(); 
   }
 
+  // Follows the page down, so switching section never means scrolling back up.
+  // Sticking works because the layout puts this inside a wrapper that spans
+  // the whole page rather than just the header.
   &__nav {
-    border-bottom: 1px solid var(--bs-secondary);
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    margin-bottom: 1.5rem;
+    background: var(--bs-body-bg);
 
-    a {
-      padding-bottom: 0.5em;
-      position: relative;
-      top: 1px;
+    .ant-tabs-nav {
+      margin-bottom: 0;
+    }
 
-      &.active {
-        border-bottom: 2px solid var(--bs-link-color);
-      }
+    // The tabs carry no panels; without this their empty content area still
+    // takes up room under the bar.
+    .ant-tabs-content-holder {
+      display: none;
     }
   }
 }

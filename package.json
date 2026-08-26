@@ -71,10 +71,13 @@
     "vite-plugin-svgr": "^4.3.0"
   },
   "dependencies": {
+    "@ant-design/icons": "^6.3.2",
+    "@ant-design/v5-patch-for-react-19": "^1.0.3",
     "@patrickkfkan/cross-spawn": "^7.1.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cli-color": "^2.0.5",
     "@types/deep-freeze": "^0.1.5",
+    "antd": "^6.6.1",
     "argv-split": "^3.2.1",
     "better-sqlite3": "^12.4.1",
     "bgutils-js": "^3.2.0",

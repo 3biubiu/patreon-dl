@@ -1,42 +1,89 @@
 import "../assets/styles/MainLayout.scss";
-import { Container, Row, Col, Stack } from "react-bootstrap";
+import { useState } from "react";
+import { Button, Drawer, Layout, theme } from "antd";
+import { MenuOutlined } from "@ant-design/icons";
 import { Link, Outlet } from "react-router";
 import Sidebar from "../components/Sidebar";
 import { ScrollProvider } from "../contexts/MainContentScrollProvider";
-import SidebarTrigger from "../components/SidebarTrigger";
 import { useSidebar } from "../contexts/SidebarProvider";
+import { DESKTOP_QUERY, useMediaQuery } from "../utils/useMediaQuery";
 import { APP_NAME } from "../utils/Misc";
 
+const { Header, Sider } = Layout;
+
+const SIDER_WIDTH = 264;
+const SIDER_COLLAPSED_WIDTH = 80;
+
 function MainLayout() {
-  const { collapsed } = useSidebar();
+  const { collapsed, setCollapsed } = useSidebar();
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
+  const [ drawerOpen, setDrawerOpen ] = useState(false);
+  const { token } = theme.useToken();
 
   return (
-    <Container fluid className="p-0 vh-100">
-      <Row className="g-0 h-100">
-        <Col
-          xs="auto"
-          className="p-0 sticky-top d-none d-lg-block main-layout__sidebar"
-          // Inline, because Bootstrap's own `.col-auto { width: auto }` is
-          // just as specific as anything this stylesheet could say.
-          style={{
-            width: collapsed ? 'var(--sidebar-collapsed-width)' : 'var(--sidebar-width)'
-          }}
-        >
-          <Sidebar collapsible />
-        </Col>
-        <Col className="p-0">
-          <ScrollProvider>
-            <Stack direction="horizontal" className="d-lg-none sticky-top bg-body py-2">
-              <SidebarTrigger />
-              <div className="fs-5">
-                <Link className="text-body" to="/">{APP_NAME}</Link>
-              </div>
-            </Stack>
-            <Outlet />
-          </ScrollProvider>
-        </Col>
-      </Row>
-    </Container>
+    <Layout className="main-layout">
+      {
+        isDesktop ? (
+          <Sider
+            theme="light"
+            collapsible
+            collapsed={collapsed}
+            onCollapse={setCollapsed}
+            width={SIDER_WIDTH}
+            collapsedWidth={SIDER_COLLAPSED_WIDTH}
+            style={{
+              background: token.colorBgContainer,
+              borderInlineEnd: `1px solid ${token.colorBorderSecondary}`
+            }}
+          >
+            <Sidebar collapsed={collapsed} />
+          </Sider>
+        ) : null
+      }
+      <Layout className="main-layout__body">
+        {
+          !isDesktop ? (
+            <Header
+              className="main-layout__header"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                height: 56,
+                paddingInline: 12,
+                lineHeight: 'normal',
+                background: token.colorBgContainer,
+                borderBottom: `1px solid ${token.colorBorderSecondary}`
+              }}
+            >
+              <Button
+                type="text"
+                icon={<MenuOutlined />}
+                aria-label="Open menu"
+                onClick={() => setDrawerOpen(true)}
+              />
+              <Link to="/" className="main-layout__brand">{APP_NAME}</Link>
+            </Header>
+          ) : null
+        }
+        <ScrollProvider>
+          <Outlet />
+        </ScrollProvider>
+      </Layout>
+      {
+        !isDesktop ? (
+          <Drawer
+            placement="left"
+            open={drawerOpen}
+            width={SIDER_WIDTH}
+            onClose={() => setDrawerOpen(false)}
+            styles={{ body: { padding: 0 }, header: { display: 'none' } }}
+          >
+            <Sidebar onNavigate={() => setDrawerOpen(false)} />
+          </Drawer>
+        ) : null
+      }
+    </Layout>
   )
 }
 

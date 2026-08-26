@@ -1,7 +1,7 @@
-import fs from 'fs';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
 import AudioExtractor, { SAMPLE_RATE } from './AudioExtractor.js';
+import { ensureSileroModel } from './SileroModel.js';
 
 /** A stretch of the source file that contains speech, in seconds. */
 export interface SpeechInterval {
@@ -84,15 +84,14 @@ export default class VoiceActivityDetector {
   }
 
   /**
-   * Why the detector cannot run, or `null` when it can. Checked before a job
-   * is accepted so the reason reaches the browser instead of a stack trace.
+   * Why the detector cannot run, or `null` when it can.
+   *
+   * Deliberately cheap: this answers a status endpoint that the browser calls
+   * on load, so it checks only what is already here. A missing model is not
+   * reported - it is fetched when a job runs - because downloading it from
+   * inside a status check would stall the page.
    */
   async getUnavailableReason(): Promise<string | null> {
-    if (!fs.existsSync(this.#modelPath)) {
-      return `Silero VAD model not found at "${this.#modelPath}". Download silero_vad.onnx ` +
-        'and place it there (it ships with the Python "silero-vad" package, or can be ' +
-        'fetched from https://github.com/snakers4/silero-vad).';
-    }
     try {
       await this.#loadModule();
     }
@@ -117,6 +116,8 @@ export default class VoiceActivityDetector {
   ): Promise<SpeechInterval[]> {
     const opts = { ...DEFAULTS, ...options };
     const { Vad } = await this.#loadModule();
+    // First run fetches the model; afterwards this is one `existsSync`.
+    await ensureSileroModel(this.#modelPath, this.#logger, signal);
     const duration = await this.#extractor.probeDuration(videoPath);
 
     const vad = new Vad({

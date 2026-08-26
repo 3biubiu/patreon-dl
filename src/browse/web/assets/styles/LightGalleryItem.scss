@@ -6,6 +6,9 @@
     font-size: 0.85em;
     top: 1em;
     left: 1em;
-    z-index: 1001;
+    // Only has to clear the thumbnail beside it. Nothing here opens a stacking
+    // context, so a big value would compete with antd's overlays (1000) in the
+    // root context and punch through them.
+    z-index: 1;
   }
 }

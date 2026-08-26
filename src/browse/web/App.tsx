@@ -23,6 +23,8 @@ import CollectionList from "./pages/CollectionList";
 import CollectionLayout from "./layouts/CollectionLayout";
 import { DocumentProvider } from "./contexts/DocumentProvider";
 import { SidebarProvider } from "./contexts/SidebarProvider";
+import { AuthProvider } from "./contexts/AuthProvider";
+import Users from "./pages/Users";
 import { DARK_SCHEME_QUERY, useMediaQuery } from "./utils/useMediaQuery";
 import PlaybackRateControl from "./components/PlaybackRateControl";
 
@@ -72,32 +74,35 @@ function App() {
       }}
     >
       <APIProvider>
-        <BrowseSettingsProvider>
-          <GlobalModalsProvider>
-            <DocumentProvider>
-              <SidebarProvider>
-                <PlaybackRateControl />
-                <Routes>
-                  <Route path="/" element={<MainLayout />} >
-                    <Route index element={<CampaignList />} />
-                    <Route path="creators" element={<CampaignList />} />
-                    <Route path="campaigns/:id" element={<CampaignLayout />}>
-                      {campaignSubRoutes}
+        <AuthProvider>
+          <BrowseSettingsProvider>
+            <GlobalModalsProvider>
+              <DocumentProvider>
+                <SidebarProvider>
+                  <PlaybackRateControl />
+                  <Routes>
+                    <Route path="/" element={<MainLayout />} >
+                      <Route index element={<CampaignList />} />
+                      <Route path="creators" element={<CampaignList />} />
+                      <Route path="campaigns/:id" element={<CampaignLayout />}>
+                        {campaignSubRoutes}
+                      </Route>
+                      <Route path="posts/:id" element={<PostContent />} />
+                      <Route path="products/:id" element={<ProductContent />} />
+                      <Route path="collections/:id" element={<CollectionLayout />}>
+                        <Route index element={<CampaignContent type="post" collection />} />
+                      </Route>
+                      <Route path="users" element={<Users />} />
+                      <Route path=":vanity" element={<CampaignLayout />}>
+                        {campaignSubRoutes}
+                      </Route>
                     </Route>
-                    <Route path="posts/:id" element={<PostContent />} />
-                    <Route path="products/:id" element={<ProductContent />} />
-                    <Route path="collections/:id" element={<CollectionLayout />}>
-                      <Route index element={<CampaignContent type="post" collection />} />
-                    </Route>
-                    <Route path=":vanity" element={<CampaignLayout />}>
-                      {campaignSubRoutes}
-                    </Route>
-                  </Route>
-                </Routes>
-              </SidebarProvider>
-            </DocumentProvider>
-          </GlobalModalsProvider>
-        </BrowseSettingsProvider>
+                  </Routes>
+                </SidebarProvider>
+              </DocumentProvider>
+            </GlobalModalsProvider>
+          </BrowseSettingsProvider>
+        </AuthProvider>
       </APIProvider>
     </ConfigProvider>
   )

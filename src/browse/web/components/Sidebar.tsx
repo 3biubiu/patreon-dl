@@ -1,11 +1,12 @@
 import "../assets/styles/Sidebar.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar, Menu, type MenuProps } from "antd";
-import { HomeOutlined, SettingOutlined } from "@ant-design/icons";
+import { HomeOutlined, LogoutOutlined, SettingOutlined, TeamOutlined } from "@ant-design/icons";
 import { type Campaign } from "../../../entities";
 import { useAPI } from "../contexts/APIProvider";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useGlobalModals } from "../contexts/GlobalModalsProvider";
+import { useAuth } from "../contexts/AuthProvider";
 import { APP_NAME, getCampaignBaseUrl } from "../utils/Misc";
 
 interface SidebarProps {
@@ -19,11 +20,14 @@ interface SidebarProps {
 }
 
 const SETTINGS_KEY = 'settings';
+const USERS_KEY = '/users';
+const SIGN_OUT_KEY = 'sign-out';
 
 function Sidebar(props: SidebarProps) {
   const { collapsed = false, onNavigate } = props;
   const { api } = useAPI();
   const { showBrowseSettingsModal } = useGlobalModals();
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
@@ -82,9 +86,19 @@ function Sidebar(props: SidebarProps) {
 
   // Its own menu, so it can sit at the foot of the panel rather than wherever
   // the campaign list happens to end.
-  const footerItems = useMemo<MenuProps['items']>(() => [
-    { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' }
-  ], []);
+  const footerItems = useMemo<MenuProps['items']>(() => {
+    const items: NonNullable<MenuProps['items']> = [];
+    // Hidden from everyone else. The server refuses these endpoints to
+    // non-administrators regardless of what the menu shows.
+    if (user?.role === 'admin') {
+      items.push({ key: USERS_KEY, icon: <TeamOutlined />, label: 'Users' });
+    }
+    items.push(
+      { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' },
+      { key: SIGN_OUT_KEY, icon: <LogoutOutlined />, label: 'Sign out' }
+    );
+    return items;
+  }, [user?.role]);
 
   // A campaign stays selected while any of its sub-pages is open.
   const selectedKeys = useMemo(() => {
@@ -102,13 +116,16 @@ function Sidebar(props: SidebarProps) {
     if (key === SETTINGS_KEY) {
       showBrowseSettingsModal();
     }
+    else if (key === SIGN_OUT_KEY) {
+      void signOut();
+    }
     else {
       void navigate(key);
     }
     if (onNavigate) {
       onNavigate();
     }
-  }, [navigate, showBrowseSettingsModal, onNavigate]);
+  }, [navigate, showBrowseSettingsModal, signOut, onNavigate]);
 
   return (
     <div className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
@@ -135,8 +152,7 @@ function Sidebar(props: SidebarProps) {
         <Menu
           mode="inline"
           items={footerItems}
-          // Opens a dialog rather than going anywhere, so it is never current.
-          selectedKeys={[]}
+          selectedKeys={location.pathname === USERS_KEY ? [ USERS_KEY ] : []}
           onClick={handleClick}
         />
       </div>

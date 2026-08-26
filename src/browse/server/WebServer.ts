@@ -7,6 +7,7 @@ import getPort from 'get-port';
 import { type Logger } from '../../utils/logging/index.js';
 import { getRouter } from './Router.js';
 import API from '../api/index.js';
+import AuthStore from './AuthStore.js';
 
 export const DEFAULT_WEB_SERVER_PORT = 3000;
 
@@ -60,7 +61,13 @@ export class WebServer {
     }
     const db = await DB.getInstance(dbFile, false, this.#config.logger);
     const api = API.getInstance(db, this.#config.logger);
-    const router = getRouter(db, api, dataDir, this.#config.pathToFFmpeg, this.#config.logger);
+    // Accounts live beside the content DB but in a file of their own - see
+    // `AuthStore` for why they are not in it.
+    const authStore = AuthStore.load(
+      path.resolve(dataDir, '.patreon-dl', 'auth.json'),
+      this.#config.logger
+    );
+    const router = getRouter(db, api, dataDir, authStore, this.#config.pathToFFmpeg, this.#config.logger);
 
     this.#app.use(express.json());
     this.#app.use(express.urlencoded({ extended: true }));

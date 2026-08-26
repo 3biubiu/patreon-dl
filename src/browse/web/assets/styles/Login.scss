@@ -1,0 +1,41 @@
+.login {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 1.5rem;
+
+  &__card {
+    width: 100%;
+    max-width: 22rem;
+  }
+
+  &__brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1.5rem;
+    font-size: 1.25rem;
+    font-weight: 700;
+  }
+
+  &__logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    // Matches the sidebar mark. The letter is dark because white on this
+    // green would be unreadable.
+    background-color: #00ff7f;
+    color: #0a3d29;
+    font-size: 1.1rem;
+    font-weight: 800;
+    line-height: 1;
+  }
+
+  &__error {
+    margin-bottom: 1rem;
+  }
+}

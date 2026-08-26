@@ -6,6 +6,7 @@ import { type BrowseSettings, type BrowseSettingOptions as BrowseSettingOptions 
 import { type Filter, type FilterSearchParams, type FilterData, type MediaFilterSearchParams, type PostFilterSearchParams } from '../../types/Filter';
 import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
+import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
 
 interface APIProviderProps {
   children: React.ReactNode;
@@ -13,6 +14,42 @@ interface APIProviderProps {
 
 export interface APIContextValue {
   api: API;
+}
+
+
+/** Raised when the session has gone away mid-use. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('Unauthorized');
+    this.name = 'UnauthorizedError';
+  }
+}
+
+export const UNAUTHORIZED_EVENT = 'patreon-dl:unauthorized';
+
+/**
+ * Every data request goes through here so that one expired session is noticed
+ * once, in one place.
+ *
+ * It throws rather than returning the 401 body: callers hand the result
+ * straight to `setState`, and letting `{ error: "Unauthorized" }` through
+ * would have them render it as if it were content.
+ */
+async function apiFetch(input: string, init?: RequestInit) {
+  const response = await fetch(input, init);
+  if (response.status === 401) {
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+    throw new UnauthorizedError();
+  }
+  return response;
+}
+
+async function readJSON(response: Response) {
+  const data = await response.json() as { error?: string } & Record<string, any>;
+  if (!response.ok) {
+    throw Error(data?.error || 'Request failed');
+  }
+  return data;
 }
 
 class API {
@@ -27,7 +64,7 @@ class API {
       urlObj.searchParams.append('sort_by', params.sortBy);
     }
     this.#setPaginationParams(urlObj, params);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -50,7 +87,7 @@ class API {
     }
     this.#setFilterParams(urlObj, filter);
     this.#setPaginationParams(urlObj, params);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -100,7 +137,7 @@ class API {
       urlObj.searchParams.append('by_vanity', 'true');
     }
     urlObj.searchParams.append('with_counts', withCounts ? 'true' : 'false' );
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -111,7 +148,7 @@ class API {
     const campaignId = typeof campaign === 'string' ? campaign : campaign.id;
     const ct = contentType === 'post' ? 'posts' : 'products';
     const urlObj = new URL(`/api/campaigns/${campaignId}/${ct}/filter_options`, window.location.href);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -120,19 +157,19 @@ class API {
     if (contextQS) {
       urlObj.search = contextQS;
     }
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
   async getProduct(id: string): Promise<Product | null> {
     const urlObj = new URL(`/api/products/${id}`, window.location.href);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
   async getCollection(id: string): Promise<{ collection: Collection; campaignId: string; }> {
     const urlObj = new URL(`/api/collections/${id}`, window.location.href);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -153,7 +190,7 @@ class API {
       urlObj.searchParams.append('sort_by', sortBy);
     }
     this.#setPaginationParams(urlObj, params);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -163,19 +200,19 @@ class API {
     const { campaign } = params;
     const campaignId = typeof campaign === 'string' ? campaign : campaign.id;
     const urlObj = new URL(`/api/campaigns/${campaignId}/post_tags`, window.location.href);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
   async getBrowseSettings(): Promise<BrowseSettings> {
     const urlObj = new URL(`/api/settings/browse`, window.location.href);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
   async getBrowseSettingOptions(): Promise<BrowseSettingOptions> {
     const urlObj = new URL(`/api/settings/browse/options`, window.location.href);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -189,7 +226,7 @@ class API {
     const urlObj = new URL(`/api/campaigns/${campaign.id}/media`, window.location.href);
     this.#setFilterParams(urlObj, filter);
     this.#setPaginationParams(urlObj, params);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
@@ -198,16 +235,70 @@ class API {
   ): Promise<FilterData<MediaFilterSearchParams>> {
     const campaignId = typeof campaign === 'string' ? campaign : campaign.id;
     const urlObj = new URL(`/api/campaigns/${campaignId}/media/filter_options`, window.location.href);
-    const result = await fetch(urlObj.toString());
+    const result = await apiFetch(urlObj.toString());
     return await result.json();
   }
 
   saveBrowseSettings(settings: BrowseSettings) {
-    return fetch("/api/settings/browse", {
+    return apiFetch("/api/settings/browse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     });
+  }
+
+  // Auth endpoints use plain `fetch`: a 401 from them is an expected answer
+  // ("not signed in", "wrong password"), not a session that has lapsed.
+  async getSession(): Promise<AuthSession> {
+    const result = await fetch('/api/auth/me');
+    if (!result.ok) {
+      return { user: null };
+    }
+    return await result.json();
+  }
+
+  async login(username: string, password: string): Promise<AuthUser> {
+    const result = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await result.json() as { user?: AuthUser; error?: string };
+    if (!result.ok || !data.user) {
+      throw Error(data?.error || 'Could not sign in');
+    }
+    return data.user;
+  }
+
+  async logout(): Promise<void> {
+    await fetch('/api/auth/logout', { method: 'POST' });
+  }
+
+  async listUsers(): Promise<AuthUser[]> {
+    const data = await readJSON(await apiFetch('/api/auth/users'));
+    return data.users as AuthUser[];
+  }
+
+  async createUser(params: CreateUserRequest): Promise<AuthUser> {
+    const data = await readJSON(await apiFetch('/api/auth/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    }));
+    return data.user as AuthUser;
+  }
+
+  async updateUser(id: string, params: UpdateUserRequest): Promise<AuthUser> {
+    const data = await readJSON(await apiFetch(`/api/auth/users/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    }));
+    return data.user as AuthUser;
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await readJSON(await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE' }));
   }
 
   #setPaginationParams(

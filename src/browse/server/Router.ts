@@ -1,4 +1,4 @@
-import express, { type Router } from 'express';
+import express, { type RequestHandler, type Router } from 'express';
 import path from 'path';
 import CampaignAPIRequestHandler from './handler/CampaignAPIRequesthandler.js';
 import { type DBInstance } from '../db/index.js';
@@ -9,7 +9,10 @@ import MediaRequestHandler from './handler/MediaRequestHandler.js';
 import SettingsAPIRequestHandler from './handler/SettingsAPIRequestHandler.js';
 import MediaAPIRequestHandler from './handler/MediaAPIRequestHandler.js';
 import VideoThumbnailer from './VideoThumbnailer.js';
-import { checkMediaAccess, issueMediaAccessCookie } from './MediaAccessGuard.js';
+import { checkMediaAccess } from './MediaAccessGuard.js';
+import AuthAPIRequestHandler from './handler/AuthAPIRequestHandler.js';
+import type AuthStore from './AuthStore.js';
+import { getSessionUser, refreshSessionIfStale, type AuthenticatedRequest } from './AuthGuard.js';
 
 interface RequestHandlers {
   campaignAPI: CampaignAPIRequestHandler;
@@ -17,27 +20,81 @@ interface RequestHandlers {
   media: MediaRequestHandler;
   settingsAPI: SettingsAPIRequestHandler;
   mediaAPI: MediaAPIRequestHandler;
+  auth: AuthAPIRequestHandler;
 }
 
 class _Router {
   #handlers: RequestHandlers;
+  #authStore: AuthStore;
   #router: Router;
 
-  constructor(handlers: RequestHandlers) {
+  constructor(handlers: RequestHandlers, authStore: AuthStore) {
     this.#handlers = handlers;
+    this.#authStore = authStore;
     this.#router = express.Router();
     this.initializeRoutes();
   }
 
   initializeRoutes() {
-    // Every request that is not itself for media renews the access cookie, so
-    // it stays valid for as long as the app is being used.
+    // Resolve the session once, up front, so everything downstream - including
+    // the content permissions that will come later - can simply read
+    // `req.authUser`.
     this.#router.use((req, res, next) => {
-      if (!req.path.startsWith('/media/')) {
-        issueMediaAccessCookie(res);
+      const user = getSessionUser(req, this.#authStore);
+      if (user) {
+        (req as AuthenticatedRequest).authUser = user;
+        refreshSessionIfStale(req, res, this.#authStore, user);
       }
       next();
     });
+
+    // Reachable while signed out - otherwise there would be no way in.
+    this.#router.post('/api/auth/login', (req, res) =>
+      this.#handlers.auth.handleLoginRequest(req, res)
+    );
+
+    this.#router.post('/api/auth/logout', (req, res) =>
+      this.#handlers.auth.handleLogoutRequest(req, res)
+    );
+
+    this.#router.get('/api/auth/me', (req, res) =>
+      this.#handlers.auth.handleSessionRequest(req, res)
+    );
+
+    // Everything that serves data sits behind the sign-in. The catch-all that
+    // serves index.html deliberately does not, so the login page can load.
+    this.#router.use((req, res, next) => {
+      const isProtected = req.path.startsWith('/api/') || req.path.startsWith('/media/');
+      if (isProtected && !(req as AuthenticatedRequest).authUser) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      next();
+    });
+
+    const requireAdmin: RequestHandler = (req, res, next) => {
+      if ((req as AuthenticatedRequest).authUser?.role !== 'admin') {
+        res.status(403).json({ error: 'Forbidden' });
+        return;
+      }
+      next();
+    };
+
+    this.#router.get('/api/auth/users', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleListUsersRequest(req, res)
+    );
+
+    this.#router.post('/api/auth/users', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleCreateUserRequest(req, res)
+    );
+
+    this.#router.patch('/api/auth/users/:id', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleUpdateUserRequest(req, res, req.params.id)
+    );
+
+    this.#router.delete('/api/auth/users/:id', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleDeleteUserRequest(req, res, req.params.id)
+    );
 
     this.#router.get([
       '/api/campaigns/:id/posts/filter_options',
@@ -143,6 +200,7 @@ export function getRouter(
   db: DBInstance,
   api: APIInstance,
   dataDir: string,
+  authStore: AuthStore,
   pathToFFmpeg?: string | null,
   logger?: Logger | null
 ) {
@@ -152,6 +210,7 @@ export function getRouter(
     contentAPI: new ContentAPIRequestHandler(api, logger),
     media: new MediaRequestHandler(db, dataDir, videoThumbnailer, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
-    mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger)
-  }).router;
+    mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
+    auth: new AuthAPIRequestHandler(authStore, logger)
+  }, authStore).router;
 }

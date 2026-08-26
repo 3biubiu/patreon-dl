@@ -1,0 +1,53 @@
+.playback-rate {
+  position: fixed;
+  // Clear of lightgallery's own toolbar, which sits along the top edge.
+  top: 4.25rem;
+  right: 1.25rem;
+  // Above the lightbox (1050) and its toolbar.
+  z-index: 1090;
+
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 999px;
+  color: #fff;
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
+
+  &__label {
+    margin: 0;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+
+  &__select {
+    padding: 0.1rem 0.2rem;
+    border: 0;
+    border-radius: var(--bs-border-radius);
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.15);
+    font-size: 0.8rem;
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 2px solid #fff;
+    }
+
+    // The menu itself is drawn by the OS, which does not inherit the dark pill.
+    option {
+      color: initial;
+      background-color: initial;
+    }
+  }
+}
+
+@media (max-width: 575.98px) {
+  .playback-rate {
+    top: auto;
+    bottom: 1.25rem;
+    right: 1rem;
+  }
+}

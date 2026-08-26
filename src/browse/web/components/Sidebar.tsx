@@ -77,12 +77,14 @@ function Sidebar(props: SidebarProps) {
         });
       }
     }
-    items.push(
-      { type: 'divider' },
-      { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' }
-    );
     return items;
   }, [campaignItems, collapsed]);
+
+  // Its own menu, so it can sit at the foot of the panel rather than wherever
+  // the campaign list happens to end.
+  const footerItems = useMemo<MenuProps['items']>(() => [
+    { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' }
+  ], []);
 
   // A campaign stays selected while any of its sub-pages is open.
   const selectedKeys = useMemo(() => {
@@ -111,8 +113,14 @@ function Sidebar(props: SidebarProps) {
   return (
     <div className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
       <div className="sidebar__brand">
-        <Link to="/" onClick={onNavigate} aria-label={APP_NAME}>
-          {collapsed ? <HomeOutlined /> : APP_NAME}
+        <Link
+          to="/"
+          className="sidebar__brand-link"
+          onClick={onNavigate}
+          aria-label={APP_NAME}
+        >
+          <span className="sidebar__logo" aria-hidden="true">B</span>
+          {!collapsed ? <span className="sidebar__brand-text">{APP_NAME}</span> : null}
         </Link>
       </div>
       <div className="sidebar__menu">
@@ -120,6 +128,15 @@ function Sidebar(props: SidebarProps) {
           mode="inline"
           items={items}
           selectedKeys={selectedKeys}
+          onClick={handleClick}
+        />
+      </div>
+      <div className="sidebar__footer">
+        <Menu
+          mode="inline"
+          items={footerItems}
+          // Opens a dialog rather than going anywhere, so it is never current.
+          selectedKeys={[]}
           onClick={handleClick}
         />
       </div>

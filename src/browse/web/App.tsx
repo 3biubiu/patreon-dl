@@ -24,6 +24,7 @@ import CollectionLayout from "./layouts/CollectionLayout";
 import { DocumentProvider } from "./contexts/DocumentProvider";
 import { SidebarProvider } from "./contexts/SidebarProvider";
 import { DARK_SCHEME_QUERY, useMediaQuery } from "./utils/useMediaQuery";
+import PlaybackRateControl from "./components/PlaybackRateControl";
 
 function App() {
   // With the theme picker gone, light / dark simply follows the OS. Both
@@ -75,6 +76,7 @@ function App() {
           <GlobalModalsProvider>
             <DocumentProvider>
               <SidebarProvider>
+                <PlaybackRateControl />
                 <Routes>
                   <Route path="/" element={<MainLayout />} >
                     <Route index element={<CampaignList />} />

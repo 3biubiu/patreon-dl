@@ -5,6 +5,7 @@ import RawDataExtractor from "../utils/RawDataExtractor";
 import { type CampaignWithCounts } from "../../types/Campaign";
 import MediaImage from "./MediaImage";
 import { getCampaignBaseUrl } from "../utils/Misc";
+import Icon from "./Icon";
 
 interface CampaignCardProps {
   campaign: CampaignWithCounts;
@@ -29,7 +30,7 @@ function CampaignCard(props: CampaignCardProps) {
     if (count > 0) {
       result.push((
         <Stack key={`${campaign.id}:${key}`} direction="horizontal" style={{alignSelf: 'auto'}}>
-          <span className="campaign-card__count-icon material-icons-outlined">{icon}</span>
+          <Icon name={icon} outlined className="campaign-card__count-icon" />
           <span className="campaign-card__count-text">{count}</span>
         </Stack>
       ));

@@ -12,6 +12,7 @@ import lgZoom from 'lightgallery/plugins/zoom';
 import lgVideo from 'lightgallery/plugins/video';
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
 import path from "path";
+import Icon from "./Icon";
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
@@ -145,7 +146,7 @@ function MediaGrid(props: MediaGridProps) {
       {
         lgItemProps.length > 1 ?
           <Badge className="media-grid__badge d-flex align-items-center">
-            <span className="material-icons me-2">image</span>
+            <Icon name="image" className="me-2" />
             {lgItemProps.length}
           </Badge>
           : null

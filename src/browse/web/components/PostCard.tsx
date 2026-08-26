@@ -16,6 +16,7 @@ import lgZoom from 'lightgallery/plugins/zoom';
 import lgVideo from 'lightgallery/plugins/video';
 import FadeContent from "./FadeContent";
 import { getCampaignBaseUrl, getContentUrl, getFileIcon } from "../utils/Misc";
+import Icon from "./Icon";
 
 interface PostCardProps {
   post: Post;
@@ -131,7 +132,7 @@ function PostCard(props: PostCardProps) {
                   data-media-id={id}
                   className={`post-card__attachment ${id === highlightMediaId ? 'post-card__attachment--highlighted' : ''}`}
                 >
-                  <span className="material-icons-outlined post-card__attachment-icon">{getFileIcon(title)}</span>
+                  <Icon name={getFileIcon(title)} outlined className="post-card__attachment-icon" />
                   <a href={url}>{title}</a>
                 </li>
               ))
@@ -248,7 +249,7 @@ function PostCard(props: PostCardProps) {
         <Card.Title className="m-0">{titleEl}</Card.Title>
         {
           !post.isViewable ? (
-            <span className="material-icons text-body-secondary">lock</span>
+            <Icon name="lock" className="text-body-secondary" />
           ) : null
         }
       </Stack>
@@ -263,7 +264,7 @@ function PostCard(props: PostCardProps) {
         {
           post.commentCount > 0 ? (
             <Stack direction="horizontal" gap={2}>
-              <span className="material-icons" style={{ fontSize: '1.2em' }}>comment</span>
+              <Icon name="comment" style={{ fontSize: '1.2em' }} />
               <span>{post.commentCount}</span>
             </Stack>
           ) : null

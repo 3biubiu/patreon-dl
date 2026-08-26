@@ -1,6 +1,7 @@
 import "../assets/styles/LightGalleryItem.scss";
 import { useEffect, useState } from "react";
 import { Badge, Card } from "react-bootstrap";
+import Icon from "./Icon";
 
 export interface LightGalleryItemProps {
   id: string;
@@ -66,9 +67,12 @@ function LightGalleryItem(props: LightGalleryItemProps) {
         )
         : (
           <Card className="w-100 h-100 d-flex align-items-center justify-content-center">
-            <span className="material-icons-outlined text-secondary" style={{fontSize: '5em'}}>
-              {dataVideo ? 'movie' : 'description'}
-            </span>
+            <Icon
+              name={dataVideo ? 'movie' : 'description'}
+              outlined
+              className="text-secondary"
+              style={{fontSize: '5em'}}
+            />
           </Card>
         )
       }

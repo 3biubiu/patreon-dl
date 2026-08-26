@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { type Post } from "../../../entities";
 import { getCampaignBaseUrl, getContentUrl } from "../utils/Misc";
 import PostThumbnail from "./PostThumbnail";
+import Icon from "./Icon";
 
 interface PostListProps {
   posts: Post[];
@@ -41,7 +42,7 @@ function PostList(props: PostListProps) {
                   </Link>
                   {
                     !post.isViewable ? (
-                      <span className="material-icons text-body-secondary flex-shrink-0">lock</span>
+                      <Icon name="lock" className="text-body-secondary flex-shrink-0" />
                     ) : null
                   }
                 </Stack>
@@ -54,7 +55,7 @@ function PostList(props: PostListProps) {
                   {
                     post.commentCount > 0 ? (
                       <Stack direction="horizontal" gap={2}>
-                        <span className="material-icons" style={{ fontSize: '1.2em' }}>comment</span>
+                        <Icon name="comment" style={{ fontSize: '1.2em' }} />
                         <span>{post.commentCount}</span>
                       </Stack>
                     ) : null

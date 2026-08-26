@@ -1,5 +1,6 @@
 import "../assets/styles/SliderArrow.scss";
 import { Button }from "react-bootstrap";
+import Icon from "./Icon";
 
 interface ArrowProps {
   type: 'prev' | 'next';
@@ -25,7 +26,7 @@ function SliderArrow(props: ArrowProps) {
       onClick={onClick}
       variant="primary"
     >
-      <span className="slider-arrow__icon material-icons">{iconName}</span>
+      <Icon name={iconName} className="slider-arrow__icon" />
     </Button>
   )
 }

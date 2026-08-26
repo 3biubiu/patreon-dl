@@ -13,6 +13,7 @@ import lgVideo from 'lightgallery/plugins/video';
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
 import PdfViewerModal, { type PdfViewerTarget } from "./PdfViewerModal";
 import { formatFileSize, getContentUrlForMedia, getFileExtension, getFileIcon } from "../utils/Misc";
+import Icon from "./Icon";
 
 interface MediaGalleryProps {
   items: MediaListItem<any>[];
@@ -162,12 +163,12 @@ function FileTile(props: { file: FileProps }) {
       href={file.downloadURL}
       title={`Download ${file.filename}`}
     >
-      <span className="material-icons-outlined media-gallery__file-icon">{file.icon}</span>
+      <Icon name={file.icon} outlined className="media-gallery__file-icon" />
       <span className="media-gallery__file-name">{file.filename}</span>
       <span className="media-gallery__file-meta">
         {file.extension ? <span className="media-gallery__file-ext">{file.extension}</span> : null}
         {file.size ? <span>{file.size}</span> : null}
-        <span className="material-icons media-gallery__file-download">download</span>
+        <Icon name="download" className="media-gallery__file-download" />
       </span>
     </a>
   );
@@ -249,7 +250,7 @@ function MediaGallery(props: MediaGalleryProps) {
                   className="media-gallery__source"
                   title={`Go to "${tile.sourceTitle}"`}
                 >
-                  <span className="material-icons media-gallery__source-icon">subdirectory_arrow_left</span>
+                  <Icon name="subdirectory_arrow_left" className="media-gallery__source-icon" />
                   <span className="media-gallery__source-title">{tile.sourceTitle}</span>
                 </Link>
               ) : null

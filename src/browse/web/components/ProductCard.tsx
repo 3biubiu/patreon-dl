@@ -11,6 +11,7 @@ import path from "path";
 import MediaImage from "./MediaImage";
 import { ProductType } from "../../../entities/Product";
 import { getCampaignBaseUrl, getContentUrl } from "../utils/Misc";
+import Icon from "./Icon";
 
 interface ProductCardProps {
   product: Product;
@@ -239,7 +240,7 @@ function ProductCard(props: ProductCardProps) {
             </Card.Title>
             {
               !product.isAccessible ? (
-                <span className="material-icons text-body-secondary">lock</span>
+                <Icon name="lock" className="text-body-secondary" />
               ) : null
             }
           </Stack>

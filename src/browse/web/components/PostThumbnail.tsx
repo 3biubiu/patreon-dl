@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { type Post } from "../../../entities";
 import { getPostThumbnailCandidates, postHasVideo } from "../utils/Misc";
+import Icon from "./Icon";
 
 interface PostThumbnailProps {
   post: Post;
@@ -36,9 +37,11 @@ function PostThumbnail(props: PostThumbnailProps) {
 
   if (!candidate) {
     return (
-      <span className={`material-icons-outlined ${classNamePrefix}__thumbnail-placeholder`}>
-        {postHasVideo(post) ? 'movie' : 'article'}
-      </span>
+      <Icon
+        name={postHasVideo(post) ? 'movie' : 'article'}
+        outlined
+        className={`${classNamePrefix}__thumbnail-placeholder`}
+      />
     );
   }
   return (
@@ -54,7 +57,7 @@ function PostThumbnail(props: PostThumbnailProps) {
       {
         isVideoCover ? (
           <span className={`${classNamePrefix}__play`} aria-hidden="true">
-            <span className="material-icons">play_arrow</span>
+            <Icon name="play_arrow" />
           </span>
         ) : null
       }

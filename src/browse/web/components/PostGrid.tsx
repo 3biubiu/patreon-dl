@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { type Post } from "../../../entities";
 import { getContentUrl } from "../utils/Misc";
 import PostThumbnail from "./PostThumbnail";
+import Icon from "./Icon";
 
 interface PostGridProps {
   posts: Post[];
@@ -36,7 +37,7 @@ function PostGrid(props: PostGridProps) {
                 <PostThumbnail post={post} classNamePrefix="post-grid" />
                 {
                   !post.isViewable ? (
-                    <span className="material-icons post-grid__lock">lock</span>
+                    <Icon name="lock" className="post-grid__lock" />
                   ) : null
                 }
               </div>

@@ -95,13 +95,13 @@ function TranscriptionSettings() {
   }, [ api ]);
 
   if (!settings) {
-    return error ? <Alert type="error" message={error} showIcon /> : <LoadingBlock />;
+    return error ? <Alert type="error" title={error} showIcon /> : <LoadingBlock />;
   }
 
   const fromEnvironment = settings.source === 'env';
 
   return (
-    <Space direction="vertical" size="middle" style={{ display: 'flex', maxWidth: '44rem' }}>
+    <Space orientation="vertical" size="middle" style={{ display: 'flex', maxWidth: '44rem' }}>
       <Card title="OpenRouter">
         <Descriptions column={1} size="small">
           <Descriptions.Item label="Status">
@@ -137,15 +137,15 @@ function TranscriptionSettings() {
             <Alert
               type="warning"
               showIcon
-              message="A key is configured, but it could not be checked just now"
+              title="A key is configured, but it could not be checked just now"
               description={settings.keyError}
             />
           ) : null
         }
       </Card>
 
-      {error ? <Alert type="error" message={error} showIcon closable onClose={() => setError(null)} /> : null}
-      {saved ? <Alert type="success" message="Settings saved" showIcon closable onClose={() => setSaved(false)} /> : null}
+      {error ? <Alert type="error" title={error} showIcon closable={{ onClose: () => setError(null) }} /> : null}
+      {saved ? <Alert type="success" title="Settings saved" showIcon closable={{ onClose: () => setSaved(false) }} /> : null}
 
       <Card title="Settings">
         <Form form={form} layout="vertical" onFinish={(v) => void handleSubmit(v)} disabled={submitting}>

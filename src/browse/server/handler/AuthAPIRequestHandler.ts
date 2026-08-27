@@ -2,6 +2,7 @@ import { type Request, type Response } from 'express';
 import { type Logger } from '../../../utils/logging/index.js';
 import Basehandler from './BaseHandler.js';
 import type AuthStore from '../AuthStore.js';
+import type HistoryStore from '../HistoryStore.js';
 import { clearSession, issueSession, type AuthenticatedRequest } from '../AuthGuard.js';
 import { type UserRole } from '../../types/Auth.js';
 
@@ -11,14 +12,38 @@ function readRole(value: unknown): UserRole | undefined {
   return ROLES.includes(value as UserRole) ? value as UserRole : undefined;
 }
 
+/**
+ * The campaign restriction as it arrived over the wire.
+ *
+ * Three outcomes, all of them meaningful: `undefined` (the field was not sent -
+ * leave the restriction alone), `null` (every campaign) and an array (only
+ * these, an empty one included). Anything else is rejected rather than guessed
+ * at, so a malformed body cannot widen a permission.
+ */
+function readVisibleCampaigns(body: unknown): string[] | null | undefined {
+  if (!body || typeof body !== 'object' || !('visibleCampaigns' in body)) {
+    return undefined;
+  }
+  const value = (body as { visibleCampaigns: unknown }).visibleCampaigns;
+  if (value === null) {
+    return null;
+  }
+  if (Array.isArray(value) && value.every((id) => typeof id === 'string')) {
+    return value as string[];
+  }
+  throw Error('"visibleCampaigns" must be an array of campaign ids, or null');
+}
+
 export default class AuthAPIRequestHandler extends Basehandler {
   name = 'AuthAPIRequestHandler';
 
   #store: AuthStore;
+  #historyStore: HistoryStore;
 
-  constructor(store: AuthStore, logger?: Logger | null) {
+  constructor(store: AuthStore, historyStore: HistoryStore, logger?: Logger | null) {
     super(logger);
     this.#store = store;
+    this.#historyStore = historyStore;
   }
 
   handleLoginRequest(req: Request, res: Response) {
@@ -60,7 +85,8 @@ export default class AuthAPIRequestHandler extends Basehandler {
       return;
     }
     try {
-      res.json({ user: this.#store.createUser({ username, password, role }) });
+      const visibleCampaigns = readVisibleCampaigns(req.body);
+      res.json({ user: this.#store.createUser({ username, password, role, visibleCampaigns }) });
     }
     catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'Could not create user' });
@@ -71,7 +97,8 @@ export default class AuthAPIRequestHandler extends Basehandler {
     const { password } = (req.body || {}) as { password?: string; };
     const role = readRole((req.body as { role?: unknown } | undefined)?.role);
     try {
-      const user = this.#store.updateUser(id, { password, role });
+      const visibleCampaigns = readVisibleCampaigns(req.body);
+      const user = this.#store.updateUser(id, { password, role, visibleCampaigns });
       // Changing your own password does not sign you out: the session names a
       // user id, and that has not changed.
       res.json({ user });
@@ -88,6 +115,9 @@ export default class AuthAPIRequestHandler extends Basehandler {
     }
     try {
       this.#store.deleteUser(id);
+      // Nothing can sign in as this account any more, so what it watched is
+      // just a file that grows.
+      this.#historyStore.forgetUser(id);
       res.json({ ok: true });
     }
     catch (error) {

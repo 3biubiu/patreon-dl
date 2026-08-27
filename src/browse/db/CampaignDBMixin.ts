@@ -211,8 +211,16 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
     }
 
     getCampaignList(params: GetCampaignListParams): CampaignList {
-      const { sortBy, limit, offset } = params;
+      const { sortBy, limit, offset, campaignIds } = params;
       this.log('debug', 'Get campaigns from DB:', params);
+      // A caller permitted no campaigns is answered without asking the DB:
+      // an empty list in SQL would be "IN ()", which SQLite will not parse.
+      if (campaignIds && campaignIds.length === 0) {
+        return { campaigns: [], total: 0 };
+      }
+      const scopeClause = campaignIds ?
+        `WHERE campaign.campaign_id IN (${campaignIds.map(() => '?').join(', ')})` : '';
+      const scopeValues = campaignIds || [];
       let orderByClause: string;
       switch (sortBy) {
         case 'a-z':
@@ -285,10 +293,11 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
             LEFT JOIN (${productCountSelect}) productc ON productc.campaign_id = campaign.campaign_id 
             LEFT JOIN (${mediaCountSelect}) mc ON mc.campaign_id = campaign.campaign_id 
             LEFT JOIN (${collectionCountSelect}) cc ON cc.campaign_id = campaign.campaign_id
+          ${scopeClause}
           ${orderByClause}
           ${limitOffsetClause}
           `,
-          [...limitOffsetValues]
+          [...scopeValues, ...limitOffsetValues]
         );
         const campaigns = rows.map((row) => ({
           ...JSON.parse(row.details) as Campaign,
@@ -298,7 +307,8 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
           mediaCount: (row.media_count || 0) as number
         }));
         const totalResult = this.get(
-          `SELECT COUNT(*) AS campaign_count FROM campaign`
+          `SELECT COUNT(*) AS campaign_count FROM campaign ${scopeClause}`,
+          [...scopeValues]
         );
         const total = totalResult ? (totalResult.campaign_count as number) : 0;
         return {
@@ -394,6 +404,166 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
           `Failed to get campaign by creator #${creatorId} from DB:`,
           error
         );
+        return null;
+      }
+    }
+
+    /**
+     * The campaign a post or product belongs to, or `null` if there is no such
+     * content. Campaign permissions are checked against this before anything
+     * reached by content id is served.
+     */
+    getCampaignIdForContent(id: string, contentType: 'post' | 'product'): string | null {
+      try {
+        const result = this.get(
+          `SELECT campaign_id FROM content WHERE content_id = ? AND content_type = ?`,
+          [id, contentType]
+        );
+        return (result?.campaign_id as string | undefined) || null;
+      } catch (error) {
+        this.log('error', `Failed to get campaign for ${contentType} #${id} from DB:`, error);
+        return null;
+      }
+    }
+
+    /** The campaign a collection belongs to, or `null` if there is no such collection. */
+    getCampaignIdForCollection(id: string): string | null {
+      try {
+        const result = this.get(
+          `SELECT campaign_id FROM collection WHERE collection_id = ?`,
+          [id]
+        );
+        return (result?.campaign_id as string | undefined) || null;
+      } catch (error) {
+        this.log('error', `Failed to get campaign for collection #${id} from DB:`, error);
+        return null;
+      }
+    }
+
+    /**
+     * The campaign a media file belongs to, or `null` when nothing ties it to
+     * one.
+     *
+     * Most media are reached through `content_media`. The ones that are not
+     * are the images a parser synthesises for the record they hang off - a
+     * post's cover, a collection's thumbnail, a creator's avatar - which go
+     * into `media` alone and carry their owner in the id itself
+     * (`post:<id>:cover` and the like). Those have to be resolved through
+     * whatever the prefix names: read only `content_media` and every one of
+     * them looks campaign-less, which is to say visible to everybody.
+     */
+    getCampaignIdForMedia(id: string): string | null {
+      const synthetic = /^(post|product|campaign|collection|reward|user):([^:]+):[^:]+$/.exec(id);
+      if (synthetic) {
+        const [ , ownerType, ownerId ] = synthetic;
+        switch (ownerType) {
+          case 'campaign':
+            return ownerId;
+          case 'post':
+          case 'product':
+            return this.getCampaignIdForContent(ownerId, ownerType);
+          case 'collection':
+            return this.getCampaignIdForCollection(ownerId);
+          case 'reward':
+            return this.#getCampaignIdForReward(ownerId);
+          case 'user':
+            return this.getCampaignIdByCreatorId(ownerId);
+        }
+      }
+      try {
+        const result = this.get(
+          `SELECT campaign_id FROM content_media WHERE media_id = ?`,
+          [id]
+        );
+        return (result?.campaign_id as string | undefined) || null;
+      } catch (error) {
+        this.log('error', `Failed to get campaign for media #${id} from DB:`, error);
+        return null;
+      }
+    }
+
+    #getCampaignIdForReward(id: string): string | null {
+      try {
+        const result = this.get(
+          `SELECT campaign_id FROM reward WHERE reward_id = ? LIMIT 1`,
+          [id]
+        );
+        return (result?.campaign_id as string | undefined) || null;
+      } catch (error) {
+        this.log('error', `Failed to get campaign for reward #${id} from DB:`, error);
+        return null;
+      }
+    }
+
+    /**
+     * Title and creator of a post or product - enough to show it in a list
+     * without loading and parsing the whole record.
+     */
+    getContentSummary(id: string, contentType: 'post' | 'product') {
+      try {
+        const result = this.get(
+          `
+          SELECT content.title, content.campaign_id, campaign.campaign_name
+          FROM content
+            LEFT JOIN campaign ON campaign.campaign_id = content.campaign_id
+          WHERE content.content_id = ? AND content.content_type = ?
+          `,
+          [id, contentType]
+        );
+        if (!result) {
+          return null;
+        }
+        return {
+          title: (result.title as string | null) || null,
+          campaignId: (result.campaign_id as string | null) || null,
+          campaignName: (result.campaign_name as string | null) || null
+        };
+      } catch (error) {
+        this.log('error', `Failed to get summary for ${contentType} #${id} from DB:`, error);
+        return null;
+      }
+    }
+
+    /** The post or product a media file was downloaded as part of. */
+    getContentMediaOwner(mediaId: string) {
+      try {
+        const result = this.get(
+          `SELECT content_id, content_type FROM content_media WHERE media_id = ?`,
+          [mediaId]
+        );
+        if (!result?.content_id) {
+          return null;
+        }
+        return {
+          contentId: result.content_id as string,
+          contentType: result.content_type as 'post' | 'product'
+        };
+      } catch (error) {
+        this.log('error', `Failed to get owner of media #${mediaId} from DB:`, error);
+        return null;
+      }
+    }
+
+    /**
+     * The first of `candidates` that was actually downloaded, or `null`.
+     *
+     * Used to pick a picture for something that may have several to offer and
+     * may equally have none of them - a post's thumbnail, then its cover.
+     */
+    getExistingMediaId(candidates: string[]): string | null {
+      if (candidates.length === 0) {
+        return null;
+      }
+      try {
+        const rows = this.all(
+          `SELECT media_id FROM media WHERE media_id IN (${candidates.map(() => '?').join(', ')})`,
+          [...candidates]
+        );
+        const found = new Set(rows.map((row) => row.media_id as string));
+        // Order of preference is the caller's, not the database's.
+        return candidates.find((id) => found.has(id)) || null;
+      } catch (error) {
+        this.log('error', 'Failed to look up media ids in DB:', error);
         return null;
       }
     }

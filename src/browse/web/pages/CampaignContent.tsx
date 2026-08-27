@@ -139,10 +139,10 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
     }
     const abortController = new AbortController();
     void (async () => {
-      const { collection, campaignId } = await api.getCollection(collectionId);
-      const campaign = await api.getCampaign({ id: campaignId });
+      const found = await api.getCollection(collectionId);
+      const campaign = found ? await api.getCampaign({ id: found.campaignId }) : null;
       if (!abortController.signal.aborted) {
-        setCollection(collection);
+        setCollection(found?.collection || null);
         setCampaign(campaign);
       }
     })();

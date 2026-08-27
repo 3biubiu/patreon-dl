@@ -8,6 +8,12 @@ import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
+import {
+  type RecordWatchedVideoRequest,
+  type ViewedPostListItem,
+  type WatchedVideo,
+  type WatchedVideoListItem
+} from '../../types/History';
 
 interface APIProviderProps {
   children: React.ReactNode;
@@ -100,7 +106,7 @@ class API {
     id?: never;
     vanity: string;
     withCounts?: true;
-  }): Promise<CampaignWithCounts>
+  }): Promise<CampaignWithCounts | null>
   async getCampaign(params: {
     id: string;
     vanity?: never;
@@ -109,7 +115,7 @@ class API {
     id?: never;
     vanity: string;
     withCounts?: false;
-  }): Promise<Campaign>
+  }): Promise<Campaign | null>
   async getCampaign(params: {
     id: string;
     vanity?: never;
@@ -118,7 +124,7 @@ class API {
     id?: never;
     vanity: string;
     withCounts?: boolean;
-  }): Promise<Campaign | CampaignWithCounts>
+  }): Promise<Campaign | CampaignWithCounts | null>
   async getCampaign(params: {
     id: string;
     vanity?: never;
@@ -139,6 +145,12 @@ class API {
     }
     urlObj.searchParams.append('with_counts', withCounts ? 'true' : 'false' );
     const result = await apiFetch(urlObj.toString());
+    // A creator that is not there and one this account may not see answer the
+    // same way, on purpose. Callers get `null` for both rather than an error
+    // body they would otherwise spread into a half-built campaign.
+    if (!result.ok) {
+      return null;
+    }
     return await result.json();
   }
 
@@ -168,9 +180,12 @@ class API {
     return await result.json();
   }
 
-  async getCollection(id: string): Promise<{ collection: Collection; campaignId: string; }> {
+  async getCollection(id: string): Promise<{ collection: Collection; campaignId: string; } | null> {
     const urlObj = new URL(`/api/collections/${id}`, window.location.href);
     const result = await apiFetch(urlObj.toString());
+    if (!result.ok) {
+      return null;
+    }
     return await result.json();
   }
 
@@ -300,6 +315,71 @@ class API {
 
   async deleteUser(id: string): Promise<void> {
     await readJSON(await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE' }));
+  }
+
+  /**
+   * Where this account had got to in a video, or `null` - which is the answer
+   * both for one never watched and for one watched long enough ago to have
+   * dropped out of the entries the server keeps.
+   */
+  async getWatchedVideo(mediaId: string, postId?: string | null): Promise<WatchedVideo | null> {
+    const urlObj = this.#historyVideoURL(mediaId, postId);
+    const result = await apiFetch(urlObj.toString());
+    if (!result.ok) {
+      return null;
+    }
+    const data = await result.json() as { video: WatchedVideo | null };
+    return data.video;
+  }
+
+  /**
+   * `keepalive` lets the last report of a session outlive the page that sent
+   * it, which is the only way the position survives a tab being closed
+   * mid-video.
+   */
+  async recordWatchedVideo(
+    mediaId: string,
+    params: RecordWatchedVideoRequest,
+    keepalive = false
+  ): Promise<void> {
+    await apiFetch(this.#historyVideoURL(mediaId, params.postId).toString(), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+      keepalive
+    });
+  }
+
+  /** The videos this account may resume, most recent first. */
+  async listWatchedVideos(): Promise<WatchedVideoListItem[]> {
+    const data = await readJSON(await apiFetch('/api/history/videos'));
+    return data.videos as WatchedVideoListItem[];
+  }
+
+  async listViewedPosts(): Promise<ViewedPostListItem[]> {
+    const data = await readJSON(await apiFetch('/api/history/posts'));
+    return data.posts as ViewedPostListItem[];
+  }
+
+  async recordViewedPost(postId: string): Promise<void> {
+    await apiFetch(`/api/history/posts/${encodeURIComponent(postId)}`, { method: 'PUT' });
+  }
+
+  /**
+   * The post is named in the query string as well as the body because the
+   * permission check runs before the body is looked at - a linked attachment
+   * has no row tying it to a campaign, and the post it hangs off is the only
+   * thing that says which creator it belongs to.
+   */
+  #historyVideoURL(mediaId: string, postId?: string | null) {
+    const urlObj = new URL(
+      `/api/history/videos/${encodeURIComponent(mediaId)}`,
+      window.location.href
+    );
+    if (postId) {
+      urlObj.searchParams.set('lapid', postId);
+    }
+    return urlObj;
   }
 
   async getTranscriptionAvailability(): Promise<TranscriptionAvailability> {

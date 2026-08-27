@@ -2,6 +2,7 @@ import "../assets/styles/PlayerControls.scss";
 import { createPortal } from "react-dom";
 import useActiveVideo from "../utils/useActiveVideo";
 import useLightboxToolbar from "../utils/useLightboxToolbar";
+import useWatchHistory from "../utils/useWatchHistory";
 import PlaybackRateControl from "./PlaybackRateControl";
 import SubtitleControl from "./SubtitleControl";
 
@@ -24,6 +25,9 @@ import SubtitleControl from "./SubtitleControl";
 function PlayerControls() {
   const video = useActiveVideo();
   const toolbar = useLightboxToolbar(video);
+  // Not a control, but this is the one place that already knows which video is
+  // playing, and it is mounted for the whole session.
+  useWatchHistory(video);
 
   if (!video) {
     return null;

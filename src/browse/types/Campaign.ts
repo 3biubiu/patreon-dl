@@ -21,6 +21,15 @@ export interface GetCampaignListParams {
   sortBy?: CampaignListSortBy;
   limit?: number;
   offset?: number;
+  /**
+   * Restricts the list to these campaign ids. `null` or omitted means no
+   * restriction. An empty array yields an empty list - a user permitted no
+   * campaigns must not be shown all of them.
+   *
+   * Applied in SQL rather than to the returned page, so `total` and the
+   * paging built on it describe what the caller may actually see.
+   */
+  campaignIds?: string[] | null;
 }
 
 export interface CampaignList {

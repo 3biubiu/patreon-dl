@@ -1,4 +1,5 @@
 import { Container, Row, Col } from "react-bootstrap";
+import { Result } from "antd";
 import { Outlet, useParams } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useEffect, useState } from "react";
@@ -21,10 +22,12 @@ function CampaignLayout() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
   const [campaign, setCampaign] = useState<CampaignLayoutOutletContext['campaign']>(null);
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     const abortController = new AbortController();
     setCampaign(null);
+    setMissing(false);
     void (async () => {
       let campaign;
       if (campaignId) {
@@ -33,6 +36,12 @@ function CampaignLayout() {
         campaign = await api.getCampaign({ vanity: decodeURIComponent(vanity!), withCounts: true });
       }
       if (!abortController.signal.aborted) {
+        // No such creator, or one this account is not permitted - which of the
+        // two it is deliberately cannot be told apart from here.
+        if (!campaign) {
+          setMissing(true);
+          return;
+        }
         setCampaign({
           ...campaign,
           baseUrl: getCampaignBaseUrl(campaign)
@@ -46,6 +55,16 @@ function CampaignLayout() {
   useEffect(() => {
     setTitle(campaign?.name || null);
   }, [setTitle, campaign]);
+
+  if (missing) {
+    return (
+      <Result
+        status="404"
+        title="Creator not available"
+        subTitle="This creator is not in the library, or is not one your account can see."
+      />
+    );
+  }
 
   if (!campaign) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;

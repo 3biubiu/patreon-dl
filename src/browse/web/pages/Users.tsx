@@ -1,23 +1,42 @@
 import "../assets/styles/Users.scss";
-import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag } from "antd";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Alert, Button, Form, Input, Modal, Popconfirm, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
 import { DeleteOutlined, EditOutlined, UserAddOutlined } from "@ant-design/icons";
+import { type FormInstance } from "antd";
 import { type AuthUser, type UserRole } from "../../types/Auth";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
 
+/**
+ * The permission is two fields in the form and one on the wire: "all" sends
+ * `null`, "selected" sends the list. Splitting them keeps an empty selection
+ * from reading as "not set yet" - it means no creators, and the form has to be
+ * able to say so.
+ */
+type CampaignAccess = 'all' | 'selected';
+
 interface UserFormValues {
   username: string;
   password: string;
   role: UserRole;
+  campaignAccess: CampaignAccess;
+  visibleCampaigns: string[];
 }
 
 const ROLE_OPTIONS = [
   { value: 'user', label: 'User' },
   { value: 'admin', label: 'Administrator' }
 ];
+
+const CAMPAIGN_ACCESS_OPTIONS = [
+  { value: 'all', label: 'All creators' },
+  { value: 'selected', label: 'Only selected' }
+];
+
+/** Enough to hold every creator in one go for all but the largest libraries. */
+const CAMPAIGN_FETCH_SIZE = 500;
 
 /**
  * User management, reachable only by administrators - the route is hidden from
@@ -28,6 +47,7 @@ function Users() {
   const { user: currentUser } = useAuth();
   const { setTitle } = useDocument();
   const [ users, setUsers ] = useState<AuthUser[] | null>(null);
+  const [ campaigns, setCampaigns ] = useState<{ id: string; name: string; }[] | null>(null);
   const [ error, setError ] = useState<string | null>(null);
   const [ editing, setEditing ] = useState<AuthUser | 'new' | null>(null);
   const [ submitting, setSubmitting ] = useState(false);
@@ -51,12 +71,59 @@ function Users() {
     void refresh();
   }, [refresh]);
 
+  // The creators to choose from. An administrator is unrestricted, so this is
+  // the full list - which is also what makes it the right list to grant from.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        let list = await api.getCampaignList({ itemsPerPage: CAMPAIGN_FETCH_SIZE });
+        if (list.total > list.campaigns.length) {
+          list = await api.getCampaignList({ itemsPerPage: list.total });
+        }
+        if (!cancelled) {
+          setCampaigns(list.campaigns.map(({ id, name }) => ({ id, name })));
+        }
+      }
+      catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : 'Could not load creators');
+          setCampaigns([]);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [api]);
+
+  const campaignOptions = useMemo(
+    () => (campaigns || []).map(({ id, name }) => ({ value: id, label: name })),
+    [campaigns]
+  );
+
+  const campaignNames = useMemo(
+    () => new Map((campaigns || []).map(({ id, name }) => [ id, name ])),
+    [campaigns]
+  );
+
+  // A campaign can be removed from the library while an account still names
+  // it, so an id with no name left is shown as itself rather than dropped -
+  // a permission that silently loses entries is worse than an ugly one.
+  const describeScope = useCallback((ids: string[]) =>
+    ids.map((id) => campaignNames.get(id) || id), [campaignNames]);
+
   const openEditor = useCallback((target: AuthUser | 'new') => {
     setError(null);
     setEditing(target);
     form.setFieldsValue(target === 'new' ?
-      { username: '', password: '', role: 'user' }
-      : { username: target.username, password: '', role: target.role }
+      { username: '', password: '', role: 'user', campaignAccess: 'all', visibleCampaigns: [] }
+      : {
+        username: target.username,
+        password: '',
+        role: target.role,
+        campaignAccess: target.visibleCampaigns ? 'selected' : 'all',
+        visibleCampaigns: target.visibleCampaigns || []
+      }
     );
   }, [form]);
 
@@ -65,16 +132,27 @@ function Users() {
       return;
     }
     setSubmitting(true);
+    // An administrator is unrestricted whatever the form last showed, so the
+    // selection is not carried over when someone is promoted.
+    const visibleCampaigns =
+      values.role === 'admin' || values.campaignAccess === 'all' ?
+        null : (values.visibleCampaigns || []);
     try {
       if (editing === 'new') {
-        await api.createUser(values);
+        await api.createUser({
+          username: values.username,
+          password: values.password,
+          role: values.role,
+          visibleCampaigns
+        });
       }
       else {
         // An empty password box means "leave it alone" rather than "set it to
         // nothing", which is why it is not simply passed through.
         await api.updateUser(editing.id, {
           role: values.role,
-          password: values.password || undefined
+          password: values.password || undefined,
+          visibleCampaigns
         });
       }
       setEditing(null);
@@ -143,6 +221,26 @@ function Users() {
                 {role === 'admin' ? 'Administrator' : 'User'}
               </Tag>
             )
+          },
+          {
+            title: 'Creators',
+            dataIndex: 'visibleCampaigns',
+            render: (visibleCampaigns: string[] | null) => {
+              if (!visibleCampaigns) {
+                return <Tag>All</Tag>;
+              }
+              if (visibleCampaigns.length === 0) {
+                return <Tag color="red">None</Tag>;
+              }
+              const names = describeScope(visibleCampaigns);
+              return (
+                <Tooltip title={names.join(', ')}>
+                  <Tag color="blue">
+                    {names.length === 1 ? names[0] : `${names.length} creators`}
+                  </Tag>
+                </Tooltip>
+              );
+            }
           },
           {
             title: 'Added',
@@ -216,9 +314,69 @@ function Users() {
           <Form.Item name="role" label="Role">
             <Select options={ROLE_OPTIONS} />
           </Form.Item>
+          <CampaignAccessFields
+            form={form}
+            options={campaignOptions}
+            loading={campaigns === null}
+          />
         </Form>
       </Modal>
     </div>
+  );
+}
+
+/**
+ * The creator restriction, which only applies to ordinary users.
+ *
+ * Its own component so that watching the role and the access mode re-renders
+ * this and not the whole page - the user table above it is not cheap.
+ */
+function CampaignAccessFields(props: {
+  form: FormInstance<UserFormValues>;
+  options: { value: string; label: string; }[];
+  loading: boolean;
+}) {
+  const { form, options, loading } = props;
+  const role = Form.useWatch('role', form);
+  const access = Form.useWatch('campaignAccess', form);
+
+  if (role === 'admin') {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        title="Administrators can see every creator"
+        description={
+          'Anyone who can edit permissions can lift their own, so a restriction ' +
+          'here would not hold. Make the account a user to limit it.'
+        }
+      />
+    );
+  }
+
+  return (
+    <>
+      <Form.Item name="campaignAccess" label="Creators">
+        <Radio.Group options={CAMPAIGN_ACCESS_OPTIONS} optionType="button" />
+      </Form.Item>
+      {
+        access === 'selected' ? (
+          <Form.Item
+            name="visibleCampaigns"
+            extra="Everything belonging to the other creators is hidden and refused - their posts, media and files, not just their place in the list."
+          >
+            <Select
+              mode="multiple"
+              allowClear
+              loading={loading}
+              options={options}
+              showSearch={{ optionFilterProp: 'label' }}
+              placeholder="Choose the creators this user may see"
+            />
+          </Form.Item>
+        ) : null
+      }
+    </>
   );
 }
 

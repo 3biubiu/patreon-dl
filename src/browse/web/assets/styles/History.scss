@@ -1,0 +1,68 @@
+.history {
+  width: 100%;
+  padding: 1.5rem 1rem 3rem;
+
+  &__header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+
+  &__note {
+    color: var(--bs-secondary-color);
+    font-size: 0.875rem;
+  }
+
+  &__thumbnail {
+    width: 80px;
+    height: 45px;
+    object-fit: cover;
+    border-radius: 4px;
+    display: block;
+
+    &--empty {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bs-tertiary-bg);
+      color: var(--bs-secondary-color);
+    }
+  }
+
+  &__entry {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  &__title {
+    // Long post titles are the norm, and wrapping them keeps the row height
+    // predictable where an ellipsis would hide what the entry actually was.
+    overflow-wrap: anywhere;
+
+    &--gone {
+      color: var(--bs-secondary-color);
+    }
+  }
+
+  &__progress {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+  }
+
+  &__progress-text {
+    color: var(--bs-secondary-color);
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (min-width: 768px) {
+  .history {
+    padding-inline: 1.5rem;
+  }
+}

@@ -27,6 +27,31 @@ const SCRYPT_KEY_LENGTH = 64;
 const SALT_BYTES = 16;
 const MIN_PASSWORD_LENGTH = 6;
 
+/**
+ * The stored form of a campaign restriction.
+ *
+ * Administrators are never restricted, and an empty selection is kept as an
+ * empty array rather than being folded into `null` - the two mean opposite
+ * things, and quietly turning "nothing" into "everything" is the wrong way for
+ * a permission to fail.
+ */
+function normalizeVisibleCampaigns(
+  visibleCampaigns: string[] | null | undefined,
+  role: UserRole
+): string[] | null {
+  if (role === 'admin' || visibleCampaigns === null || visibleCampaigns === undefined) {
+    return null;
+  }
+  if (!Array.isArray(visibleCampaigns)) {
+    throw Error('"visibleCampaigns" must be an array of campaign ids, or null');
+  }
+  const ids = visibleCampaigns
+    .filter((id): id is string => typeof id === 'string')
+    .map((id) => id.trim())
+    .filter((id) => !!id);
+  return [ ...new Set(ids) ];
+}
+
 function hashPassword(password: string, salt: string) {
   return crypto.scryptSync(password, salt, SCRYPT_KEY_LENGTH).toString('base64');
 }
@@ -64,6 +89,12 @@ export default class AuthStore {
       if (!data.secret || !Array.isArray(data.users)) {
         throw Error(`"${filePath}" is not a valid auth file`);
       }
+      // Accounts written before campaign permissions existed have no such
+      // field. They kept seeing everything up to this point, so that is what
+      // they carry on doing until someone narrows them.
+      for (const user of data.users) {
+        user.visibleCampaigns = normalizeVisibleCampaigns(user.visibleCampaigns, user.role);
+      }
       return new AuthStore(filePath, data, logger);
     }
 
@@ -79,6 +110,7 @@ export default class AuthStore {
           username: 'admin',
           role: 'admin',
           createdAt: new Date().toISOString(),
+          visibleCampaigns: null,
           salt,
           passwordHash: hashPassword(password, salt)
         }
@@ -124,7 +156,12 @@ export default class AuthStore {
     return this.#toAuthUser(user);
   }
 
-  createUser(params: { username: string; password: string; role: UserRole; }): AuthUser {
+  createUser(params: {
+    username: string;
+    password: string;
+    role: UserRole;
+    visibleCampaigns?: string[] | null;
+  }): AuthUser {
     const username = params.username.trim();
     if (!username) {
       throw Error('Username is required');
@@ -139,6 +176,7 @@ export default class AuthStore {
       username,
       role: params.role,
       createdAt: new Date().toISOString(),
+      visibleCampaigns: normalizeVisibleCampaigns(params.visibleCampaigns, params.role),
       salt,
       passwordHash: hashPassword(params.password, salt)
     };
@@ -147,7 +185,11 @@ export default class AuthStore {
     return this.#toAuthUser(user);
   }
 
-  updateUser(id: string, params: { password?: string; role?: UserRole; }): AuthUser {
+  updateUser(id: string, params: {
+    password?: string;
+    role?: UserRole;
+    visibleCampaigns?: string[] | null;
+  }): AuthUser {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
       throw Error('User not found');
@@ -160,6 +202,14 @@ export default class AuthStore {
       }
       user.role = params.role;
     }
+    // Whether the restriction was sent or not, it is re-normalized against the
+    // role that now applies: promoting someone to administrator has to drop a
+    // restriction that is about to stop being enforced, rather than leave it
+    // in the file to be silently reapplied if they are demoted again.
+    user.visibleCampaigns = normalizeVisibleCampaigns(
+      params.visibleCampaigns !== undefined ? params.visibleCampaigns : user.visibleCampaigns,
+      user.role
+    );
     if (params.password !== undefined) {
       this.#assertPassword(params.password);
       user.salt = crypto.randomBytes(SALT_BYTES).toString('base64');
@@ -196,8 +246,10 @@ export default class AuthStore {
   }
 
   #toAuthUser(user: StoredUser): AuthUser {
-    const { id, username, role, createdAt } = user;
-    return { id, username, role, createdAt };
+    const { id, username, role, createdAt, visibleCampaigns } = user;
+    // A copy, so a caller cannot reach into the store and edit a permission
+    // in place - the array would otherwise be the live one.
+    return { id, username, role, createdAt, visibleCampaigns: visibleCampaigns ? [ ...visibleCampaigns ] : null };
   }
 
   #save() {

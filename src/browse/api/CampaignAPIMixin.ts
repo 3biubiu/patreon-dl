@@ -10,11 +10,12 @@ const DEFAULT_CAMPAIGN_LIST_SORT_BY: CampaignListSortBy = 'a-z';
 export function CampaignAPIMixin<TBase extends APIConstructor>(Base: TBase) {
   return class CampaignAPI extends Base {
     getCampaignList(params: GetCampaignListParams): CampaignList {
-      const { sortBy = DEFAULT_CAMPAIGN_LIST_SORT_BY, limit = DEFAULT_CAMPAIGN_LIST_SIZE, offset = 0 } = params;
+      const { sortBy = DEFAULT_CAMPAIGN_LIST_SORT_BY, limit = DEFAULT_CAMPAIGN_LIST_SIZE, offset = 0, campaignIds } = params;
       const list = this.db.getCampaignList({
         sortBy,
         limit,
-        offset
+        offset,
+        campaignIds
       });
       for (const campaign of list.campaigns) {
         this.#sanitizeCampaign(campaign);

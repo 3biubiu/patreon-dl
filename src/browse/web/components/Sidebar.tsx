@@ -2,6 +2,7 @@ import "../assets/styles/Sidebar.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Avatar, Menu, type MenuProps } from "antd";
 import {
+  HistoryOutlined,
   HomeOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
@@ -30,6 +31,7 @@ interface SidebarProps {
 }
 
 const SETTINGS_KEY = 'settings';
+const HISTORY_KEY = '/history';
 const USERS_KEY = '/users';
 const TRANSCRIPTION_KEY = '/transcription';
 const SIGN_OUT_KEY = 'sign-out';
@@ -76,7 +78,10 @@ function Sidebar(props: SidebarProps) {
 
   const items = useMemo<MenuProps['items']>(() => {
     const items: NonNullable<MenuProps['items']> = [
-      { key: '/', icon: <HomeOutlined />, label: 'Home' }
+      { key: '/', icon: <HomeOutlined />, label: 'Home' },
+      // Everyone has one of their own, so unlike the entries below it this is
+      // not tied to a role.
+      { key: HISTORY_KEY, icon: <HistoryOutlined />, label: 'History' }
     ];
     if (campaignItems.length > 0) {
       // A group heading has nowhere to be read on the rail, so there the
@@ -128,6 +133,9 @@ function Sidebar(props: SidebarProps) {
     );
     if (match) {
       return [ match.key ];
+    }
+    if (path === HISTORY_KEY) {
+      return [ HISTORY_KEY ];
     }
     return path === '/' || path === '/creators' ? [ '/' ] : [];
   }, [location.pathname, campaignItems]);

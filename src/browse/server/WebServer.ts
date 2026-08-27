@@ -8,6 +8,7 @@ import { type Logger } from '../../utils/logging/index.js';
 import { getRouter } from './Router.js';
 import API from '../api/index.js';
 import AuthStore from './AuthStore.js';
+import HistoryStore from './HistoryStore.js';
 import { type TranscriptionConfig } from './transcription/Config.js';
 
 export const DEFAULT_WEB_SERVER_PORT = 3000;
@@ -74,8 +75,15 @@ export class WebServer {
       path.resolve(dataDir, '.patreon-dl', 'auth.json'),
       this.#config.logger
     );
+    // What each account has watched. Its own file again, and for the opposite
+    // reason to the accounts': it is rewritten constantly and losing it costs
+    // nothing worse than a video starting from the beginning.
+    const historyStore = HistoryStore.load(
+      path.resolve(dataDir, '.patreon-dl', 'history.json'),
+      this.#config.logger
+    );
     const router = getRouter(
-      db, api, dataDir, authStore,
+      db, api, dataDir, authStore, historyStore,
       this.#config.pathToFFmpeg,
       this.#config.transcription,
       this.#config.logger

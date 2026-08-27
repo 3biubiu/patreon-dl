@@ -1,4 +1,5 @@
 import { Container, Row, Col } from "react-bootstrap";
+import { Result } from "antd";
 import { Outlet, useParams } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useEffect, useState } from "react";
@@ -18,23 +19,41 @@ function CollectionLayout() {
   const { api } = useAPI();
   const [campaign, setCampaign] = useState<(CampaignWithCounts & { baseUrl: string; }) | null>(null);
   const [collection, setCollection] = useState<Collection | null>(null);
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
     const abortController = new AbortController();
     void (async () => {
-      const { campaignId, collection } = await api.getCollection(collectionId);
-      const campaign = await api.getCampaign({ id: campaignId, withCounts: true });
+      const found = await api.getCollection(collectionId);
+      const campaign = found ?
+        await api.getCampaign({ id: found.campaignId, withCounts: true }) : null;
       if (!abortController.signal.aborted) {
+        // The collection is gone, or belongs to a creator this account is not
+        // permitted. Either way there is nothing here to show.
+        if (!found || !campaign) {
+          setMissing(true);
+          return;
+        }
         setCampaign({
           ...campaign,
           baseUrl: getCampaignBaseUrl(campaign)
         });
-        setCollection(collection);
+        setCollection(found.collection);
       };
     })();
 
     return () => abortController.abort();
   }, [api, collectionId]);
+
+  if (missing) {
+    return (
+      <Result
+        status="404"
+        title="Collection not available"
+        subTitle="This collection is no longer in the library, or belongs to a creator your account cannot see."
+      />
+    );
+  }
 
   if (!campaign) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;

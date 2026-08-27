@@ -3,6 +3,7 @@ import { type Logger } from '../../../utils/logging';
 import { type APIInstance } from '../../api';
 import Basehandler from './BaseHandler.js';
 import { type CampaignListSortBy } from '../../types/Campaign.js';
+import { canSeeCampaign, getCampaignScope } from '../CampaignAccessGuard.js';
 
 const DEFAULT_ITEMS_PER_PAGE = 20;
 
@@ -27,7 +28,10 @@ export default class CampaignAPIRequestHandler extends Basehandler {
     const list = this.#api.getCampaignList({
       sortBy,
       limit,
-      offset
+      offset,
+      // Narrowed in the query rather than after it, so that `total` - and the
+      // paging the browser builds from it - counts only what this user may see.
+      campaignIds: getCampaignScope(req)
     });
     res.json(list);
   }
@@ -43,10 +47,16 @@ export default class CampaignAPIRequestHandler extends Basehandler {
       'with_counts',
       ['true', 'false']
     ) === 'true' ? true : false : undefined;
-    if (byVanity) {
-      res.json(this.#api.getCampaign({ vanity: id, withCounts }));
+    // Checked on the way out rather than by a guard on the way in: the route's
+    // ":id" may be a vanity, and which campaign that names is not known until
+    // it has been looked up.
+    const campaign = byVanity ?
+      this.#api.getCampaign({ vanity: id, withCounts }) :
+      this.#api.getCampaign({ id, withCounts });
+    if (campaign && !canSeeCampaign(req, campaign.id)) {
+      res.status(404).json({ error: 'Not found' });
       return;
     }
-    res.json(this.#api.getCampaign({id, withCounts}));
+    res.json(campaign);
   }
 }

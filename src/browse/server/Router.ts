@@ -14,7 +14,16 @@ import AuthAPIRequestHandler from './handler/AuthAPIRequestHandler.js';
 import type AuthStore from './AuthStore.js';
 import { getSessionUser, refreshSessionIfStale, type AuthenticatedRequest } from './AuthGuard.js';
 import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHandler.js';
+import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
+import type HistoryStore from './HistoryStore.js';
 import { createTranscriptionServices, type TranscriptionConfig } from './transcription/Config.js';
+import {
+  byCampaignParam,
+  byCollectionParam,
+  byContentParam,
+  byMediaParam,
+  requireCampaignAccess
+} from './CampaignAccessGuard.js';
 
 interface RequestHandlers {
   campaignAPI: CampaignAPIRequestHandler;
@@ -24,24 +33,26 @@ interface RequestHandlers {
   mediaAPI: MediaAPIRequestHandler;
   auth: AuthAPIRequestHandler;
   transcription: TranscriptionAPIRequestHandler;
+  history: HistoryAPIRequestHandler;
 }
 
 class _Router {
   #handlers: RequestHandlers;
   #authStore: AuthStore;
+  #db: DBInstance;
   #router: Router;
 
-  constructor(handlers: RequestHandlers, authStore: AuthStore) {
+  constructor(handlers: RequestHandlers, authStore: AuthStore, db: DBInstance) {
     this.#handlers = handlers;
     this.#authStore = authStore;
+    this.#db = db;
     this.#router = express.Router();
     this.initializeRoutes();
   }
 
   initializeRoutes() {
-    // Resolve the session once, up front, so everything downstream - including
-    // the content permissions that will come later - can simply read
-    // `req.authUser`.
+    // Resolve the session once, up front, so everything downstream - the
+    // campaign permissions included - can simply read `req.authUser`.
     this.#router.use((req, res, next) => {
       const user = getSessionUser(req, this.#authStore);
       if (user) {
@@ -83,6 +94,13 @@ class _Router {
       next();
     };
 
+    // A user restricted to certain creators is refused everything belonging to
+    // the others, whichever way the route names it. The campaign listing is
+    // narrowed by its handler instead, in SQL, so that its paging counts only
+    // what the user may see.
+    const inScope = (resolve: Parameters<typeof requireCampaignAccess>[1]) =>
+      requireCampaignAccess(this.#db, resolve);
+
     this.#router.get('/api/auth/users', requireAdmin, (req, res) =>
       this.#handlers.auth.handleListUsersRequest(req, res)
     );
@@ -97,6 +115,29 @@ class _Router {
 
     this.#router.delete('/api/auth/users/:id', requireAdmin, (req, res) =>
       this.#handlers.auth.handleDeleteUserRequest(req, res, req.params.id)
+    );
+
+    // Watch history. Recording is guarded the same way the content itself is,
+    // so an account cannot build up - or read back - entries for a creator it
+    // was never allowed to see.
+    this.#router.get('/api/history/videos', (req, res) =>
+      this.#handlers.history.handleListVideosRequest(req, res)
+    );
+
+    this.#router.get('/api/history/posts', (req, res) =>
+      this.#handlers.history.handleListPostsRequest(req, res)
+    );
+
+    this.#router.get('/api/history/videos/:id', inScope(byMediaParam), (req, res) =>
+      this.#handlers.history.handleGetVideoRequest(req, res, req.params.id)
+    );
+
+    this.#router.put('/api/history/videos/:id', inScope(byMediaParam), (req, res) =>
+      this.#handlers.history.handleRecordVideoRequest(req, res, req.params.id)
+    );
+
+    this.#router.put('/api/history/posts/:id', inScope(byContentParam('post')), (req, res) =>
+      this.#handlers.history.handleRecordPostRequest(req, res, req.params.id)
     );
 
     // Making captions is an administrator's job; reading them is not, so an
@@ -140,15 +181,15 @@ class _Router {
       this.#handlers.transcription.handleSaveSettingsRequest(req, res)
     );
 
-    this.#router.get('/api/media/:id/transcription', (req, res) =>
+    this.#router.get('/api/media/:id/transcription', inScope(byMediaParam), (req, res) =>
       this.#handlers.transcription.handleJobRequest(req, res, req.params.id)
     );
 
-    this.#router.get('/api/media/:id/subtitles', (req, res) =>
+    this.#router.get('/api/media/:id/subtitles', inScope(byMediaParam), (req, res) =>
       this.#handlers.transcription.handleSubtitleListRequest(req, res, req.params.id)
     );
 
-    this.#router.get('/api/media/:id/subtitles/:filename', (req, res) =>
+    this.#router.get('/api/media/:id/subtitles/:filename', inScope(byMediaParam), (req, res) =>
       this.#handlers.transcription.handleSubtitleRequest(req, res, req.params.id, req.params.filename)
     );
 
@@ -156,7 +197,7 @@ class _Router {
       '/api/campaigns/:id/posts/filter_options',
       '/api/campaigns/:id/products/filter_options',
       '/api/campaigns/:id/media/filter_options'
-    ], (req, res) => {
+    ], inScope(byCampaignParam), (req, res) => {
       const paramContentType = req.path.split('/')[4];
       const contentType =
         paramContentType === 'posts' ? 'post'
@@ -177,7 +218,7 @@ class _Router {
       '/api/campaigns/:id/content',
       '/api/campaigns/:id/collections',
       '/api/campaigns/:id/post_tags'
-    ], (req, res) => {
+    ], inScope(byCampaignParam), (req, res) => {
       const paramContentType = req.path.split('/')[4];
       const contentType =
         paramContentType === 'posts' ? 'post'
@@ -198,7 +239,7 @@ class _Router {
       }
     });
 
-    this.#router.get('/api/collections/:id', (req, res) => {
+    this.#router.get('/api/collections/:id', inScope(byCollectionParam), (req, res) => {
       return this.#handlers.contentAPI.handleCollectionRequest(req, res, req.params.id);
     });
 
@@ -210,11 +251,11 @@ class _Router {
       this.#handlers.campaignAPI.handleListRequest(req, res)
     );
 
-    this.#router.get('/api/posts/:id', (req, res) =>
+    this.#router.get('/api/posts/:id', inScope(byContentParam('post')), (req, res) =>
       this.#handlers.contentAPI.handleGetRequest(req, res, 'post', req.params.id)
     );
 
-    this.#router.get('/api/products/:id', (req, res) =>
+    this.#router.get('/api/products/:id', inScope(byContentParam('product')), (req, res) =>
       this.#handlers.contentAPI.handleGetRequest(req, res, 'product', req.params.id)
     );
 
@@ -230,7 +271,15 @@ class _Router {
       this.#handlers.settingsAPI.handleSaveBrowseSettingsRequest(req, res)
     );
 
-    this.#router.get('/media/:id', (req, res) => {
+    // The media route answers in plain text, so it refuses an out-of-scope file
+    // the same way it already refuses one that genuinely is not there.
+    const mediaInScope = requireCampaignAccess(
+      this.#db,
+      byMediaParam,
+      (res) => { res.status(404).send('Media not found'); }
+    );
+
+    this.#router.get('/media/:id', mediaInScope, (req, res) => {
       const denied = checkMediaAccess(req);
       if (denied) {
         res.status(403).send('Forbidden');
@@ -257,6 +306,7 @@ export function getRouter(
   api: APIInstance,
   dataDir: string,
   authStore: AuthStore,
+  historyStore: HistoryStore,
   pathToFFmpeg?: string | null,
   transcriptionConfig?: TranscriptionConfig | null,
   logger?: Logger | null
@@ -269,11 +319,12 @@ export function getRouter(
     media: new MediaRequestHandler(db, dataDir, videoThumbnailer, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
-    auth: new AuthAPIRequestHandler(authStore, logger),
+    auth: new AuthAPIRequestHandler(authStore, historyStore, logger),
+    history: new HistoryAPIRequestHandler(db, historyStore, logger),
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,
       transcription.index, transcription.queue, transcription.vad, transcription.settings,
       logger
     )
-  }, authStore).router;
+  }, authStore, db).router;
 }

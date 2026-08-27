@@ -97,6 +97,15 @@ function PostContent() {
     setTitle(post?.title || null);
   }, [setTitle, post]);
 
+  // Keyed on the id rather than the post, so paging through with the previous
+  // and next links records each one - and re-rendering the same post does not.
+  useEffect(() => {
+    if (!post?.id) {
+      return;
+    }
+    void api.recordViewedPost(post.id).catch(() => undefined);
+  }, [api, post?.id]);
+
   const nav = useMemo(() => {
     const { previous, next } = postNav;
     if (!previous && !next) {

@@ -5,17 +5,26 @@ import { commonLog } from '../../../utils/logging/Logger.js';
 import { type Logger } from '../../../utils/logging/index.js';
 
 /**
- * Pinned to a tag rather than a branch. The file at `master` happens to match
+ * Where the model is fetched from, in order.
+ *
+ * Pinned to a tag rather than a branch: the file at `master` happens to match
  * this one today, but it is a moving target - `v6.0` already carries different
  * weights - and a voice detector that silently changes behaviour between
  * deployments is not something to leave to chance.
+ *
+ * jsDelivr comes first because raw.githubusercontent.com is unreliable from
+ * some networks, which is exactly where this used to fail.
  */
-const MODEL_URL =
-  'https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/src/silero_vad/data/silero_vad.onnx';
+const MODEL_SOURCES = [
+  'https://cdn.jsdelivr.net/gh/snakers4/silero-vad@v6.2.1/src/silero_vad/data/silero_vad.onnx',
+  'https://raw.githubusercontent.com/snakers4/silero-vad/v6.2.1/src/silero_vad/data/silero_vad.onnx'
+];
 const MODEL_SHA256 = '1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3';
 const MODEL_BYTES = 2327524;
 /** Well above the real size, and only there to stop a redirect to something huge. */
 const MAX_DOWNLOAD_BYTES = 16 * 1024 * 1024;
+/** A stalled connection should move on to the next source, not hang the job. */
+const SOURCE_TIMEOUT_MS = 60_000;
 
 /** Shared so two callers arriving together fetch once, not twice. */
 let inFlight: Promise<void> | null = null;
@@ -34,8 +43,8 @@ function sha256(buffer: Buffer) {
  *
  * Downloading rather than shipping the file keeps it out of the published
  * package, where it would be dead weight for everyone who never transcribes
- * anything. Nothing is lost by fetching it: transcription already needs the
- * network to reach OpenRouter at all.
+ * anything - but a download can fail, so the error says exactly how to supply
+ * the file by hand instead.
  */
 export async function ensureSileroModel(
   filePath: string,
@@ -52,47 +61,74 @@ export async function ensureSileroModel(
   return inFlight;
 }
 
-async function download(filePath: string, logger?: Logger | null, signal?: AbortSignal) {
-  commonLog(logger, 'info', 'Transcription',
-    `Speech detection model not found, downloading it to "${filePath}" (${(MODEL_BYTES / 1048576).toFixed(1)} MB)`);
-
-  let response: Response;
+/** Fetches and verifies one source, or throws with why it did not work. */
+async function fetchFrom(url: string, signal?: AbortSignal): Promise<Buffer> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
+  const onAbort = () => controller.abort();
+  signal?.addEventListener('abort', onAbort, { once: true });
   try {
-    response = await fetch(MODEL_URL, { signal });
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw Error(`HTTP ${response.status}`);
+    }
+    // Inside the same try as the request: a connection dropped part way
+    // through the body fails here, not at the fetch, and undici reports that
+    // as a bare "terminated" with nothing to say where it came from.
+    const body = Buffer.from(await response.arrayBuffer());
+    if (body.length > MAX_DOWNLOAD_BYTES) {
+      throw Error('the response was implausibly large');
+    }
+    const digest = sha256(body);
+    if (digest !== MODEL_SHA256) {
+      throw Error(`checksum mismatch (got ${digest.slice(0, 16)}…)`);
+    }
+    return body;
   }
-  catch (error) {
-    throw Error(
-      `Could not download the speech detection model: ` +
-      `${error instanceof Error ? error.message : String(error)}`
-    );
+  finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', onAbort);
   }
-  if (!response.ok) {
-    throw Error(`Could not download the speech detection model: HTTP ${response.status}`);
-  }
-
-  const body = Buffer.from(await response.arrayBuffer());
-  if (body.length > MAX_DOWNLOAD_BYTES) {
-    throw Error('The downloaded speech detection model was implausibly large; refusing it');
-  }
-  const digest = sha256(body);
-  if (digest !== MODEL_SHA256) {
-    // Refuse rather than run: whatever this is, it is not the model these
-    // detection settings were chosen against.
-    throw Error(
-      `The downloaded speech detection model did not match its expected checksum ` +
-      `(got ${digest.slice(0, 16)}…, expected ${MODEL_SHA256.slice(0, 16)}…). ` +
-      `Nothing was written. Place a trusted silero_vad.onnx at "${filePath}" instead.`
-    );
-  }
-
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
-  // Written beside the target and renamed, so a download cut off part way
-  // cannot leave a truncated file that later looks present and valid.
-  const tmpFilePath = `${filePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmpFilePath, body);
-  fs.renameSync(tmpFilePath, filePath);
-  commonLog(logger, 'info', 'Transcription', 'Speech detection model ready');
 }
 
-export { MODEL_URL, MODEL_SHA256 };
+async function download(filePath: string, logger?: Logger | null, signal?: AbortSignal) {
+  commonLog(logger, 'info', 'Transcription',
+    `Speech detection model not found, downloading it to "${filePath}" ` +
+    `(${(MODEL_BYTES / 1048576).toFixed(1)} MB)`);
+
+  const failures: string[] = [];
+  for (const url of MODEL_SOURCES) {
+    if (signal?.aborted) {
+      throw Error('Aborted');
+    }
+    try {
+      const body = await fetchFrom(url, signal);
+      const dir = path.dirname(filePath);
+      fs.mkdirSync(dir, { recursive: true });
+      // Written beside the target and renamed, so a download cut off part way
+      // cannot leave a truncated file that later looks present and valid.
+      const tmpFilePath = `${filePath}.${process.pid}.tmp`;
+      fs.writeFileSync(tmpFilePath, body);
+      fs.renameSync(tmpFilePath, filePath);
+      commonLog(logger, 'info', 'Transcription', 'Speech detection model ready');
+      return;
+    }
+    catch (error) {
+      if (signal?.aborted) {
+        throw Error('Aborted');
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      failures.push(`${new URL(url).host}: ${reason}`);
+      commonLog(logger, 'debug', 'Transcription', `Model source failed - ${reason}`);
+    }
+  }
+
+  throw Error(
+    `Could not download the speech detection model (${failures.join('; ')}). ` +
+    `Copy silero_vad.onnx to "${filePath}" instead - it ships with the Python ` +
+    `"silero-vad" package, or can be downloaded on another machine from ` +
+    MODEL_SOURCES[0]
+  );
+}
+
+export { MODEL_SOURCES, MODEL_SHA256 };

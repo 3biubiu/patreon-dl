@@ -113,6 +113,19 @@ class _Router {
       this.#handlers.transcription.handleListJobsRequest(req, res)
     );
 
+    // POST rather than DELETE: this stops work, it does not remove anything.
+    this.#router.post('/api/transcriptions/stop', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleCancelAllRequest(req, res)
+    );
+
+    this.#router.delete('/api/transcriptions', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleClearHistoryRequest(req, res)
+    );
+
+    this.#router.delete('/api/transcriptions/:id', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleForgetRequest(req, res, req.params.id)
+    );
+
     this.#router.get('/api/transcription/status', (req, res) =>
       this.#handlers.transcription.handleStatusRequest(req, res)
     );

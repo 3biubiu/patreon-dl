@@ -7,7 +7,7 @@ import { type Filter, type FilterSearchParams, type FilterData, type MediaFilter
 import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
-import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionJob, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
+import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 
 interface APIProviderProps {
   children: React.ReactNode;
@@ -331,11 +331,11 @@ class API {
     return data.settings as TranscriptionSettings;
   }
 
-  async startTranscription(mediaId: string): Promise<TranscriptionJob> {
+  async startTranscription(mediaId: string): Promise<TranscriptionRecord> {
     const data = await readJSON(await apiFetch(
       `/api/media/${mediaId}/transcribe`, { method: 'POST' }
     ));
-    return data.job as TranscriptionJob;
+    return data.record as TranscriptionRecord;
   }
 
   async cancelTranscription(mediaId: string): Promise<boolean> {
@@ -345,19 +345,36 @@ class API {
     return !!data.cancelled;
   }
 
-  /**
-   * `job` is the run happening now, `record` what the index remembers. A video
-   * transcribed before the last restart has a record but no job.
-   */
-  async getTranscription(mediaId: string): Promise<{
-    job: TranscriptionJob | null;
-    record: TranscriptionRecord | null;
-  }> {
+  /** One video's transcription, at whatever stage it has reached. */
+  async getTranscription(mediaId: string): Promise<TranscriptionRecord | null> {
     const data = await readJSON(await apiFetch(`/api/media/${mediaId}/transcription`));
-    return {
-      job: (data.job || null) as TranscriptionJob | null,
-      record: (data.record || null) as TranscriptionRecord | null
-    };
+    return (data.record || null) as TranscriptionRecord | null;
+  }
+
+  /** The whole transcription history, newest request first. */
+  async listTranscriptions(): Promise<TranscriptionRecord[]> {
+    const data = await readJSON(await apiFetch('/api/transcriptions'));
+    return (data.records || []) as TranscriptionRecord[];
+  }
+
+  /**
+   * Stops the running transcription and everything queued behind it. Records
+   * are kept and marked cancelled - nothing is removed.
+   */
+  async stopAllTranscriptions(): Promise<TranscriptionRecord[]> {
+    const data = await readJSON(await apiFetch('/api/transcriptions/stop', { method: 'POST' }));
+    return (data.records || []) as TranscriptionRecord[];
+  }
+
+  /** Clears finished records. Anything queued or running is left alone. */
+  async clearTranscriptionHistory(): Promise<TranscriptionRecord[]> {
+    const data = await readJSON(await apiFetch('/api/transcriptions', { method: 'DELETE' }));
+    return (data.records || []) as TranscriptionRecord[];
+  }
+
+  /** Forgets one record. The subtitle file it produced is left on disk. */
+  async forgetTranscription(mediaId: string): Promise<void> {
+    await readJSON(await apiFetch(`/api/transcriptions/${mediaId}`, { method: 'DELETE' }));
   }
 
   async getSubtitles(mediaId: string): Promise<SubtitleFile[]> {

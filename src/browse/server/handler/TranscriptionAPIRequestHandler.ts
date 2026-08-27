@@ -172,9 +172,9 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
       res.status(404).json({ error: 'No video found for this media' });
       return;
     }
-    const job = this.#queue.enqueue(id, video);
+    const record = this.#queue.enqueue(id, video);
     this.log('info', `Transcription queued for media "${id}"`);
-    res.json({ job });
+    res.json({ record });
   }
 
   handleCancelRequest(_req: Request, res: Response, id: string) {
@@ -182,21 +182,36 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     res.json({ cancelled });
   }
 
-  /**
-   * Live progress when a job is running, falling back to what the index
-   * remembers. The index is the only thing that survives a restart.
-   */
-  handleJobRequest(_req: Request, res: Response, id: string) {
-    const job = this.#queue.getJob(id) || null;
-    const record = this.#index.get(id);
-    res.json({ job, record });
+  /** Stops the running job and empties the queue behind it. */
+  handleCancelAllRequest(_req: Request, res: Response) {
+    const stopped = this.#queue.cancelAll();
+    this.log('info', `Stopped ${stopped} transcription(s) on request`);
+    res.json({ stopped, records: this.#index.list() });
   }
 
+  /** One video's transcription, at whatever stage it has reached. */
+  handleJobRequest(_req: Request, res: Response, id: string) {
+    res.json({ record: this.#index.get(id) });
+  }
+
+  /** The whole history, newest request first. */
   handleListJobsRequest(_req: Request, res: Response) {
-    res.json({
-      jobs: this.#queue.listJobs(),
-      records: this.#index.list()
-    });
+    res.json({ records: this.#index.list() });
+  }
+
+  /**
+   * Drops every record that is no longer moving, leaving anything queued or
+   * running alone. Only the history is cleared - subtitle files already
+   * written stay where they are.
+   */
+  handleClearHistoryRequest(_req: Request, res: Response) {
+    const removed = this.#index.clearFinished();
+    res.json({ removed, records: this.#index.list() });
+  }
+
+  /** Forgets one record, so its video looks untranscribed again. */
+  handleForgetRequest(_req: Request, res: Response, id: string) {
+    res.json({ removed: this.#index.remove(id) });
   }
 
   /**

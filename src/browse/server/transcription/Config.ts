@@ -83,6 +83,9 @@ export function createTranscriptionServices(
   const queue = new TranscriptionQueue(
     dataDir, extractor, vad, transcriber, index, config?.vad, logger
   );
+  // A request made just before a restart is still a request. Ones that were
+  // already under way are not resumed - the index has marked those failed.
+  queue.resumePending();
   if (!settings.getApiKey() && !config?.apiKey) {
     commonLog(logger, 'debug', 'Transcription',
       'No OpenRouter API key yet. An administrator can set one in the transcription ' +

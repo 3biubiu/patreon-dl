@@ -8,9 +8,6 @@ import VoiceActivityDetector, { type SpeechInterval, type VADOptions } from './V
 import OpenRouterTranscriber, { TranscriptionError } from './OpenRouterTranscriber.js';
 import type TranscriptionIndex from './TranscriptionIndex.js';
 import { buildSRT, filterHallucinations, type Segment } from './SubtitleBuilder.js';
-import { type TranscriptionJob } from '../../types/Transcription.js';
-
-export { type JobStatus, type TranscriptionJob } from '../../types/Transcription.js';
 
 /**
  * Longest clip sent in one request. The endpoint's upstreams give up after 60
@@ -30,15 +27,12 @@ interface QueueEntry {
 }
 
 /**
- * Runs transcription jobs one at a time.
+ * Runs transcription jobs one at a time, recording every step in the index.
  *
- * Live progress stays in memory - it changes every second and is of no
- * interest once a job ends - while the outcome goes to `TranscriptionIndex`,
- * so the browser can be told what has been transcribed without anyone reading
- * the media library. A job interrupted by a restart is left as `pending` in
- * the index and has to be started again; the alternative was a schema
- * migration, which is a lot to put in front of a feature that can just be
- * re-run.
+ * There is no job state here beyond what is queued: progress, stage and
+ * outcome all go straight to `TranscriptionIndex`, which is what the browser
+ * reads. One source of truth, and a restart leaves behind a record that says
+ * where things got to.
  */
 export default class TranscriptionQueue {
   name = 'TranscriptionQueue';
@@ -51,7 +45,6 @@ export default class TranscriptionQueue {
   #vadOptions?: VADOptions;
   #logger?: Logger | null;
 
-  #jobs: Map<string, TranscriptionJob>;
   #pending: QueueEntry[];
   #current: QueueEntry | null;
   #draining: boolean;
@@ -72,48 +65,57 @@ export default class TranscriptionQueue {
     this.#index = index;
     this.#vadOptions = vadOptions;
     this.#logger = logger;
-    this.#jobs = new Map();
     this.#pending = [];
     this.#current = null;
     this.#draining = false;
   }
 
-  /** Current state for `mediaId`, or `null` if it has never been queued. */
-  getJob(mediaId: string) {
-    return this.#jobs.get(mediaId) || null;
-  }
-
-  listJobs() {
-    return [ ...this.#jobs.values() ];
+  /**
+   * Picks up requests that were still waiting when the server last stopped.
+   *
+   * Only ones that never started: a job that was mid-flight has already been
+   * marked failed by the index, so a request that brought the server down does
+   * not start again on every boot.
+   */
+  resumePending() {
+    const waiting = this.#index.listPending();
+    if (waiting.length === 0) {
+      return 0;
+    }
+    for (const record of waiting) {
+      const videoPath = path.resolve(this.#dataDir, record.videoPath);
+      if (!fs.existsSync(videoPath)) {
+        this.#index.markError(record.mediaId, 'The video is no longer where it was');
+        continue;
+      }
+      this.#pending.push({
+        mediaId: record.mediaId,
+        videoPath,
+        controller: new AbortController()
+      });
+    }
+    this.log('info', `Resuming ${this.#pending.length} transcription(s) queued before restart`);
+    void this.#drain();
+    return this.#pending.length;
   }
 
   /**
-   * Queues `mediaId`. Returns the existing job when one is already queued or
-   * running, so a double click does not transcribe twice.
+   * Queues `mediaId`. Returns the existing record when one is already queued
+   * or running, so a double click does not transcribe twice.
    */
-  enqueue(mediaId: string, videoPath: string): TranscriptionJob {
-    const existing = this.#jobs.get(mediaId);
-    if (existing && [ 'queued', 'detecting', 'transcribing', 'writing' ].includes(existing.status)) {
+  enqueue(mediaId: string, videoPath: string) {
+    const existing = this.#index.get(mediaId);
+    if (existing && (existing.state === 'pending' || existing.state === 'running')) {
       return existing;
     }
-    const job: TranscriptionJob = {
+    const record = this.#index.markPending(
       mediaId,
-      status: 'queued',
-      percent: 0,
-      error: null,
-      language: null,
-      subtitlePath: null,
-      cost: null,
-      queuedAt: new Date().toISOString(),
-      finishedAt: null
-    };
-    this.#jobs.set(mediaId, job);
-    // Recorded before any work starts, so a request survives a crash as a
-    // visible `pending` rather than vanishing.
-    this.#index.markRequested(mediaId, path.relative(this.#dataDir, videoPath));
+      path.relative(this.#dataDir, videoPath),
+      path.basename(videoPath)
+    );
     this.#pending.push({ mediaId, videoPath, controller: new AbortController() });
     void this.#drain();
-    return job;
+    return record;
   }
 
   /** Cancels a queued or running job. Returns whether anything was cancelled. */
@@ -121,15 +123,42 @@ export default class TranscriptionQueue {
     const queuedIndex = this.#pending.findIndex((entry) => entry.mediaId === mediaId);
     if (queuedIndex >= 0) {
       this.#pending.splice(queuedIndex, 1);
-      this.#finish(mediaId, { status: 'cancelled' });
-      this.#index.remove(mediaId);
+      this.#index.markCancelled(mediaId);
       return true;
     }
     if (this.#current?.mediaId === mediaId) {
+      // The record is marked once the run actually stops, in `#drain`.
       this.#current.controller.abort();
       return true;
     }
     return false;
+  }
+
+  /**
+   * Stops everything: the running job and everything waiting behind it.
+   *
+   * The queue is emptied first, so the job being aborted does not simply hand
+   * over to the next one on its way out.
+   */
+  cancelAll() {
+    const queued = this.#pending.splice(0, this.#pending.length);
+    for (const entry of queued) {
+      this.#index.markCancelled(entry.mediaId);
+    }
+    let stopped = queued.length;
+    if (this.#current) {
+      this.#current.controller.abort();
+      stopped++;
+    }
+    if (stopped > 0) {
+      this.log('info', `Stopped ${stopped} transcription(s)`);
+    }
+    return stopped;
+  }
+
+  /** How many jobs are queued or running right now. */
+  get activeCount() {
+    return this.#pending.length + (this.#current ? 1 : 0);
   }
 
   async #drain() {
@@ -151,15 +180,11 @@ export default class TranscriptionQueue {
         }
         catch (error) {
           if (entry.controller.signal.aborted) {
-            this.#finish(entry.mediaId, { status: 'cancelled' });
-            // A cancelled job left nothing behind, so it should not linger in
-            // the index as something that was asked for.
-            this.#index.remove(entry.mediaId);
+            this.#index.markCancelled(entry.mediaId);
           }
           else {
             const message = error instanceof Error ? error.message : String(error);
             this.log('error', `Transcription of "${entry.videoPath}" failed:`, message);
-            this.#finish(entry.mediaId, { status: 'error', error: message });
             this.#index.markError(entry.mediaId, message);
           }
         }
@@ -177,11 +202,11 @@ export default class TranscriptionQueue {
     const { mediaId, videoPath, controller } = entry;
     const signal = controller.signal;
 
-    this.#update(mediaId, { status: 'detecting', percent: 0 });
+    this.#index.markRunning(mediaId, 'detecting');
     const intervals = await this.#vad.detect(
       videoPath,
       this.#vadOptions,
-      (fraction) => this.#update(mediaId, { percent: Math.round(fraction * DETECT_SHARE * 100) }),
+      (fraction) => this.#index.markProgress(mediaId, fraction * DETECT_SHARE * 100),
       signal
     );
     if (intervals.length === 0) {
@@ -194,7 +219,7 @@ export default class TranscriptionQueue {
       `Transcribing "${path.basename(videoPath)}": ${clips.length} clips, ` +
       `${(totalSeconds / 60).toFixed(1)} min of speech`
     );
-    this.#update(mediaId, { status: 'transcribing' });
+    this.#index.markStage(mediaId, 'transcribing');
 
     const workDir = path.resolve(
       this.#dataDir, '.patreon-dl', 'transcription',
@@ -226,21 +251,20 @@ export default class TranscriptionQueue {
         // later clip of mostly silence cannot come back as another language.
         if (!language && result.language) {
           language = result.language;
-          this.#update(mediaId, { language });
         }
         if (result.cost) {
           cost += result.cost;
         }
         doneSeconds += clip.end - clip.start;
         const fraction = DETECT_SHARE + (doneSeconds / totalSeconds) * (1 - DETECT_SHARE);
-        this.#update(mediaId, { percent: Math.min(99, Math.round(fraction * 100)), cost });
+        this.#index.markProgress(mediaId, Math.min(99, fraction * 100), cost);
       }
     }
     finally {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
 
-    this.#update(mediaId, { status: 'writing', percent: 99 });
+    this.#index.markStage(mediaId, 'writing');
     const { kept, rejected } = filterHallucinations(collected);
     if (rejected.length > 0) {
       const tally = rejected.reduce<Record<string, number>>((counts, r) => {
@@ -265,15 +289,11 @@ export default class TranscriptionQueue {
       (cost ? `, $${cost.toFixed(4)}` : '')
     );
 
-    const subtitlePath = path.relative(this.#dataDir, outFile);
-    this.#finish(mediaId, {
-      status: 'done',
-      percent: 100,
+    this.#index.markDone(mediaId, {
+      subtitlePath: path.relative(this.#dataDir, outFile),
       language: lang,
-      subtitlePath,
       cost: cost || null
     });
-    this.#index.markDone(mediaId, { subtitlePath, language: lang, cost: cost || null });
   }
 
   /**
@@ -355,17 +375,6 @@ export default class TranscriptionQueue {
       }
     }
     return clips;
-  }
-
-  #update(mediaId: string, patch: Partial<TranscriptionJob>) {
-    const job = this.#jobs.get(mediaId);
-    if (job) {
-      Object.assign(job, patch);
-    }
-  }
-
-  #finish(mediaId: string, patch: Partial<TranscriptionJob>) {
-    this.#update(mediaId, { ...patch, finishedAt: new Date().toISOString() });
   }
 
   protected log(level: LogLevel, ...msg: any[]) {

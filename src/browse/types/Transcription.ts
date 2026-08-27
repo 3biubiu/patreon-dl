@@ -3,46 +3,43 @@
  * Shared so the two cannot drift, in the way `Auth.ts` is shared.
  */
 
-export type JobStatus =
-  | 'queued'
-  | 'detecting'
-  | 'transcribing'
-  | 'writing'
+export type TranscriptionState =
+  /** Asked for, waiting its turn. */
+  | 'pending'
+  | 'running'
   | 'done'
   | 'error'
   | 'cancelled';
 
-/** A run in progress. Lives in memory only, and is gone after a restart. */
-export interface TranscriptionJob {
-  mediaId: string;
-  status: JobStatus;
-  /** 0-100. Speech detection is the first tenth, transcription the rest. */
-  percent: number;
-  error: string | null;
-  language: string | null;
-  /** Where the subtitle was written, relative to the data directory. */
-  subtitlePath: string | null;
-  cost: number | null;
-  queuedAt: string;
-  finishedAt: string | null;
-}
-
-export type TranscriptionState = 'pending' | 'done' | 'error';
+/** Which part of a running job is under way. */
+export type TranscriptionStage = 'detecting' | 'transcribing' | 'writing';
 
 /**
- * What the index remembers about a video. This is what survives a restart,
- * and what the grid reads to decide whether to mark a tile as captioned.
+ * One video's transcription, from the moment it is asked for to whatever
+ * became of it.
+ *
+ * This is the whole story: there is no separate in-memory job. Progress is
+ * written here as it changes, so a restart leaves a record that says where
+ * things got to rather than a gap.
  */
 export interface TranscriptionRecord {
   mediaId: string;
+  /** Relative to the data directory, so the library stays movable. */
   videoPath: string;
+  /** File name alone, so a list has something readable to show. */
+  videoName: string;
   subtitlePath: string | null;
   language: string | null;
   state: TranscriptionState;
+  stage: TranscriptionStage | null;
+  /** 0-100. Detection is the first tenth, transcription the rest. */
+  percent: number;
   error: string | null;
-  requestedAt: string;
-  completedAt: string | null;
+  /** US dollars spent, as reported by the API. */
   cost: number | null;
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 /** One subtitle offered to the player, found beside the video. */
@@ -90,4 +87,11 @@ export interface TranscriptionSettings {
   key: KeyDescription | null;
   /** Why the key could not be checked, when it could not. */
   keyError: string | null;
+}
+
+/** A record is still moving while it is in one of these states. */
+export const ACTIVE_STATES: TranscriptionState[] = [ 'pending', 'running' ];
+
+export function isActive(record: { state: TranscriptionState } | null | undefined) {
+  return !!record && ACTIVE_STATES.includes(record.state);
 }

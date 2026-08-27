@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Card, Descriptions, Form, Input, Popconfirm, Space, Tag } from "antd";
+import { Link } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
@@ -102,6 +103,10 @@ function TranscriptionSettings() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ display: 'flex', maxWidth: '44rem' }}>
+      <Link to="/transcription">
+        <Button>Back to history</Button>
+      </Link>
+
       <Card title="OpenRouter">
         <Descriptions column={1} size="small">
           <Descriptions.Item label="Status">

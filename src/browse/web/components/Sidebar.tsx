@@ -1,6 +1,6 @@
 import "../assets/styles/Sidebar.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Avatar, Menu, type MenuProps } from "antd";
+import { Avatar, Menu, Tooltip, type MenuProps } from "antd";
 import {
   HistoryOutlined,
   HomeOutlined,
@@ -17,7 +17,9 @@ import { useAPI } from "../contexts/APIProvider";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useGlobalModals } from "../contexts/GlobalModalsProvider";
 import { useAuth } from "../contexts/AuthProvider";
+import { useQuota } from "../contexts/QuotaProvider";
 import { APP_NAME, getCampaignBaseUrl } from "../utils/Misc";
+import { type QuotaCounter, type QuotaStatus } from "../../types/Quota";
 
 interface SidebarProps {
   /**
@@ -44,6 +46,7 @@ function Sidebar(props: SidebarProps) {
   const { api } = useAPI();
   const { showBrowseSettingsModal } = useGlobalModals();
   const { user, signOut } = useAuth();
+  const { quota } = useQuota();
   const navigate = useNavigate();
   const location = useLocation();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
@@ -188,6 +191,7 @@ function Sidebar(props: SidebarProps) {
           onClick={handleClick}
         />
       </div>
+      { !collapsed ? <QuotaSummary quota={quota} /> : null }
       <div className="sidebar__footer">
         <Menu
           mode="inline"
@@ -199,5 +203,53 @@ function Sidebar(props: SidebarProps) {
     </div>
   );
 };
+
+/**
+ * What is left of today's allowance.
+ *
+ * Shown only to accounts that actually have one - an administrator, or a user
+ * whose limits are both lifted, gets nothing here rather than a row of
+ * infinity signs. Hidden on the collapsed rail too: there is no room for a
+ * number that has to be read to mean anything.
+ */
+function QuotaSummary(props: { quota: QuotaStatus | null; }) {
+  const { quota } = props;
+  if (!quota || !quota.limited) {
+    return null;
+  }
+  const resetsAt = new Date(quota.resetsAt);
+  const rows: { label: string; counter: QuotaCounter; }[] = [
+    { label: 'Posts', counter: quota.posts },
+    { label: 'Videos', counter: quota.videos }
+  ];
+  return (
+    <Tooltip
+      placement="right"
+      title={`Resets at 08:00 Beijing time (${resetsAt.toLocaleString()}). Opening the same post or video again is free.`}
+    >
+      <div className="sidebar__quota">
+        <div className="sidebar__quota-title">Today's allowance</div>
+        {
+          rows.map(({ label, counter }) => (
+            <div key={label} className="sidebar__quota-row">
+              <span className="sidebar__quota-label">{label}</span>
+              <span
+                className={
+                  `sidebar__quota-value${counter.remaining === 0 ? ' sidebar__quota-value--spent' : ''}`
+                }
+              >
+                {
+                  counter.limit === null ?
+                    'Unlimited' :
+                    `${counter.remaining ?? 0} / ${counter.limit}`
+                }
+              </span>
+            </div>
+          ))
+        }
+      </div>
+    </Tooltip>
+  );
+}
 
 export default Sidebar;

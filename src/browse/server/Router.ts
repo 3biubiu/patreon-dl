@@ -16,6 +16,8 @@ import { getSessionUser, refreshSessionIfStale, type AuthenticatedRequest } from
 import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHandler.js';
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
+import type QuotaStore from './QuotaStore.js';
+import { requirePostQuota } from './QuotaGuard.js';
 import { createTranscriptionServices, type TranscriptionConfig } from './transcription/Config.js';
 import TranslationAPIRequestHandler from './handler/TranslationAPIRequestHandler.js';
 import { createTranslationServices, type TranslationConfig } from './translation/Config.js';
@@ -42,12 +44,14 @@ interface RequestHandlers {
 class _Router {
   #handlers: RequestHandlers;
   #authStore: AuthStore;
+  #quotaStore: QuotaStore;
   #db: DBInstance;
   #router: Router;
 
-  constructor(handlers: RequestHandlers, authStore: AuthStore, db: DBInstance) {
+  constructor(handlers: RequestHandlers, authStore: AuthStore, quotaStore: QuotaStore, db: DBInstance) {
     this.#handlers = handlers;
     this.#authStore = authStore;
+    this.#quotaStore = quotaStore;
     this.#db = db;
     this.#router = express.Router();
     this.initializeRoutes();
@@ -103,6 +107,13 @@ class _Router {
     // what the user may see.
     const inScope = (resolve: Parameters<typeof requireCampaignAccess>[1]) =>
       requireCampaignAccess(this.#db, resolve);
+
+    // Where the signed-in account stands against its daily limits. Not an
+    // administrator's route: it is the account's own standing, and the sidebar
+    // asks for it on every page.
+    this.#router.get('/api/quota', (req, res) =>
+      this.#handlers.auth.handleQuotaRequest(req, res)
+    );
 
     this.#router.get('/api/auth/users', requireAdmin, (req, res) =>
       this.#handlers.auth.handleListUsersRequest(req, res)
@@ -311,8 +322,14 @@ class _Router {
       this.#handlers.campaignAPI.handleListRequest(req, res)
     );
 
-    this.#router.get('/api/posts/:id', inScope(byContentParam('post')), (req, res) =>
-      this.#handlers.contentAPI.handleGetRequest(req, res, 'post', req.params.id)
+    // Opening a post is what spends the day's allowance for posts - the
+    // listings above are free to page through, and a post already opened
+    // today costs nothing to go back to. The creator check runs first, so a
+    // post the user was never allowed to see is refused rather than counted.
+    this.#router.get('/api/posts/:id',
+      inScope(byContentParam('post')),
+      requirePostQuota(this.#quotaStore),
+      (req, res) => this.#handlers.contentAPI.handleGetRequest(req, res, 'post', req.params.id)
     );
 
     this.#router.get('/api/products/:id', inScope(byContentParam('product')), (req, res) =>
@@ -367,6 +384,7 @@ export function getRouter(
   dataDir: string,
   authStore: AuthStore,
   historyStore: HistoryStore,
+  quotaStore: QuotaStore,
   pathToFFmpeg?: string | null,
   transcriptionConfig?: TranscriptionConfig | null,
   logger?: Logger | null,
@@ -382,10 +400,10 @@ export function getRouter(
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
-    media: new MediaRequestHandler(db, dataDir, videoThumbnailer, logger),
+    media: new MediaRequestHandler(db, dataDir, videoThumbnailer, quotaStore, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
-    auth: new AuthAPIRequestHandler(authStore, historyStore, logger),
+    auth: new AuthAPIRequestHandler(authStore, historyStore, quotaStore, logger),
     history: new HistoryAPIRequestHandler(db, historyStore, logger),
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,
@@ -396,5 +414,5 @@ export function getRouter(
       transcription.index, translation.queue, translation.settings, translation.cache,
       logger
     )
-  }, authStore, db).router;
+  }, authStore, quotaStore, db).router;
 }

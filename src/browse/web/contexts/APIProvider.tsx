@@ -7,6 +7,7 @@ import { type Filter, type FilterSearchParams, type FilterData, type MediaFilter
 import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
+import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
 import {
@@ -35,6 +36,18 @@ export class UnauthorizedError extends Error {
 }
 
 export const UNAUTHORIZED_EVENT = 'patreon-dl:unauthorized';
+
+/**
+ * Raised when the day's allowance is spent. Its own type because a page has to
+ * tell it from a permission refusal - one is "come back tomorrow", the other
+ * is "this was never yours to read".
+ */
+export class QuotaExceededError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'QuotaExceededError';
+  }
+}
 
 /**
  * Every data request goes through here so that one expired session is noticed
@@ -173,7 +186,15 @@ class API {
       urlObj.search = contextQS;
     }
     const result = await apiFetch(urlObj.toString());
-    return await result.json();
+    const data = await result.json() as
+      { error?: string; code?: string } &
+      { post: PostWithComments; previous: PostWithComments | null; next: PostWithComments | null; };
+    // The daily limit is the one refusal the page can do something about, so
+    // it is raised as itself rather than left to look like an empty post.
+    if (data?.code === QUOTA_EXCEEDED_CODE) {
+      throw new QuotaExceededError(data.error || 'Daily limit reached');
+    }
+    return data;
   }
 
   async getProduct(id: string): Promise<Product | null> {
@@ -290,6 +311,15 @@ class API {
 
   async logout(): Promise<void> {
     await fetch('/api/auth/logout', { method: 'POST' });
+  }
+
+  /**
+   * Where this account stands against its daily limits. Administrators come
+   * back unlimited, so the caller can ask without knowing who is signed in.
+   */
+  async getQuota(): Promise<QuotaStatus> {
+    const data = await readJSON(await apiFetch('/api/quota'));
+    return data.quota as QuotaStatus;
   }
 
   async listUsers(): Promise<AuthUser[]> {

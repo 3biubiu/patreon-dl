@@ -8,6 +8,8 @@ import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
 import type VideoThumbnailer from '../VideoThumbnailer.js';
 import { isMediaElementRequest } from '../MediaAccessGuard.js';
+import type QuotaStore from '../QuotaStore.js';
+import { consumeQuota } from '../QuotaGuard.js';
 import mime from 'mime-types';
 
 const VIDEO_EXTENSIONS = [
@@ -65,12 +67,20 @@ export default class MediaRequestHandler extends Basehandler {
   #db: DBInstance;
   #dataDir: string;
   #videoThumbnailer: VideoThumbnailer;
+  #quotaStore: QuotaStore;
 
-  constructor(db: DBInstance, dataDir: string, videoThumbnailer: VideoThumbnailer, logger?: Logger | null) {
+  constructor(
+    db: DBInstance,
+    dataDir: string,
+    videoThumbnailer: VideoThumbnailer,
+    quotaStore: QuotaStore,
+    logger?: Logger | null
+  ) {
     super(logger);
     this.#db = db;
     this.#dataDir = dataDir;
     this.#videoThumbnailer = videoThumbnailer;
+    this.#quotaStore = quotaStore;
   }
 
   async handleMediaRequest(req: Request, res: Response, id: string) {
@@ -133,6 +143,22 @@ export default class MediaRequestHandler extends Basehandler {
       this.log('debug', `Refused non-player request for media file "${mediaFilePath}"`);
       res.status(403).send('Forbidden');
       return;
+    }
+    // Watching a video is what spends the day's allowance, so it is counted
+    // here - at the file itself - rather than anywhere the browser could
+    // choose not to call. Poster frames are exempt: a grid full of thumbnails
+    // is browsing, not watching.
+    //
+    // Range requests, replays and a second visit to the same post all name the
+    // same media id, and an id already counted today is free - which is what
+    // makes the limit one on how many videos are watched rather than on how
+    // many times the player reconnects.
+    if (!isThumbnail && !isRequestingThumbnail && looksLikeVideo(mediaFilePath, downloaded.mimeType)) {
+      if (!consumeQuota(this.#quotaStore, req, 'videos', id)) {
+        this.log('debug', `Refused media file "${mediaFilePath}" - daily video limit reached`);
+        res.status(403).send('You have reached your daily limit for videos. It resets at 08:00 (Beijing time).');
+        return;
+      }
     }
     // Force a "Save as" instead of letting the browser render the file inline.
     // The filename always comes from the file on disk - never from the request.

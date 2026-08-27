@@ -9,6 +9,7 @@ import { getRouter } from './Router.js';
 import API from '../api/index.js';
 import AuthStore from './AuthStore.js';
 import HistoryStore from './HistoryStore.js';
+import QuotaStore from './QuotaStore.js';
 import { type TranscriptionConfig } from './transcription/Config.js';
 import { type TranslationConfig } from './translation/Config.js';
 
@@ -88,8 +89,15 @@ export class WebServer {
       path.resolve(dataDir, '.patreon-dl', 'history.json'),
       this.#config.logger
     );
+    // How much each account has read today. Its own file for the same reason
+    // the history is: worthless once the day turns over at 08:00 Beijing time,
+    // so one that cannot be read is started over rather than fatal.
+    const quotaStore = QuotaStore.load(
+      path.resolve(dataDir, '.patreon-dl', 'quota.json'),
+      this.#config.logger
+    );
     const router = getRouter(
-      db, api, dataDir, authStore, historyStore,
+      db, api, dataDir, authStore, historyStore, quotaStore,
       this.#config.pathToFFmpeg,
       this.#config.transcription,
       this.#config.logger,

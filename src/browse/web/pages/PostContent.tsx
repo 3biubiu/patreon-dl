@@ -3,7 +3,8 @@ import { forwardRef, useEffect, useMemo, useReducer, useState } from "react";
 import { NavLink, useParams } from "react-router";
 import { Container, Row, Col } from "react-bootstrap";
 import { LeftOutlined, RightOutlined } from "@ant-design/icons";
-import { useAPI } from "../contexts/APIProvider";
+import { Result } from "antd";
+import { QuotaExceededError, useAPI } from "../contexts/APIProvider";
 import PostCard from "../components/PostCard";
 import PostThumbnail from "../components/PostThumbnail";
 import CommentsPanel from "../components/CommentsPanel";
@@ -16,6 +17,7 @@ import { type BrowseSettings } from "../../types/Settings";
 import { useDocument } from "../contexts/DocumentProvider";
 import { getContentUrl } from "../utils/Misc";
 import { LoadingBlock } from "../components/Loading";
+import { useQuota } from "../contexts/QuotaProvider";
 
 interface PostNav {
   previous: PostWithComments | null;
@@ -72,8 +74,10 @@ function PostContent() {
   const { setTitle } = useDocument();
   const { settings } = useBrowseSettings();
   const { scrollTo } = useScroll();
+  const { refresh: refreshQuota } = useQuota();
   const [post, setContent] = useReducer(contentReducer, null);;
   const [postNav, setPostNav] = useState<PostNav>({ previous: null, next: null });
+  const [quotaMessage, setQuotaMessage] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if postId is in format <slug>-<id>. If so, extract the id part.
@@ -83,15 +87,32 @@ function PostContent() {
     }
     const abortController = new AbortController();
     void (async () => {
-      const { post, previous, next } = await api.getPost(resolvedPostId, getContextQS());
-      if (!abortController.signal.aborted) {
-        setContent(post);
-        setPostNav({ previous, next });
+      try {
+        setQuotaMessage(null);
+        const { post, previous, next } = await api.getPost(resolvedPostId, getContextQS());
+        if (!abortController.signal.aborted) {
+          setContent(post);
+          setPostNav({ previous, next });
+        }
+      }
+      catch (e) {
+        // Anything else is left to the loading state it already had - this
+        // page only knows what to say about the one refusal it can explain.
+        if (e instanceof QuotaExceededError && !abortController.signal.aborted) {
+          setQuotaMessage(e.message);
+        }
+      }
+      finally {
+        // Opening a post is what spends the allowance, so the sidebar is
+        // brought up to date whether this one was served or refused.
+        if (!abortController.signal.aborted) {
+          void refreshQuota();
+        }
       }
     })();
 
     return () => abortController.abort();
-  }, [api, postId]);
+  }, [api, postId, refreshQuota]);
 
   useEffect(() => {
     setTitle(post?.title || null);
@@ -148,6 +169,19 @@ function PostContent() {
       </ContentColumn>
     );
   }, [postNav, scrollTo, settings]);
+
+  if (quotaMessage) {
+    return (
+      <ContentColumn settings={settings}>
+        <Result
+          className="py-5"
+          status="warning"
+          title="Daily limit reached"
+          subTitle={quotaMessage}
+        />
+      </ContentColumn>
+    );
+  }
 
   if (!post) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;

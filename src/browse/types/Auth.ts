@@ -1,3 +1,5 @@
+import { type UserQuota } from './Quota.js';
+
 export type UserRole = 'admin' | 'user';
 
 /**
@@ -24,6 +26,14 @@ export interface AuthUser {
    * can change their own permissions.
    */
   visibleCampaigns: string[] | null;
+  /**
+   * How much this user may read in a day, counted from 08:00 Beijing time.
+   *
+   * `null` on either field means that kind is not limited - which is what
+   * every account that existed before limits carries, and what an
+   * administrator always carries.
+   */
+  quota: UserQuota;
 }
 
 export interface AuthSession {
@@ -40,6 +50,11 @@ export interface CreateUserRequest {
   password: string;
   role: UserRole;
   visibleCampaigns?: string[] | null;
+  /**
+   * Omit to start the account on the default allowance
+   * (`DEFAULT_USER_QUOTA`); send a field as `null` to lift that limit.
+   */
+  quota?: Partial<UserQuota> | null;
 }
 
 export interface UpdateUserRequest {
@@ -47,4 +62,6 @@ export interface UpdateUserRequest {
   role?: UserRole;
   /** Omit to leave as it is; `null` to lift the restriction entirely. */
   visibleCampaigns?: string[] | null;
+  /** Omit a field to leave it as it is; send `null` to lift that limit. */
+  quota?: Partial<UserQuota> | null;
 }

@@ -4,6 +4,12 @@ import path from 'path';
 import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
 import { type AuthUser, type UserRole } from '../types/Auth.js';
+import {
+  DEFAULT_USER_QUOTA,
+  UNLIMITED_QUOTA,
+  type QuotaKind,
+  type UserQuota
+} from '../types/Quota.js';
 
 /**
  * A user as stored on disk. The hash and its salt never leave this module -
@@ -52,6 +58,50 @@ function normalizeVisibleCampaigns(
   return [ ...new Set(ids) ];
 }
 
+/**
+ * One daily limit as it arrived. `null` is no limit, and zero is kept as zero -
+ * an account that may open nothing today is a real setting, not a mistake.
+ */
+function normalizeQuotaValue(value: unknown, kind: QuotaKind): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw Error(`The daily limit for ${kind} must be a number of 0 or more, or null for no limit`);
+  }
+  return Math.floor(value);
+}
+
+/**
+ * The stored form of a daily allowance.
+ *
+ * Administrators are never limited, for the same reason they are never
+ * restricted to certain creators: they can lift their own allowance, so
+ * storing one would only be something to go stale.
+ *
+ * `fallback` is what an unspecified allowance becomes - the defaults for a new
+ * account, and whatever is already on file for an existing one.
+ */
+function normalizeQuota(
+  quota: Partial<UserQuota> | null | undefined,
+  role: UserRole,
+  fallback: UserQuota
+): UserQuota {
+  if (role === 'admin') {
+    return { ...UNLIMITED_QUOTA };
+  }
+  if (quota === null || quota === undefined) {
+    return { posts: fallback.posts, videos: fallback.videos };
+  }
+  if (typeof quota !== 'object') {
+    throw Error('"quota" must be an object with "posts" and "videos"');
+  }
+  return {
+    posts: 'posts' in quota ? normalizeQuotaValue(quota.posts, 'posts') : fallback.posts,
+    videos: 'videos' in quota ? normalizeQuotaValue(quota.videos, 'videos') : fallback.videos
+  };
+}
+
 function hashPassword(password: string, salt: string) {
   return crypto.scryptSync(password, salt, SCRYPT_KEY_LENGTH).toString('base64');
 }
@@ -94,6 +144,11 @@ export default class AuthStore {
       // they carry on doing until someone narrows them.
       for (const user of data.users) {
         user.visibleCampaigns = normalizeVisibleCampaigns(user.visibleCampaigns, user.role);
+        // Accounts written before daily limits existed have no allowance on
+        // file. They have been reading without one up to this point, so that
+        // is what they carry on doing until someone sets one - only accounts
+        // made from here on start on `DEFAULT_USER_QUOTA`.
+        user.quota = normalizeQuota(user.quota, user.role, UNLIMITED_QUOTA);
       }
       return new AuthStore(filePath, data, logger);
     }
@@ -111,6 +166,7 @@ export default class AuthStore {
           role: 'admin',
           createdAt: new Date().toISOString(),
           visibleCampaigns: null,
+          quota: { ...UNLIMITED_QUOTA },
           salt,
           passwordHash: hashPassword(password, salt)
         }
@@ -161,6 +217,7 @@ export default class AuthStore {
     password: string;
     role: UserRole;
     visibleCampaigns?: string[] | null;
+    quota?: Partial<UserQuota> | null;
   }): AuthUser {
     const username = params.username.trim();
     if (!username) {
@@ -177,6 +234,9 @@ export default class AuthStore {
       role: params.role,
       createdAt: new Date().toISOString(),
       visibleCampaigns: normalizeVisibleCampaigns(params.visibleCampaigns, params.role),
+      // A new account is limited unless it is told otherwise - the opposite of
+      // what the accounts already on file kept.
+      quota: normalizeQuota(params.quota, params.role, DEFAULT_USER_QUOTA),
       salt,
       passwordHash: hashPassword(params.password, salt)
     };
@@ -189,6 +249,7 @@ export default class AuthStore {
     password?: string;
     role?: UserRole;
     visibleCampaigns?: string[] | null;
+    quota?: Partial<UserQuota> | null;
   }): AuthUser {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
@@ -210,6 +271,11 @@ export default class AuthStore {
       params.visibleCampaigns !== undefined ? params.visibleCampaigns : user.visibleCampaigns,
       user.role
     );
+    // Re-normalized against the role that now applies, the same way the
+    // creator restriction is: promoting someone drops an allowance that is
+    // about to stop being enforced, rather than leaving it to be silently
+    // reapplied if they are demoted again.
+    user.quota = normalizeQuota(params.quota, user.role, user.quota);
     if (params.password !== undefined) {
       this.#assertPassword(params.password);
       user.salt = crypto.randomBytes(SALT_BYTES).toString('base64');
@@ -246,10 +312,14 @@ export default class AuthStore {
   }
 
   #toAuthUser(user: StoredUser): AuthUser {
-    const { id, username, role, createdAt, visibleCampaigns } = user;
+    const { id, username, role, createdAt, visibleCampaigns, quota } = user;
     // A copy, so a caller cannot reach into the store and edit a permission
     // in place - the array would otherwise be the live one.
-    return { id, username, role, createdAt, visibleCampaigns: visibleCampaigns ? [ ...visibleCampaigns ] : null };
+    return {
+      id, username, role, createdAt,
+      visibleCampaigns: visibleCampaigns ? [ ...visibleCampaigns ] : null,
+      quota: { ...quota }
+    };
   }
 
   #save() {

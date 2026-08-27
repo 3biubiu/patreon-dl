@@ -1,9 +1,10 @@
 import "../assets/styles/Users.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Button, Form, Input, Modal, Popconfirm, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
+import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
 import { DeleteOutlined, EditOutlined, UserAddOutlined } from "@ant-design/icons";
 import { type FormInstance } from "antd";
 import { type AuthUser, type UserRole } from "../../types/Auth";
+import { DEFAULT_USER_QUOTA, type UserQuota } from "../../types/Quota";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { useDocument } from "../contexts/DocumentProvider";
@@ -17,12 +18,23 @@ import { LoadingBlock } from "../components/Loading";
  */
 type CampaignAccess = 'all' | 'selected';
 
+/**
+ * A daily limit is the same shape of choice as the creator restriction: a mode
+ * and a value. Splitting them keeps "unlimited" from having to be spelled as
+ * an empty box, and leaves zero free to mean what it says - nothing today.
+ */
+type QuotaMode = 'unlimited' | 'limited';
+
 interface UserFormValues {
   username: string;
   password: string;
   role: UserRole;
   campaignAccess: CampaignAccess;
   visibleCampaigns: string[];
+  postQuotaMode: QuotaMode;
+  postQuota: number;
+  videoQuotaMode: QuotaMode;
+  videoQuota: number;
 }
 
 const ROLE_OPTIONS = [
@@ -34,6 +46,24 @@ const CAMPAIGN_ACCESS_OPTIONS = [
   { value: 'all', label: 'All creators' },
   { value: 'selected', label: 'Only selected' }
 ];
+
+const QUOTA_MODE_OPTIONS = [
+  { value: 'unlimited', label: 'Unlimited' },
+  { value: 'limited', label: 'Limit to' }
+];
+
+/** The form's two fields for one limit, from the single value on the wire. */
+function quotaFields(limit: number | null, fallback: number) {
+  return {
+    mode: (limit === null ? 'unlimited' : 'limited') as QuotaMode,
+    value: limit === null ? fallback : limit
+  };
+}
+
+/** How a limit reads in the table. */
+function describeLimit(limit: number | null) {
+  return limit === null ? 'Unlimited' : `${limit}/day`;
+}
 
 /** Enough to hold every creator in one go for all but the largest libraries. */
 const CAMPAIGN_FETCH_SIZE = 500;
@@ -115,16 +145,29 @@ function Users() {
   const openEditor = useCallback((target: AuthUser | 'new') => {
     setError(null);
     setEditing(target);
-    form.setFieldsValue(target === 'new' ?
-      { username: '', password: '', role: 'user', campaignAccess: 'all', visibleCampaigns: [] }
-      : {
-        username: target.username,
-        password: '',
-        role: target.role,
-        campaignAccess: target.visibleCampaigns ? 'selected' : 'all',
-        visibleCampaigns: target.visibleCampaigns || []
-      }
+    // A new account opens on the defaults every new account gets, so the form
+    // shows what would happen anyway rather than something the server would
+    // then override.
+    const posts = quotaFields(
+      target === 'new' ? DEFAULT_USER_QUOTA.posts : target.quota.posts,
+      DEFAULT_USER_QUOTA.posts ?? 0
     );
+    const videos = quotaFields(
+      target === 'new' ? DEFAULT_USER_QUOTA.videos : target.quota.videos,
+      DEFAULT_USER_QUOTA.videos ?? 0
+    );
+    form.setFieldsValue({
+      username: target === 'new' ? '' : target.username,
+      password: '',
+      role: target === 'new' ? 'user' : target.role,
+      campaignAccess:
+        target === 'new' ? 'all' : (target.visibleCampaigns ? 'selected' : 'all'),
+      visibleCampaigns: target === 'new' ? [] : (target.visibleCampaigns || []),
+      postQuotaMode: posts.mode,
+      postQuota: posts.value,
+      videoQuotaMode: videos.mode,
+      videoQuota: videos.value
+    });
   }, [form]);
 
   const handleSubmit = useCallback(async (values: UserFormValues) => {
@@ -137,13 +180,21 @@ function Users() {
     const visibleCampaigns =
       values.role === 'admin' || values.campaignAccess === 'all' ?
         null : (values.visibleCampaigns || []);
+    // Same for the allowance: an administrator is never limited, so the numbers
+    // the form was last showing are not sent along with a promotion.
+    const quota: UserQuota = values.role === 'admin' ?
+      { posts: null, videos: null } : {
+        posts: values.postQuotaMode === 'unlimited' ? null : (values.postQuota ?? 0),
+        videos: values.videoQuotaMode === 'unlimited' ? null : (values.videoQuota ?? 0)
+      };
     try {
       if (editing === 'new') {
         await api.createUser({
           username: values.username,
           password: values.password,
           role: values.role,
-          visibleCampaigns
+          visibleCampaigns,
+          quota
         });
       }
       else {
@@ -152,7 +203,8 @@ function Users() {
         await api.updateUser(editing.id, {
           role: values.role,
           password: values.password || undefined,
-          visibleCampaigns
+          visibleCampaigns,
+          quota
         });
       }
       setEditing(null);
@@ -243,6 +295,31 @@ function Users() {
             }
           },
           {
+            title: 'Daily limit',
+            key: 'quota',
+            render: (_, user) => {
+              if (user.role === 'admin') {
+                return <Tag>Unlimited</Tag>;
+              }
+              const { posts, videos } = user.quota;
+              if (posts === null && videos === null) {
+                return <Tag>Unlimited</Tag>;
+              }
+              return (
+                <Tooltip title={`Posts: ${describeLimit(posts)} · Videos: ${describeLimit(videos)}`}>
+                  <Space size={4}>
+                    <Tag color={posts === null ? undefined : 'blue'}>
+                      {`Posts ${describeLimit(posts)}`}
+                    </Tag>
+                    <Tag color={videos === null ? undefined : 'blue'}>
+                      {`Videos ${describeLimit(videos)}`}
+                    </Tag>
+                  </Space>
+                </Tooltip>
+              );
+            }
+          },
+          {
             title: 'Added',
             dataIndex: 'createdAt',
             render: (createdAt: string) => new Date(createdAt).toLocaleDateString()
@@ -319,6 +396,7 @@ function Users() {
             options={campaignOptions}
             loading={campaigns === null}
           />
+          <QuotaFields form={form} />
         </Form>
       </Modal>
     </div>
@@ -377,6 +455,75 @@ function CampaignAccessFields(props: {
         ) : null
       }
     </>
+  );
+}
+
+/**
+ * The daily allowance, which only applies to ordinary users.
+ *
+ * Two limits, each either lifted or a number. Its own component for the same
+ * reason the creator fields are: watching the role and the two modes should
+ * re-render this and not the user table above it.
+ */
+function QuotaFields(props: { form: FormInstance<UserFormValues>; }) {
+  const { form } = props;
+  const role = Form.useWatch('role', form);
+
+  if (role === 'admin') {
+    return null;
+  }
+
+  return (
+    <>
+      <QuotaField
+        form={form}
+        label="Posts per day"
+        modeName="postQuotaMode"
+        valueName="postQuota"
+        extra="Counted when a post is opened. Going back to one already opened today costs nothing. Resets at 08:00 Beijing time."
+      />
+      <QuotaField
+        form={form}
+        label="Videos per day"
+        modeName="videoQuotaMode"
+        valueName="videoQuota"
+        extra="Counted when a video starts playing. Replaying one already watched today costs nothing."
+      />
+    </>
+  );
+}
+
+function QuotaField(props: {
+  form: FormInstance<UserFormValues>;
+  label: string;
+  modeName: 'postQuotaMode' | 'videoQuotaMode';
+  valueName: 'postQuota' | 'videoQuota';
+  extra: string;
+}) {
+  const { form, label, modeName, valueName, extra } = props;
+  const mode = Form.useWatch(modeName, form);
+
+  return (
+    <Form.Item label={label} extra={extra} className="mb-3">
+      <Space align="start">
+        <Form.Item name={modeName} noStyle>
+          <Radio.Group options={QUOTA_MODE_OPTIONS} optionType="button" />
+        </Form.Item>
+        {
+          mode === 'limited' ? (
+            <Form.Item
+              name={valueName}
+              noStyle
+              rules={[ { required: true, message: 'Enter a number' } ]}
+            >
+              {/* Zero is allowed and means nothing today - a real setting, not
+                  a way of saying "unlimited". */}
+              <InputNumber min={0} step={1} precision={0} style={{ width: 100 }} />
+            </Form.Item>
+          ) : null
+        }
+      </Space>
+    </Form.Item>
   );
 }
 

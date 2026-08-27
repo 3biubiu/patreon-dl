@@ -3,8 +3,11 @@ import { type Logger } from '../../../utils/logging/index.js';
 import Basehandler from './BaseHandler.js';
 import type AuthStore from '../AuthStore.js';
 import type HistoryStore from '../HistoryStore.js';
+import type QuotaStore from '../QuotaStore.js';
 import { clearSession, issueSession, type AuthenticatedRequest } from '../AuthGuard.js';
 import { type UserRole } from '../../types/Auth.js';
+import { quotaStatus } from '../QuotaGuard.js';
+import { type QuotaKind, type UserQuota } from '../../types/Quota.js';
 
 const ROLES: UserRole[] = [ 'admin', 'user' ];
 
@@ -34,16 +37,65 @@ function readVisibleCampaigns(body: unknown): string[] | null | undefined {
   throw Error('"visibleCampaigns" must be an array of campaign ids, or null');
 }
 
+/**
+ * One daily limit as it arrived over the wire. `null` is "no limit"; a number
+ * is the allowance, zero included. Anything else is rejected rather than
+ * guessed at, so a malformed body cannot quietly lift a limit.
+ */
+function readQuotaValue(value: unknown, kind: QuotaKind): number | null {
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw Error(`"quota.${kind}" must be a number of 0 or more, or null for no limit`);
+  }
+  return Math.floor(value);
+}
+
+/**
+ * The allowance as it arrived. `undefined` means the field was not sent -
+ * leave what is on file alone - and a field left out of the object is left
+ * alone in the same way.
+ */
+function readQuota(body: unknown): Partial<UserQuota> | undefined {
+  if (!body || typeof body !== 'object' || !('quota' in body)) {
+    return undefined;
+  }
+  const value = (body as { quota: unknown }).quota;
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'object') {
+    throw Error('"quota" must be an object with "posts" and "videos"');
+  }
+  const given = value as Partial<Record<QuotaKind, unknown>>;
+  const quota: Partial<UserQuota> = {};
+  if ('posts' in given) {
+    quota.posts = readQuotaValue(given.posts, 'posts');
+  }
+  if ('videos' in given) {
+    quota.videos = readQuotaValue(given.videos, 'videos');
+  }
+  return quota;
+}
+
 export default class AuthAPIRequestHandler extends Basehandler {
   name = 'AuthAPIRequestHandler';
 
   #store: AuthStore;
   #historyStore: HistoryStore;
+  #quotaStore: QuotaStore;
 
-  constructor(store: AuthStore, historyStore: HistoryStore, logger?: Logger | null) {
+  constructor(
+    store: AuthStore,
+    historyStore: HistoryStore,
+    quotaStore: QuotaStore,
+    logger?: Logger | null
+  ) {
     super(logger);
     this.#store = store;
     this.#historyStore = historyStore;
+    this.#quotaStore = quotaStore;
   }
 
   handleLoginRequest(req: Request, res: Response) {
@@ -73,6 +125,20 @@ export default class AuthAPIRequestHandler extends Basehandler {
     res.json({ user: (req as AuthenticatedRequest).authUser || null });
   }
 
+  /**
+   * Where the signed-in account stands today. Answered for administrators too,
+   * who simply come back unlimited - the browser can then ask the same
+   * question whoever is looking.
+   */
+  handleQuotaRequest(req: Request, res: Response) {
+    const user = (req as AuthenticatedRequest).authUser;
+    if (!user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    res.json({ quota: quotaStatus(this.#quotaStore, user) });
+  }
+
   handleListUsersRequest(_req: Request, res: Response) {
     res.json({ users: this.#store.listUsers() });
   }
@@ -86,7 +152,8 @@ export default class AuthAPIRequestHandler extends Basehandler {
     }
     try {
       const visibleCampaigns = readVisibleCampaigns(req.body);
-      res.json({ user: this.#store.createUser({ username, password, role, visibleCampaigns }) });
+      const quota = readQuota(req.body);
+      res.json({ user: this.#store.createUser({ username, password, role, visibleCampaigns, quota }) });
     }
     catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'Could not create user' });
@@ -98,7 +165,8 @@ export default class AuthAPIRequestHandler extends Basehandler {
     const role = readRole((req.body as { role?: unknown } | undefined)?.role);
     try {
       const visibleCampaigns = readVisibleCampaigns(req.body);
-      const user = this.#store.updateUser(id, { password, role, visibleCampaigns });
+      const quota = readQuota(req.body);
+      const user = this.#store.updateUser(id, { password, role, visibleCampaigns, quota });
       // Changing your own password does not sign you out: the session names a
       // user id, and that has not changed.
       res.json({ user });
@@ -118,6 +186,8 @@ export default class AuthAPIRequestHandler extends Basehandler {
       // Nothing can sign in as this account any more, so what it watched is
       // just a file that grows.
       this.#historyStore.forgetUser(id);
+      // Same reasoning for today's counters - nothing can spend them any more.
+      this.#quotaStore.forgetUser(id);
       res.json({ ok: true });
     }
     catch (error) {

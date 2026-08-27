@@ -1,18 +1,13 @@
 import "../assets/styles/History.scss";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Empty, Popconfirm, Progress, Table, Tabs, Tag } from "antd";
+import { Alert, Empty, Progress, Table, Tabs, Tag } from "antd";
 import { Link } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
 import Icon from "../components/Icon";
 import { DESKTOP_QUERY, useMediaQuery } from "../utils/useMediaQuery";
-import {
-  MAX_FAVORITES,
-  type FavoriteListItem,
-  type ViewedPostListItem,
-  type WatchedVideoListItem
-} from "../../types/History";
+import { type ViewedPostListItem, type WatchedVideoListItem } from "../../types/History";
 
 function formatWhen(value: string) {
   const date = new Date(value);
@@ -94,8 +89,6 @@ function History() {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [ videos, setVideos ] = useState<WatchedVideoListItem[] | null>(null);
   const [ posts, setPosts ] = useState<ViewedPostListItem[] | null>(null);
-  const [ favorites, setFavorites ] = useState<FavoriteListItem[] | null>(null);
-  const [ busyPostId, setBusyPostId ] = useState<string | null>(null);
   const [ error, setError ] = useState<string | null>(null);
 
   useEffect(() => {
@@ -104,21 +97,18 @@ function History() {
 
   const load = useCallback(async () => {
     try {
-      const [ watched, viewed, saved ] = await Promise.all([
+      const [ watched, viewed ] = await Promise.all([
         api.listWatchedVideos(),
-        api.listViewedPosts(),
-        api.listFavorites()
+        api.listViewedPosts()
       ]);
       setVideos(watched);
       setPosts(viewed);
-      setFavorites(saved);
       setError(null);
     }
     catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load history');
       setVideos([]);
       setPosts([]);
-      setFavorites([]);
     }
   }, [api]);
 
@@ -126,22 +116,7 @@ function History() {
     void load();
   }, [load]);
 
-  const removeFavorite = useCallback(async (postId: string) => {
-    setBusyPostId(postId);
-    try {
-      await api.removeFavorite(postId);
-      setFavorites((prev) => prev ? prev.filter((favorite) => favorite.postId !== postId) : prev);
-      setError(null);
-    }
-    catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update favorites');
-    }
-    finally {
-      setBusyPostId(null);
-    }
-  }, [api]);
-
-  if (!videos || !posts || !favorites) {
+  if (!videos || !posts) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
 
@@ -233,75 +208,11 @@ function History() {
     />
   );
 
-  const favoritesTable = (
-    <Table<FavoriteListItem>
-      rowKey="postId"
-      dataSource={favorites}
-      pagination={false}
-      locale={{
-        emptyText: <Empty description="No favorites yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-      }}
-      columns={[
-        {
-          title: '',
-          key: 'thumbnail',
-          width: 96,
-          render: (_, item) => <HistoryThumbnail mediaId={item.thumbnailMediaId} />
-        },
-        {
-          title: 'Post',
-          key: 'title',
-          render: (_, item) => (
-            <div className="history__entry">
-              <EntryTitle title={item.title} to={item.title ? `/posts/${item.postId}` : null} />
-              {item.campaignName ? <Tag>{item.campaignName}</Tag> : null}
-            </div>
-          )
-        },
-        ...(isDesktop ? [ {
-          title: 'Saved',
-          dataIndex: 'favoritedAt',
-          width: 200,
-          render: (favoritedAt: string) => formatWhen(favoritedAt)
-        } ] : []),
-        {
-          title: '',
-          key: 'actions',
-          width: isDesktop ? 110 : 56,
-          render: (_: unknown, item: FavoriteListItem) => (
-            <Popconfirm
-              title="Remove from favorites?"
-              okText="Remove"
-              cancelText="Never mind"
-              onConfirm={() => void removeFavorite(item.postId)}
-            >
-              {
-                isDesktop ?
-                  <Button size="small" type="text" loading={busyPostId === item.postId}>Remove</Button>
-                  : (
-                    <Button
-                      size="small"
-                      type="text"
-                      loading={busyPostId === item.postId}
-                      icon={<Icon name="delete_outline" />}
-                      aria-label="Remove from favorites"
-                    />
-                  )
-              }
-            </Popconfirm>
-          )
-        }
-      ]}
-    />
-  );
-
   return (
     <div className="history">
       <div className="history__header">
         <h2 className="m-0">History</h2>
-        <span className="history__note">
-          The last ten videos and posts are kept; up to {MAX_FAVORITES} favorites.
-        </span>
+        <span className="history__note">The last ten of each are kept.</span>
       </div>
       {
         error ? (
@@ -312,8 +223,7 @@ function History() {
         defaultActiveKey="videos"
         items={[
           { key: 'videos', label: `Videos (${videos.length})`, children: videosTable },
-          { key: 'posts', label: `Posts (${posts.length})`, children: postsTable },
-          { key: 'favorites', label: `Favorites (${favorites.length})`, children: favoritesTable }
+          { key: 'posts', label: `Posts (${posts.length})`, children: postsTable }
         ]}
       />
     </div>

@@ -29,6 +29,7 @@ import TranscriptionHistory from "./pages/TranscriptionHistory";
 import { DARK_SCHEME_QUERY, useMediaQuery } from "./utils/useMediaQuery";
 import PlayerControls from "./components/PlayerControls";
 import History from "./pages/History";
+import Favorites from "./pages/Favorites";
 
 function App() {
   // With the theme picker gone, light / dark simply follows the OS. Both
@@ -94,6 +95,7 @@ function App() {
                       <Route path="collections/:id" element={<CollectionLayout />}>
                         <Route index element={<CampaignContent type="post" collection />} />
                       </Route>
+                      <Route path="favorites" element={<Favorites />} />
                       <Route path="history" element={<History />} />
                       <Route path="users" element={<Users />} />
                       <Route path="transcription" element={<TranscriptionHistory />} />

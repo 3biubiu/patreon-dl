@@ -8,6 +8,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   SettingOutlined,
+  StarOutlined,
   TeamOutlined,
   AudioOutlined
 } from "@ant-design/icons";
@@ -31,6 +32,7 @@ interface SidebarProps {
 }
 
 const SETTINGS_KEY = 'settings';
+const FAVORITES_KEY = '/favorites';
 const HISTORY_KEY = '/history';
 const USERS_KEY = '/users';
 const TRANSCRIPTION_KEY = '/transcription';
@@ -79,8 +81,10 @@ function Sidebar(props: SidebarProps) {
   const items = useMemo<MenuProps['items']>(() => {
     const items: NonNullable<MenuProps['items']> = [
       { key: '/', icon: <HomeOutlined />, label: 'Home' },
-      // Everyone has one of their own, so unlike the entries below it this is
-      // not tied to a role.
+      // Both belong to the account rather than to a role. Favorites sits above
+      // History: it is the list the user built on purpose, not the trace
+      // browsing left behind.
+      { key: FAVORITES_KEY, icon: <StarOutlined />, label: 'Favorites' },
       { key: HISTORY_KEY, icon: <HistoryOutlined />, label: 'History' }
     ];
     if (campaignItems.length > 0) {
@@ -133,6 +137,9 @@ function Sidebar(props: SidebarProps) {
     );
     if (match) {
       return [ match.key ];
+    }
+    if (path === FAVORITES_KEY) {
+      return [ FAVORITES_KEY ];
     }
     if (path === HISTORY_KEY) {
       return [ HISTORY_KEY ];

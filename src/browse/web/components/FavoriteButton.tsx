@@ -84,9 +84,9 @@ function FavoriteButton(props: FavoriteButtonProps) {
         onClick={() => void toggle()}
         icon={
           <Icon
-            name={favorite ? 'bookmark' : 'bookmark_border'}
+            name="star"
             outlined={!favorite}
-            style={favorite ? { color: 'var(--bs-primary)' } : undefined}
+            style={favorite ? { color: 'var(--bs-warning)' } : undefined}
           />
         }
       />

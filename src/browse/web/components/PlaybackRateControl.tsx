@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import PlayerMenuButton from "./PlayerMenuButton";
 
 /** Capped at 2x, past which speech stops being followable. */
 const RATES = [ 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2 ];
@@ -17,6 +18,7 @@ function readStoredRate() {
 
 interface PlaybackRateControlProps {
   video: HTMLVideoElement;
+  variant: 'toolbar' | 'floating';
 }
 
 /**
@@ -26,12 +28,9 @@ interface PlaybackRateControlProps {
  * everyone finds: Chrome buries it in the overflow menu, and Firefox puts it
  * in the right-click menu - which this app closes on players, because that is
  * also where "Save video as" lives.
- *
- * A plain `<select>` on purpose: its menu is drawn by the OS, so it cannot end
- * up behind the lightbox the way a stacked-in-page dropdown can.
  */
 function PlaybackRateControl(props: PlaybackRateControlProps) {
-  const { video } = props;
+  const { video, variant } = props;
   const [ rate, setRate ] = useState(readStoredRate);
   // Read inside an effect that must not re-run when the rate changes, so it
   // cannot be allowed to close over a stale value.
@@ -44,8 +43,8 @@ function PlaybackRateControl(props: PlaybackRateControlProps) {
     video.playbackRate = rateRef.current;
   }, [ video ]);
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = Number(e.target.value);
+  const handleSelect = useCallback((key: string) => {
+    const value = Number(key);
     if (!RATES.includes(value)) {
       return;
     }
@@ -60,25 +59,17 @@ function PlaybackRateControl(props: PlaybackRateControlProps) {
   }, [ video ]);
 
   return (
-    <div className="player-controls__control">
-      <label className="player-controls__label" htmlFor="playback-rate-select">
-        Speed
-      </label>
-      <select
-        id="playback-rate-select"
-        className="player-controls__select"
-        value={rate}
-        onChange={handleChange}
-      >
-        {
-          RATES.map((value) => (
-            <option key={`playback-rate-${value}`} value={value}>
-              {value}x
-            </option>
-          ))
-        }
-      </select>
-    </div>
+    <PlayerMenuButton
+      icon="speed"
+      label="Playback speed"
+      value={String(rate)}
+      items={RATES.map((value) => ({ key: String(value), label: `${value}x` }))}
+      onSelect={handleSelect}
+      // The icon alone would not say which speed is in effect, and that is the
+      // one thing worth knowing at a glance.
+      badge={rate === 1 ? undefined : `${rate}x`}
+      variant={variant}
+    />
   );
 }
 

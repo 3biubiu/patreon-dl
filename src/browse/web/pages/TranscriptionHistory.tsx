@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import "../assets/styles/TranscriptionHistory.scss";
+import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Empty, Popconfirm, Progress, Space, Table, Tag, Tooltip } from "antd";
 import { Link } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
+import Icon from "../components/Icon";
+import { useMediaQuery, DESKTOP_QUERY } from "../utils/useMediaQuery";
 import {
   isActive,
   type TranscriptionRecord,
@@ -60,6 +63,35 @@ function formatDuration(record: TranscriptionRecord) {
 }
 
 /**
+ * The video's poster, or a stand-in of the same size.
+ *
+ * The server generates a frame for videos that never had a thumbnail
+ * downloaded, and caches it - but it can still come back empty, and a broken
+ * image icon in every row would be worse than none.
+ */
+function VideoThumbnail(props: { mediaId: string }) {
+  const [ failed, setFailed ] = useState(false);
+  useEffect(() => setFailed(false), [ props.mediaId ]);
+
+  if (failed) {
+    return (
+      <span className="transcription-history__thumbnail transcription-history__thumbnail-placeholder">
+        <Icon name="movie" outlined />
+      </span>
+    );
+  }
+  return (
+    <img
+      className="transcription-history__thumbnail"
+      src={`/media/${props.mediaId}?t=1`}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+/**
  * Every transcription that has been asked for and what became of it.
  *
  * The server writes each step to its index as it happens, so this is a plain
@@ -69,11 +101,10 @@ function formatDuration(record: TranscriptionRecord) {
 function TranscriptionHistory() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
+  const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [ records, setRecords ] = useState<TranscriptionRecord[] | null>(null);
   const [ error, setError ] = useState<string | null>(null);
   const [ busyId, setBusyId ] = useState<string | null>(null);
-  // Read inside the polling effect, which must not restart on every tick.
-  const anyActiveRef = useRef(false);
   const [ anyActive, setAnyActive ] = useState(false);
 
   useEffect(() => {
@@ -84,9 +115,7 @@ function TranscriptionHistory() {
     try {
       const result = await api.listTranscriptions();
       setRecords(result);
-      const active = result.some(isActive);
-      anyActiveRef.current = active;
-      setAnyActive(active);
+      setAnyActive(result.some(isActive));
     }
     catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load the transcription history');
@@ -122,51 +151,127 @@ function TranscriptionHistory() {
     return error ? <Alert type="error" title={error} showIcon /> : <LoadingBlock />;
   }
 
-  const columns = [
-    {
-      title: 'Video',
-      dataIndex: 'videoName',
-      key: 'videoName',
-      render: (_: unknown, record: TranscriptionRecord) => (
+  const videoColumn = {
+    title: 'Video',
+    key: 'video',
+    render: (_: unknown, record: TranscriptionRecord) => (
+      <div className="transcription-history__video">
+        <VideoThumbnail mediaId={record.mediaId} />
         <Tooltip title={record.videoPath}>
-          <span>{record.videoName}</span>
+          <span className="transcription-history__name">{record.videoName}</span>
         </Tooltip>
-      )
-    },
-    {
-      title: 'State',
-      key: 'state',
-      width: 220,
-      render: (_: unknown, record: TranscriptionRecord) => (
-        <Space orientation="vertical" size={4} style={{ display: 'flex' }}>
-          <Space size={6}>
-            <Tag color={STATE_COLOR[record.state]}>{STATE_LABEL[record.state]}</Tag>
+      </div>
+    )
+  };
+
+  const stateColumn = {
+    title: isDesktop ? 'State' : 'Progress',
+    key: 'state',
+    width: isDesktop ? 220 : 110,
+    render: (_: unknown, record: TranscriptionRecord) => (
+      <div className="transcription-history__state">
+        <span>
+          <Tag color={STATE_COLOR[record.state]} style={{ marginInlineEnd: 4 }}>
+            {STATE_LABEL[record.state]}
+          </Tag>
+          {
+            isDesktop && record.state === 'running' && record.stage ?
+              <span className="transcription-history__stage">{STAGE_LABEL[record.stage]}</span>
+              : null
+          }
+        </span>
+        {
+          record.state === 'running' ?
+            <Progress percent={record.percent} size="small" />
+            : null
+        }
+        {
+          record.state === 'error' && record.error ?
+            <Tooltip title={record.error}>
+              <span className="transcription-history__error">{record.error}</span>
+            </Tooltip>
+            : null
+        }
+      </div>
+    )
+  };
+
+  const languageColumn = {
+    title: 'Lang',
+    dataIndex: 'language',
+    key: 'language',
+    width: isDesktop ? 100 : 60,
+    render: (language: string | null) => language || '—'
+  };
+
+  const actionsColumn = {
+    title: '',
+    key: 'actions',
+    width: isDesktop ? 170 : 78,
+    render: (_: unknown, record: TranscriptionRecord) => {
+      const busy = busyId === record.mediaId;
+      if (isActive(record)) {
+        return (
+          <Popconfirm
+            title="Cancel this transcription?"
+            description="Progress so far is discarded."
+            okText="Cancel it"
+            cancelText="Never mind"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => void run(record.mediaId, () => api.cancelTranscription(record.mediaId))}
+          >
             {
-              record.state === 'running' && record.stage ?
-                <span style={{ fontSize: '0.8em', opacity: 0.7 }}>{STAGE_LABEL[record.stage]}</span>
-                : null
+              isDesktop ?
+                <Button size="small" danger loading={busy}>Cancel</Button>
+                : <Button size="small" danger loading={busy} icon={<Icon name="close" />} aria-label="Cancel" />
             }
-          </Space>
-          {
-            record.state === 'running' ?
-              <Progress percent={record.percent} size="small" />
-              : null
-          }
-          {
-            record.state === 'error' && record.error ?
-              <span style={{ fontSize: '0.8em', color: 'var(--bs-danger)' }}>{record.error}</span>
-              : null
-          }
-        </Space>
-      )
-    },
-    {
-      title: 'Language',
-      dataIndex: 'language',
-      key: 'language',
-      width: 100,
-      render: (language: string | null) => language || '—'
-    },
+          </Popconfirm>
+        );
+      }
+      return (
+        <div className="transcription-history__actions">
+          <Popconfirm
+            title="Transcribe again?"
+            description={
+              record.state === 'done' ?
+                'The existing subtitle file is replaced.'
+                : 'It runs in the background and costs roughly $0.01 per hour of video.'
+            }
+            okText="Transcribe"
+            cancelText="Never mind"
+            onConfirm={() => void run(record.mediaId, () => api.startTranscription(record.mediaId))}
+          >
+            {
+              isDesktop ?
+                <Button size="small" loading={busy}>Retry</Button>
+                : <Button size="small" loading={busy} icon={<Icon name="refresh" />} aria-label="Retry" />
+            }
+          </Popconfirm>
+          <Popconfirm
+            title="Forget this record?"
+            description="The subtitle file it produced stays on disk."
+            okText="Forget"
+            cancelText="Never mind"
+            onConfirm={() => void run(record.mediaId, () => api.forgetTranscription(record.mediaId))}
+          >
+            {
+              isDesktop ?
+                <Button size="small" type="text" loading={busy}>Forget</Button>
+                : <Button size="small" type="text" loading={busy} icon={<Icon name="delete_outline" />} aria-label="Forget" />
+            }
+          </Popconfirm>
+        </div>
+      );
+    }
+  };
+
+  // A phone keeps the four that say what this is and what it is doing. The
+  // rest are for reading afterwards, and are what would push the table past
+  // the screen and put a scrollbar under it.
+  const columns = isDesktop ? [
+    videoColumn,
+    stateColumn,
+    languageColumn,
     {
       title: 'Cost',
       dataIndex: 'cost',
@@ -187,98 +292,63 @@ function TranscriptionHistory() {
       width: 180,
       render: (value: string) => formatTime(value)
     },
-    {
-      title: '',
-      key: 'actions',
-      width: 170,
-      render: (_: unknown, record: TranscriptionRecord) => {
-        const busy = busyId === record.mediaId;
-        if (isActive(record)) {
-          return (
-            <Popconfirm
-              title="Cancel this transcription?"
-              description="Progress so far is discarded."
-              okText="Cancel it"
-              cancelText="Never mind"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => void run(record.mediaId, () => api.cancelTranscription(record.mediaId))}
-            >
-              <Button size="small" danger loading={busy}>Cancel</Button>
-            </Popconfirm>
-          );
-        }
-        return (
-          <Space size={6}>
-            <Popconfirm
-              title="Transcribe again?"
-              description={
-                record.state === 'done' ?
-                  'The existing subtitle file is replaced.'
-                  : 'It runs in the background and costs roughly $0.01 per hour of video.'
-              }
-              okText="Transcribe"
-              cancelText="Never mind"
-              onConfirm={() => void run(record.mediaId, () => api.startTranscription(record.mediaId))}
-            >
-              <Button size="small" loading={busy}>Retry</Button>
-            </Popconfirm>
-            <Popconfirm
-              title="Forget this record?"
-              description="The subtitle file it produced stays on disk."
-              okText="Forget"
-              cancelText="Never mind"
-              onConfirm={() => void run(record.mediaId, () => api.forgetTranscription(record.mediaId))}
-            >
-              <Button size="small" type="text" loading={busy}>Forget</Button>
-            </Popconfirm>
-          </Space>
-        );
-      }
-    }
+    actionsColumn
+  ] : [
+    videoColumn,
+    languageColumn,
+    stateColumn,
+    actionsColumn
   ];
 
   const active = records.filter(isActive).length;
   const finished = records.length - active;
 
   return (
-    <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
+    <Space
+      orientation="vertical"
+      size="middle"
+      className="transcription-history"
+      style={{ display: 'flex' }}
+    >
       {
         error ?
           <Alert type="error" title={error} showIcon closable={{ onClose: () => setError(null) }} />
           : null
       }
 
-      <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+      <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
         <Link to="/transcription/settings">
           <Button>Settings</Button>
         </Link>
-        {
-          active > 0 ? (
-            <Popconfirm
-              title={`Stop ${active} transcription${active > 1 ? 's' : ''}?`}
-              description="The running one is aborted and the rest are taken off the queue. Progress so far is discarded."
-              okText="Stop all"
-              cancelText="Never mind"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => void run('', async () => { setRecords(await api.stopAllTranscriptions()); })}
-            >
-              <Button danger>Stop all ({active})</Button>
-            </Popconfirm>
-          ) : null
-        }
-        {
-          finished > 0 ? (
-            <Popconfirm
-              title="Clear finished records?"
-              description="Anything queued or running is kept. Subtitle files stay on disk."
-              okText="Clear"
-              cancelText="Never mind"
-              onConfirm={() => void run('', async () => { setRecords(await api.clearTranscriptionHistory()); })}
-            >
-              <Button>Clear finished ({finished})</Button>
-            </Popconfirm>
-          ) : null
-        }
+        <Space wrap>
+          {
+            active > 0 ? (
+              <Popconfirm
+                title={`Stop ${active} transcription${active > 1 ? 's' : ''}?`}
+                description="The running one is aborted and the rest are taken off the queue. Progress so far is discarded."
+                okText="Stop all"
+                cancelText="Never mind"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => void run('', async () => { setRecords(await api.stopAllTranscriptions()); })}
+              >
+                <Button danger>Stop all ({active})</Button>
+              </Popconfirm>
+            ) : null
+          }
+          {
+            finished > 0 ? (
+              <Popconfirm
+                title="Clear finished records?"
+                description="Anything queued or running is kept. Subtitle files stay on disk."
+                okText="Clear"
+                cancelText="Never mind"
+                onConfirm={() => void run('', async () => { setRecords(await api.clearTranscriptionHistory()); })}
+              >
+                <Button>Clear finished ({finished})</Button>
+              </Popconfirm>
+            ) : null
+          }
+        </Space>
       </Space>
 
       {
@@ -291,7 +361,9 @@ function TranscriptionHistory() {
               columns={columns}
               dataSource={records}
               pagination={{ pageSize: 20, hideOnSinglePage: true }}
-              scroll={{ x: 'max-content' }}
+              // No horizontal scroll: the column set is trimmed to fit instead,
+              // which is the point of dropping columns on a phone.
+              tableLayout="fixed"
             />
           )
       }

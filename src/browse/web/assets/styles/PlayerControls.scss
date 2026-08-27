@@ -1,71 +1,104 @@
-.player-controls {
+/**
+ * Controls that sit over a playing video, in one of two places: inside
+ * lightgallery's toolbar when it can be found, floating over the lightbox when
+ * it cannot.
+ */
+
+.player-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25em;
+  border: 0;
+  background: none;
+  cursor: pointer;
+
+  &__badge {
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1;
+    // The button is the click target; the label inside must not swallow it.
+    pointer-events: none;
+  }
+}
+
+/**
+ * Toolbar buttons. The metrics come from lightgallery's own `.lg-toolbar
+ * .lg-icon`, so these sit level with the zoom and close buttons rather than
+ * beside them at a different size.
+ */
+.player-controls--toolbar {
+  // Joins the toolbar's own float layout, which lays its buttons out from the
+  // right. Appended last, so the pair lands just left of the zoom buttons.
+  float: right;
+  display: flex;
+  align-items: center;
+  height: 47px;
+
+  .player-menu {
+    height: 47px;
+    min-width: 50px;
+    padding: 10px 0.4rem;
+    color: #999;
+    transition: color 0.2s linear;
+
+    // lightgallery's `.lg-icon` sets its own icon font with `!important`, but
+    // that applies to the button; the glyph is a child with a font of its own.
+    .material-icons,
+    .material-icons-outlined {
+      font-size: 22px;
+      line-height: 27px;
+    }
+
+    &:hover,
+    &:focus-visible {
+      color: #fff;
+    }
+
+    &:focus-visible {
+      outline: 1px solid rgba(255, 255, 255, 0.6);
+      outline-offset: -2px;
+    }
+  }
+}
+
+/** Fallback: a pill over the lightbox, clear of the toolbar along the top. */
+.player-controls--floating {
   position: fixed;
-  // Clear of lightgallery's own toolbar, which sits along the top edge.
   top: 4.25rem;
   right: 1.25rem;
-  // Above the lightbox (1050) and its toolbar.
+  // Above the lightbox (1050) and its toolbar (1082).
   z-index: 1090;
 
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.25rem;
+  padding: 0.15rem 0.3rem;
+  border-radius: 999px;
+  background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
 
-  &__control {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.3rem 0.5rem;
+  .player-menu {
+    padding: 0.3rem 0.45rem;
     border-radius: 999px;
     color: #fff;
-    background-color: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(2px);
-  }
 
-  &__label {
-    margin: 0;
-    font-size: 0.7rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    opacity: 0.7;
-  }
-
-  &__select {
-    padding: 0.1rem 0.2rem;
-    border: 0;
-    border-radius: var(--bs-border-radius);
-    color: #fff;
-    background-color: rgba(255, 255, 255, 0.15);
-    font-size: 0.8rem;
-    cursor: pointer;
-    // A long subtitle filename would otherwise stretch the pill across the
-    // player; the full text stays available in the open menu.
-    max-width: 12rem;
-
-    &:focus-visible {
-      outline: 2px solid #fff;
+    .material-icons,
+    .material-icons-outlined {
+      font-size: 20px;
     }
 
-    // The menu itself is drawn by the OS, which does not inherit the dark pill.
-    option {
-      color: initial;
-      background-color: initial;
+    &:hover,
+    &:focus-visible {
+      background-color: rgba(255, 255, 255, 0.15);
     }
   }
 }
 
 @media (max-width: 575.98px) {
-  .player-controls {
+  .player-controls--floating {
     top: auto;
     bottom: 1.25rem;
     right: 1rem;
-    // Two pills side by side do not fit a phone; stack them against the
-    // right edge instead.
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.5rem;
-  }
-
-  .player-controls__select {
-    max-width: 8rem;
   }
 }

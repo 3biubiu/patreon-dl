@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAPI } from "../contexts/APIProvider";
 import { getMediaIdFromVideo } from "../utils/useActiveVideo";
+import PlayerMenuButton from "./PlayerMenuButton";
 import { type SubtitleFile } from "../../types/Transcription";
 
 const OFF = '';
@@ -10,6 +11,7 @@ const MANAGED = 'data-subtitle-control';
 
 interface SubtitleControlProps {
   video: HTMLVideoElement;
+  variant: 'toolbar' | 'floating';
 }
 
 /**
@@ -26,7 +28,7 @@ interface SubtitleControlProps {
  * to render into it would mean waiting forever.
  */
 function SubtitleControl(props: SubtitleControlProps) {
-  const { video } = props;
+  const { video, variant } = props;
   const { api } = useAPI();
   const mediaId = getMediaIdFromVideo(video);
   const [ subtitles, setSubtitles ] = useState<SubtitleFile[]>([]);
@@ -102,26 +104,17 @@ function SubtitleControl(props: SubtitleControlProps) {
   }
 
   return (
-    <div className="player-controls__control">
-      <label className="player-controls__label" htmlFor="subtitle-select">
-        Subtitles
-      </label>
-      <select
-        id="subtitle-select"
-        className="player-controls__select"
-        value={selected}
-        onChange={(e) => setSelected(e.target.value)}
-      >
-        <option value={OFF}>Off</option>
-        {
-          subtitles.map((subtitle) => (
-            <option key={subtitle.filename} value={subtitle.filename}>
-              {subtitle.label}
-            </option>
-          ))
-        }
-      </select>
-    </div>
+    <PlayerMenuButton
+      icon={selected ? 'closed_caption' : 'closed_caption_disabled'}
+      label="Subtitles"
+      value={selected}
+      items={[
+        { key: OFF, label: 'Off' },
+        ...subtitles.map((subtitle) => ({ key: subtitle.filename, label: subtitle.label }))
+      ]}
+      onSelect={setSelected}
+      variant={variant}
+    />
   );
 }
 

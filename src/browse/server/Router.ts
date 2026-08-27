@@ -117,14 +117,18 @@ class _Router {
       this.#handlers.transcription.handleStatusRequest(req, res)
     );
 
-    this.#router.get('/api/media/:id/transcription', (req, res) =>
-      this.#handlers.transcription.handleJobRequest(req, res, req.params.id)
+    // The API key is set and cleared here. Administrators only, and the key
+    // itself is never in a response - see the handler.
+    this.#router.get('/api/transcription/settings', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleGetSettingsRequest(req, res)
     );
 
-    // Registered before the per-video route below so the intent is obvious;
-    // they cannot collide in any case, having different segment counts.
-    this.#router.get('/api/media/subtitles', (req, res) =>
-      this.#handlers.transcription.handleBatchSubtitleRequest(req, res)
+    this.#router.put('/api/transcription/settings', requireAdmin, (req, res) =>
+      this.#handlers.transcription.handleSaveSettingsRequest(req, res)
+    );
+
+    this.#router.get('/api/media/:id/transcription', (req, res) =>
+      this.#handlers.transcription.handleJobRequest(req, res, req.params.id)
     );
 
     this.#router.get('/api/media/:id/subtitles', (req, res) =>
@@ -254,7 +258,9 @@ export function getRouter(
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
     auth: new AuthAPIRequestHandler(authStore, logger),
     transcription: new TranscriptionAPIRequestHandler(
-      db, dataDir, transcription.index, transcription.queue, transcription.vad, logger
+      db, dataDir,
+      transcription.index, transcription.queue, transcription.vad, transcription.settings,
+      logger
     )
   }, authStore).router;
 }

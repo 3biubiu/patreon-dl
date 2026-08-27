@@ -10,19 +10,6 @@ const SUBTITLE_EXTENSIONS = [ '.srt', '.vtt' ];
 /** `en`, `zh-Hans`, `pt-BR` - a tag, not somebody's "final_v2". */
 const LANGUAGE_TAG = /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i;
 
-/**
- * Describes a subtitle already known from the index, without going near the
- * disk. Used to give a player its default captions for a whole page of tiles;
- * `listSubtitlesFor` is the one that goes looking for anything else.
- */
-export function describeIndexedSubtitle(
-  subtitlePath: string,
-  language: string | null
-): SubtitleFile {
-  const filename = path.basename(subtitlePath);
-  return { filename, language, label: toLabel(language, filename) };
-}
-
 function toLabel(language: string | null, filename: string) {
   if (!language) {
     return filename;

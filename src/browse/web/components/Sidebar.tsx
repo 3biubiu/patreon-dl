@@ -7,7 +7,8 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   SettingOutlined,
-  TeamOutlined
+  TeamOutlined,
+  AudioOutlined
 } from "@ant-design/icons";
 import { type Campaign } from "../../../entities";
 import { useAPI } from "../contexts/APIProvider";
@@ -30,6 +31,7 @@ interface SidebarProps {
 
 const SETTINGS_KEY = 'settings';
 const USERS_KEY = '/users';
+const TRANSCRIPTION_KEY = '/transcription';
 const SIGN_OUT_KEY = 'sign-out';
 const COLLAPSE_KEY = 'collapse';
 
@@ -102,6 +104,7 @@ function Sidebar(props: SidebarProps) {
     // non-administrators regardless of what the menu shows.
     if (user?.role === 'admin') {
       items.push({ key: USERS_KEY, icon: <TeamOutlined />, label: 'Users' });
+      items.push({ key: TRANSCRIPTION_KEY, icon: <AudioOutlined />, label: 'Transcription' });
     }
     items.push(
       { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' },

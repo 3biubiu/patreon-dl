@@ -3,6 +3,9 @@ import path from 'path';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
 import { type Segment } from './SubtitleBuilder.js';
+import { type KeyDescription } from '../../types/Transcription.js';
+
+export { type KeyDescription } from '../../types/Transcription.js';
 
 export const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 export const DEFAULT_MODEL = 'openai/whisper-large-v3-turbo';
@@ -56,28 +59,90 @@ interface APISegment {
  * by one, but a model substituted for it might not be, in which case
  * timestamps go missing and there is nothing to build subtitles from.
  */
+export interface TranscriberSettings {
+  apiKey: string | null;
+  model: string;
+  baseUrl: string;
+}
+
 export default class OpenRouterTranscriber {
   name = 'OpenRouterTranscriber';
 
-  #apiKey: string;
-  #model: string;
-  #baseUrl: string;
+  #getSettings: () => TranscriberSettings;
   #logger?: Logger | null;
 
-  constructor(
-    apiKey: string,
-    model = DEFAULT_MODEL,
-    baseUrl = DEFAULT_BASE_URL,
-    logger?: Logger | null
-  ) {
-    this.#apiKey = apiKey;
-    this.#model = model;
-    this.#baseUrl = baseUrl.replace(/\/+$/, '');
+  /**
+   * Settings are read through a function rather than captured, because an
+   * administrator can set the key from the browser: a value captured at
+   * startup would leave the feature dead until the server was restarted.
+   */
+  constructor(getSettings: () => TranscriberSettings, logger?: Logger | null) {
+    this.#getSettings = getSettings;
     this.#logger = logger;
   }
 
   get model() {
-    return this.#model;
+    return this.#getSettings().model;
+  }
+
+  #settings() {
+    const settings = this.#getSettings();
+    if (!settings.apiKey) {
+      throw new TranscriptionError(
+        'No OpenRouter API key is configured. An administrator can set one in the ' +
+        'transcription settings.'
+      );
+    }
+    return { ...settings, baseUrl: settings.baseUrl.replace(/\/+$/, '') };
+  }
+
+  /**
+   * Asks OpenRouter about a key, so a mistyped one is caught when it is
+   * entered rather than when the first video fails to transcribe.
+   *
+   * The label comes back already masked by OpenRouter, which saves having to
+   * hold the key anywhere just to display part of it.
+   */
+  static async describeKey(
+    apiKey: string,
+    baseUrl = DEFAULT_BASE_URL,
+    signal?: AbortSignal
+  ): Promise<KeyDescription> {
+    const url = `${baseUrl.replace(/\/+$/, '')}/key`;
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal
+      });
+    }
+    catch (error) {
+      throw new TranscriptionError(
+        `Could not reach OpenRouter: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new TranscriptionError('OpenRouter rejected this API key', response.status);
+    }
+    if (!response.ok) {
+      throw new TranscriptionError(`OpenRouter returned HTTP ${response.status}`, response.status);
+    }
+    const json = await response.json() as {
+      data?: {
+        label?: string;
+        usage?: number;
+        limit?: number | null;
+        limit_remaining?: number | null;
+        is_free_tier?: boolean;
+      };
+    };
+    return {
+      label: json.data?.label || null,
+      usage: json.data?.usage ?? null,
+      limit: json.data?.limit ?? null,
+      limitRemaining: json.data?.limit_remaining ?? null,
+      isFreeTier: json.data?.is_free_tier ?? null
+    };
   }
 
   /**
@@ -128,10 +193,13 @@ export default class OpenRouterTranscriber {
     language: string | null | undefined,
     signal?: AbortSignal
   ): Promise<TranscribeResult> {
+    // Read once per request: an administrator can change the key or model
+    // between one clip and the next.
+    const { apiKey, model, baseUrl } = this.#settings();
     const form = new FormData();
     const data = fs.readFileSync(audioPath);
     form.append('file', new Blob([ data ], { type: 'audio/ogg' }), path.basename(audioPath));
-    form.append('model', this.#model);
+    form.append('model', model);
     // Without these two the response carries plain text and no timestamps.
     form.append('response_format', 'verbose_json');
     form.append('timestamp_granularities[]', 'segment');
@@ -146,9 +214,9 @@ export default class OpenRouterTranscriber {
 
     let response: Response;
     try {
-      response = await fetch(`${this.#baseUrl}/audio/transcriptions`, {
+      response = await fetch(`${baseUrl}/audio/transcriptions`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${this.#apiKey}` },
+        headers: { Authorization: `Bearer ${apiKey}` },
         body: form,
         signal: controller.signal
       });
@@ -200,7 +268,7 @@ export default class OpenRouterTranscriber {
     if (!Array.isArray(json.segments)) {
       throw new TranscriptionError(
         `Response carried no timestamped segments, so subtitles cannot be built. ` +
-        `Model "${this.#model}" may be served by an upstream that does not support ` +
+        `Model "${model}" may be served by an upstream that does not support ` +
         `verbose_json.`
       );
     }

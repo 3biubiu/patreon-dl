@@ -1,4 +1,4 @@
-.playback-rate {
+.player-controls {
   position: fixed;
   // Clear of lightgallery's own toolbar, which sits along the top edge.
   top: 4.25rem;
@@ -8,12 +8,18 @@
 
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 999px;
-  color: #fff;
-  background-color: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(2px);
+  gap: 0.75rem;
+
+  &__control {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.5rem;
+    border-radius: 999px;
+    color: #fff;
+    background-color: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(2px);
+  }
 
   &__label {
     margin: 0;
@@ -31,6 +37,9 @@
     background-color: rgba(255, 255, 255, 0.15);
     font-size: 0.8rem;
     cursor: pointer;
+    // A long subtitle filename would otherwise stretch the pill across the
+    // player; the full text stays available in the open menu.
+    max-width: 12rem;
 
     &:focus-visible {
       outline: 2px solid #fff;
@@ -45,9 +54,18 @@
 }
 
 @media (max-width: 575.98px) {
-  .playback-rate {
+  .player-controls {
     top: auto;
     bottom: 1.25rem;
     right: 1rem;
+    // Two pills side by side do not fit a phone; stack them against the
+    // right edge instead.
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+
+  .player-controls__select {
+    max-width: 8rem;
   }
 }

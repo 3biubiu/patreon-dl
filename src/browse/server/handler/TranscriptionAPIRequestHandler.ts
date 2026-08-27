@@ -7,11 +7,10 @@ import Basehandler from './BaseHandler.js';
 import type TranscriptionQueue from '../transcription/TranscriptionQueue.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type VoiceActivityDetector from '../transcription/VoiceActivityDetector.js';
-import { describeIndexedSubtitle, listSubtitlesFor, readSubtitleAsVTT } from '../transcription/SubtitleLibrary.js';
-import { type SubtitleFile } from '../../types/Transcription.js';
-
-/** Keeps one request from turning into an unbounded pile of index lookups. */
-const MAX_BATCH_IDS = 200;
+import type TranscriptionSettingsStore from '../transcription/TranscriptionSettingsStore.js';
+import OpenRouterTranscriber, { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../transcription/OpenRouterTranscriber.js';
+import { listSubtitlesFor, readSubtitleAsVTT } from '../transcription/SubtitleLibrary.js';
+import { type TranscriptionSettings } from '../../types/Transcription.js';
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
@@ -36,16 +35,18 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
 
   #db: DBInstance;
   #dataDir: string;
-  #queue: TranscriptionQueue | null;
+  #queue: TranscriptionQueue;
   #index: TranscriptionIndex;
-  #vad: VoiceActivityDetector | null;
+  #vad: VoiceActivityDetector;
+  #settings: TranscriptionSettingsStore;
 
   constructor(
     db: DBInstance,
     dataDir: string,
     index: TranscriptionIndex,
-    queue: TranscriptionQueue | null,
-    vad: VoiceActivityDetector | null,
+    queue: TranscriptionQueue,
+    vad: VoiceActivityDetector,
+    settings: TranscriptionSettingsStore,
     logger?: Logger | null
   ) {
     super(logger);
@@ -54,6 +55,7 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     this.#queue = queue;
     this.#index = index;
     this.#vad = vad;
+    this.#settings = settings;
   }
 
   /**
@@ -73,25 +75,94 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     return file;
   }
 
+  /** Why transcription cannot run, or `null` when it can. */
+  async #getBlockedReason(): Promise<string | null> {
+    if (!this.#settings.getApiKey()) {
+      return 'No OpenRouter API key is configured. An administrator can set one in the ' +
+        'transcription settings.';
+    }
+    return await this.#vad.getUnavailableReason();
+  }
+
   /** Whether transcription is configured at all, and why not when it is not. */
   async handleStatusRequest(_req: Request, res: Response) {
-    if (!this.#queue || !this.#vad) {
-      res.json({
-        available: false,
-        reason: 'Transcription is not configured. Set an OpenRouter API key to enable it.'
-      });
-      return;
-    }
-    const blocked = await this.#vad.getUnavailableReason();
+    const blocked = await this.#getBlockedReason();
     res.json(blocked ? { available: false, reason: blocked } : { available: true, reason: null });
   }
 
-  async handleTranscribeRequest(req: Request, res: Response, id: string) {
-    if (!this.#queue || !this.#vad) {
-      res.status(503).json({ error: 'Transcription is not configured on this server' });
-      return;
+  /**
+   * The settings as the browser may see them: never the key itself, only
+   * whether one is set and the masked label OpenRouter reports for it.
+   */
+  async handleGetSettingsRequest(_req: Request, res: Response) {
+    const apiKey = this.#settings.getApiKey();
+    const settings: TranscriptionSettings = {
+      configured: !!apiKey,
+      source: this.#settings.getApiKeySource(),
+      model: this.#settings.getModel() || DEFAULT_MODEL,
+      baseUrl: this.#settings.getBaseUrl() || DEFAULT_BASE_URL,
+      key: null,
+      keyError: null
+    };
+    if (apiKey) {
+      try {
+        settings.key = await OpenRouterTranscriber.describeKey(apiKey, settings.baseUrl);
+      }
+      catch (error) {
+        // A key that cannot be checked right now is still configured; say so
+        // rather than reporting it as absent.
+        settings.keyError = error instanceof Error ? error.message : String(error);
+      }
     }
-    const blocked = await this.#vad.getUnavailableReason();
+    res.json({ settings });
+  }
+
+  /**
+   * Saves the settings, after checking any new key against OpenRouter so a
+   * mistyped one is rejected here rather than at the first video.
+   */
+  async handleSaveSettingsRequest(req: Request, res: Response) {
+    const body = (req.body || {}) as { apiKey?: unknown; model?: unknown; baseUrl?: unknown };
+    const patch: { apiKey?: string | null; model?: string | null; baseUrl?: string | null } = {};
+
+    if (body.model !== undefined) {
+      patch.model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
+    }
+    if (body.baseUrl !== undefined) {
+      patch.baseUrl = typeof body.baseUrl === 'string' && body.baseUrl.trim() ? body.baseUrl.trim() : null;
+    }
+
+    if (body.apiKey !== undefined) {
+      const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+      if (!apiKey) {
+        // An empty value clears the saved key and falls back to the
+        // environment, which is the only way to undo this from the browser.
+        patch.apiKey = null;
+      }
+      else {
+        const baseUrl = patch.baseUrl || this.#settings.getBaseUrl() || DEFAULT_BASE_URL;
+        try {
+          await OpenRouterTranscriber.describeKey(apiKey, baseUrl);
+        }
+        catch (error) {
+          res.status(400).json({
+            error: error instanceof Error ? error.message : 'Could not verify this API key'
+          });
+          return;
+        }
+        patch.apiKey = apiKey;
+      }
+    }
+
+    this.#settings.update(patch);
+    // Never log the key, and never echo it back - the response is the same
+    // masked view as a plain read.
+    this.log('info', 'Transcription settings updated');
+    await this.handleGetSettingsRequest(req, res);
+  }
+
+  async handleTranscribeRequest(req: Request, res: Response, id: string) {
+    const blocked = await this.#getBlockedReason();
     if (blocked) {
       res.status(503).json({ error: blocked });
       return;
@@ -107,10 +178,6 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
   }
 
   handleCancelRequest(_req: Request, res: Response, id: string) {
-    if (!this.#queue) {
-      res.status(503).json({ error: 'Transcription is not configured on this server' });
-      return;
-    }
     const cancelled = this.#queue.cancel(id);
     res.json({ cancelled });
   }
@@ -120,38 +187,16 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
    * remembers. The index is the only thing that survives a restart.
    */
   handleJobRequest(_req: Request, res: Response, id: string) {
-    const job = this.#queue?.getJob(id) || null;
+    const job = this.#queue.getJob(id) || null;
     const record = this.#index.get(id);
     res.json({ job, record });
   }
 
   handleListJobsRequest(_req: Request, res: Response) {
     res.json({
-      jobs: this.#queue?.listJobs() || [],
+      jobs: this.#queue.listJobs(),
       records: this.#index.list()
     });
-  }
-
-  /**
-   * The captions to hand a player for each of `ids`, answered from the index
-   * alone.
-   *
-   * A grid draws many tiles at once, and looking beside each of their videos
-   * would be one directory read per tile - the cost this index exists to
-   * avoid. The trade is that a subtitle dropped in by hand is not listed here;
-   * `handleSubtitleListRequest` finds those, for one video at a time.
-   */
-  handleBatchSubtitleRequest(req: Request, res: Response) {
-    const raw = typeof req.query.ids === 'string' ? req.query.ids : '';
-    const ids = raw.split(',').map((id) => id.trim()).filter(Boolean).slice(0, MAX_BATCH_IDS);
-    const subtitles: Record<string, SubtitleFile[]> = {};
-    for (const id of ids) {
-      const record = this.#index.get(id);
-      if (record?.state === 'done' && record.subtitlePath) {
-        subtitles[id] = [ describeIndexedSubtitle(record.subtitlePath, record.language) ];
-      }
-    }
-    res.json({ subtitles });
   }
 
   /**

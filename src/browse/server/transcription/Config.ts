@@ -6,6 +6,7 @@ import VoiceActivityDetector, { type VADOptions } from './VoiceActivityDetector.
 import OpenRouterTranscriber, { DEFAULT_BASE_URL, DEFAULT_MODEL } from './OpenRouterTranscriber.js';
 import TranscriptionIndex from './TranscriptionIndex.js';
 import TranscriptionQueue from './TranscriptionQueue.js';
+import TranscriptionSettingsStore from './TranscriptionSettingsStore.js';
 
 export interface TranscriptionConfig {
   /**
@@ -32,9 +33,9 @@ export interface TranscriptionConfig {
 
 export interface TranscriptionServices {
   index: TranscriptionIndex;
-  /** `null` when the feature is not configured; the index still works. */
-  queue: TranscriptionQueue | null;
-  vad: VoiceActivityDetector | null;
+  queue: TranscriptionQueue;
+  vad: VoiceActivityDetector;
+  settings: TranscriptionSettingsStore;
 }
 
 /**
@@ -55,15 +56,10 @@ export function createTranscriptionServices(
     logger
   );
 
-  // Every setting falls back to an environment variable, so a deployment can
-  // be configured without a command line - which is where an API key belongs
-  // anyway, since command lines end up in shell history and process listings.
-  const apiKey = config?.apiKey || process.env.OPENROUTER_API_KEY || null;
-  if (!apiKey) {
-    commonLog(logger, 'debug', 'Transcription',
-      'No OpenRouter API key, so transcription is disabled. Existing subtitles are still served.');
-    return { index, queue: null, vad: null };
-  }
+  const settings = TranscriptionSettingsStore.load(
+    path.resolve(dataDir, '.patreon-dl', 'transcription.json'),
+    logger
+  );
 
   const extractor = new AudioExtractor(pathToFFmpeg, logger);
   const vad = new VoiceActivityDetector(
@@ -73,14 +69,24 @@ export function createTranscriptionServices(
     extractor,
     logger
   );
+  // Everything is built whether or not a key is present. An administrator can
+  // set one from the browser, and rebuilding the queue - or asking for a
+  // restart - to notice would be a poor way to answer a settings form.
   const transcriber = new OpenRouterTranscriber(
-    apiKey,
-    config?.model || process.env.OPENROUTER_MODEL || DEFAULT_MODEL,
-    config?.baseUrl || process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL,
+    () => ({
+      apiKey: config?.apiKey || settings.getApiKey(),
+      model: config?.model || settings.getModel() || DEFAULT_MODEL,
+      baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL
+    }),
     logger
   );
   const queue = new TranscriptionQueue(
     dataDir, extractor, vad, transcriber, index, config?.vad, logger
   );
-  return { index, queue, vad };
+  if (!settings.getApiKey() && !config?.apiKey) {
+    commonLog(logger, 'debug', 'Transcription',
+      'No OpenRouter API key yet. An administrator can set one in the transcription ' +
+      'settings; existing subtitles are served either way.');
+  }
+  return { index, queue, vad, settings };
 }

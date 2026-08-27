@@ -7,7 +7,7 @@ import { type Filter, type FilterSearchParams, type FilterData, type MediaFilter
 import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
-import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionJob, type TranscriptionRecord } from '../../types/Transcription';
+import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionJob, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 
 interface APIProviderProps {
   children: React.ReactNode;
@@ -306,6 +306,31 @@ class API {
     return await readJSON(await apiFetch('/api/transcription/status')) as TranscriptionAvailability;
   }
 
+  async getTranscriptionSettings(): Promise<TranscriptionSettings> {
+    const data = await readJSON(await apiFetch('/api/transcription/settings'));
+    return data.settings as TranscriptionSettings;
+  }
+
+  /**
+   * Saves the settings and returns them as they now stand.
+   *
+   * Passing an empty `apiKey` clears the stored one. Omitting the field
+   * entirely leaves it alone, which is how the model can be changed without
+   * having to type the key again.
+   */
+  async saveTranscriptionSettings(params: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+  }): Promise<TranscriptionSettings> {
+    const data = await readJSON(await apiFetch('/api/transcription/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    }));
+    return data.settings as TranscriptionSettings;
+  }
+
   async startTranscription(mediaId: string): Promise<TranscriptionJob> {
     const data = await readJSON(await apiFetch(
       `/api/media/${mediaId}/transcribe`, { method: 'POST' }
@@ -333,21 +358,6 @@ class API {
       job: (data.job || null) as TranscriptionJob | null,
       record: (data.record || null) as TranscriptionRecord | null
     };
-  }
-
-  /**
-   * Captions for many videos at once, answered from the index. Cheap enough
-   * to call for a whole page of tiles - unlike `getSubtitles`, which looks in
-   * a video's own directory and is meant for one video at a time.
-   */
-  async getSubtitlesBatch(mediaIds: string[]): Promise<Record<string, SubtitleFile[]>> {
-    if (mediaIds.length === 0) {
-      return {};
-    }
-    const url = new URL('/api/media/subtitles', window.location.origin);
-    url.searchParams.set('ids', mediaIds.join(','));
-    const data = await readJSON(await apiFetch(url.toString()));
-    return (data.subtitles || {}) as Record<string, SubtitleFile[]>;
   }
 
   async getSubtitles(mediaId: string): Promise<SubtitleFile[]> {

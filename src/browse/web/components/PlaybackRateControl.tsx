@@ -1,4 +1,3 @@
-import "../assets/styles/PlaybackRateControl.scss";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Capped at 2x, past which speech stops being followable. */
@@ -16,6 +15,10 @@ function readStoredRate() {
   }
 }
 
+interface PlaybackRateControlProps {
+  video: HTMLVideoElement;
+}
+
 /**
  * Speed control for whichever video is currently playing.
  *
@@ -24,50 +27,22 @@ function readStoredRate() {
  * in the right-click menu - which this app closes on players, because that is
  * also where "Save video as" lives.
  *
- * It floats above the lightbox rather than living inside it, because the
- * player is built by lightgallery and is not ours to render into.
- *
  * A plain `<select>` on purpose: its menu is drawn by the OS, so it cannot end
  * up behind the lightbox the way a stacked-in-page dropdown can.
  */
-function PlaybackRateControl() {
+function PlaybackRateControl(props: PlaybackRateControlProps) {
+  const { video } = props;
   const [ rate, setRate ] = useState(readStoredRate);
-  const [ video, setVideo ] = useState<HTMLVideoElement | null>(null);
-  // Read from inside a listener that is only attached once, so it cannot be
-  // allowed to close over a stale value.
+  // Read inside an effect that must not re-run when the rate changes, so it
+  // cannot be allowed to close over a stale value.
   const rateRef = useRef(rate);
   rateRef.current = rate;
 
   useEffect(() => {
-    const handlePlay = (e: Event) => {
-      const target = e.target;
-      if (!(target instanceof HTMLVideoElement)) {
-        return;
-      }
-      // Each new element starts at 1x, so the chosen rate is applied per video
-      // rather than once.
-      target.playbackRate = rateRef.current;
-      setVideo(target);
-    };
-    // "play" does not bubble; it has to be caught on the way down.
-    document.addEventListener('play', handlePlay, true);
-    return () => document.removeEventListener('play', handlePlay, true);
-  }, []);
-
-  useEffect(() => {
-    if (!video) {
-      return;
-    }
-    // Closing the lightbox drops the video element with no event to go by.
-    // Noticing a beat later is fine for a control that is only there to be
-    // clicked.
-    const timer = window.setInterval(() => {
-      if (!document.contains(video)) {
-        setVideo(null);
-      }
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [video]);
+    // Each new element starts at 1x, so the chosen rate is applied per video
+    // rather than once.
+    video.playbackRate = rateRef.current;
+  }, [ video ]);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = Number(e.target.value);
@@ -81,23 +56,17 @@ function PlaybackRateControl() {
     catch (_error) {
       // Not remembering the choice is not worth failing over.
     }
-    if (video) {
-      video.playbackRate = value;
-    }
-  }, [video]);
-
-  if (!video) {
-    return null;
-  }
+    video.playbackRate = value;
+  }, [ video ]);
 
   return (
-    <div className="playback-rate">
-      <label className="playback-rate__label" htmlFor="playback-rate-select">
+    <div className="player-controls__control">
+      <label className="player-controls__label" htmlFor="playback-rate-select">
         Speed
       </label>
       <select
         id="playback-rate-select"
-        className="playback-rate__select"
+        className="player-controls__select"
         value={rate}
         onChange={handleChange}
       >

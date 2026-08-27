@@ -25,8 +25,9 @@ import { DocumentProvider } from "./contexts/DocumentProvider";
 import { SidebarProvider } from "./contexts/SidebarProvider";
 import { AuthProvider } from "./contexts/AuthProvider";
 import Users from "./pages/Users";
+import TranscriptionSettings from "./pages/TranscriptionSettings";
 import { DARK_SCHEME_QUERY, useMediaQuery } from "./utils/useMediaQuery";
-import PlaybackRateControl from "./components/PlaybackRateControl";
+import PlayerControls from "./components/PlayerControls";
 
 function App() {
   // With the theme picker gone, light / dark simply follows the OS. Both
@@ -79,7 +80,7 @@ function App() {
             <GlobalModalsProvider>
               <DocumentProvider>
                 <SidebarProvider>
-                  <PlaybackRateControl />
+                  <PlayerControls />
                   <Routes>
                     <Route path="/" element={<MainLayout />} >
                       <Route index element={<CampaignList />} />
@@ -93,6 +94,7 @@ function App() {
                         <Route index element={<CampaignContent type="post" collection />} />
                       </Route>
                       <Route path="users" element={<Users />} />
+                      <Route path="transcription" element={<TranscriptionSettings />} />
                       <Route path=":vanity" element={<CampaignLayout />}>
                         {campaignSubRoutes}
                       </Route>

@@ -162,7 +162,10 @@ function TranscriptionSettings() {
           >
             <Input.Password
               autoComplete="off"
-              placeholder={settings.configured ? settings.key?.label || 'Saved' : 'sk-or-v1-…'}
+              // Deliberately not an example key: secret scanners match on the
+              // prefix alone, and a placeholder that trips them turns every
+              // commit of this file into a false alarm.
+              placeholder={settings.configured ? settings.key?.label || 'Saved' : 'Paste your OpenRouter key'}
             />
           </Form.Item>
 

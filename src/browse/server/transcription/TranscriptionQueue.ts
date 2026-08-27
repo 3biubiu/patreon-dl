@@ -48,6 +48,7 @@ export default class TranscriptionQueue {
   #pending: QueueEntry[];
   #current: QueueEntry | null;
   #draining: boolean;
+  #onFinished: ((mediaId: string, succeeded: boolean) => void) | null;
 
   constructor(
     dataDir: string,
@@ -68,6 +69,18 @@ export default class TranscriptionQueue {
     this.#pending = [];
     this.#current = null;
     this.#draining = false;
+    this.#onFinished = null;
+  }
+
+  /**
+   * Called after every job, however it ended.
+   *
+   * Set rather than injected so that translation can follow a transcription
+   * without this class knowing anything about translation - which would
+   * otherwise be a cycle, since a translation reads what this queue writes.
+   */
+  setOnFinished(handler: ((mediaId: string, succeeded: boolean) => void) | null) {
+    this.#onFinished = handler;
   }
 
   /**
@@ -190,6 +203,16 @@ export default class TranscriptionQueue {
         }
         finally {
           this.#current = null;
+          // Read back rather than inferred from the try/catch: a cancellation
+          // arrives as a throw, and a job that was already recorded done is
+          // not one to look at the exception to classify.
+          const succeeded = this.#index.get(entry.mediaId)?.state === 'done';
+          try {
+            this.#onFinished?.(entry.mediaId, succeeded);
+          }
+          catch (error) {
+            this.log('warn', 'Handler for a finished transcription threw:', error);
+          }
         }
       }
     }

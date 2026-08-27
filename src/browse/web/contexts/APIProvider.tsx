@@ -8,6 +8,7 @@ import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
+import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
 import {
   type RecordWatchedVideoRequest,
   type ViewedPostListItem,
@@ -455,6 +456,78 @@ class API {
   /** Forgets one record. The subtitle file it produced is left on disk. */
   async forgetTranscription(mediaId: string): Promise<void> {
     await readJSON(await apiFetch(`/api/transcriptions/${mediaId}`, { method: 'DELETE' }));
+  }
+
+  async getTranslationAvailability(): Promise<TranslationAvailability> {
+    return await readJSON(await apiFetch('/api/translation/status')) as TranslationAvailability;
+  }
+
+  async getTranslationSettings(): Promise<TranslationSettings> {
+    const data = await readJSON(await apiFetch('/api/translation/settings'));
+    return data.settings as TranslationSettings;
+  }
+
+  /**
+   * Saves the settings and returns them as they now stand.
+   *
+   * Passing an empty `apiKey` clears the stored one; omitting the field leaves
+   * it alone. Passing an empty `prompt` puts the default prompt back.
+   */
+  async saveTranslationSettings(params: {
+    apiKey?: string;
+    model?: string;
+    baseUrl?: string;
+    prompt?: string;
+    batchCharacters?: number;
+    batchLines?: number;
+    disableThinking?: boolean;
+  }): Promise<TranslationSettings> {
+    const data = await readJSON(await apiFetch('/api/translation/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params)
+    }));
+    return data.settings as TranslationSettings;
+  }
+
+  /**
+   * Queues a translation of one video's transcription.
+   *
+   * Accepted while the transcription is still running, in which case it starts
+   * as soon as there is a subtitle to translate.
+   */
+  async startTranslation(mediaId: string): Promise<TranscriptionRecord> {
+    const data = await readJSON(await apiFetch(
+      `/api/media/${mediaId}/translate`, { method: 'POST' }
+    ));
+    return data.record as TranscriptionRecord;
+  }
+
+  async cancelTranslation(mediaId: string): Promise<boolean> {
+    const data = await readJSON(await apiFetch(
+      `/api/media/${mediaId}/translate`, { method: 'DELETE' }
+    ));
+    return !!data.cancelled;
+  }
+
+  /** Stops the running translation and everything queued behind it. */
+  async stopAllTranslations(): Promise<TranscriptionRecord[]> {
+    const data = await readJSON(await apiFetch('/api/translations/stop', { method: 'POST' }));
+    return (data.records || []) as TranscriptionRecord[];
+  }
+
+  /** Empties the cache of already-translated batches. */
+  async clearTranslationCache(): Promise<number> {
+    const data = await readJSON(await apiFetch('/api/translation/cache', { method: 'DELETE' }));
+    return (data.removed || 0) as number;
+  }
+
+  /** Puts the running count of Gemini calls back to zero. */
+  async resetTranslationRequestCount(): Promise<TranslationSettings> {
+    const data = await readJSON(await apiFetch(
+      '/api/translation/requests/reset', { method: 'POST' }
+    ));
+    return data.settings as TranslationSettings;
   }
 
   async getSubtitles(mediaId: string): Promise<SubtitleFile[]> {

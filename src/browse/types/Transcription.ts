@@ -3,6 +3,8 @@
  * Shared so the two cannot drift, in the way `Auth.ts` is shared.
  */
 
+import { type TranslationProgress } from './Translation.js';
+
 export type TranscriptionState =
   /** Asked for, waiting its turn. */
   | 'pending'
@@ -40,6 +42,14 @@ export interface TranscriptionRecord {
   requestedAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  /**
+   * The AI translation of this transcription, once one has been asked for.
+   *
+   * It lives here rather than in an index of its own because it is not a thing
+   * on its own: it reads the subtitle this record produced, and a history list
+   * that showed the two separately would show one video twice.
+   */
+  translation: TranslationProgress | null;
 }
 
 /** One subtitle offered to the player, found beside the video. */

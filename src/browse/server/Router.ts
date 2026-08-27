@@ -17,6 +17,8 @@ import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHan
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
 import { createTranscriptionServices, type TranscriptionConfig } from './transcription/Config.js';
+import TranslationAPIRequestHandler from './handler/TranslationAPIRequestHandler.js';
+import { createTranslationServices, type TranslationConfig } from './translation/Config.js';
 import {
   byCampaignParam,
   byCollectionParam,
@@ -33,6 +35,7 @@ interface RequestHandlers {
   mediaAPI: MediaAPIRequestHandler;
   auth: AuthAPIRequestHandler;
   transcription: TranscriptionAPIRequestHandler;
+  translation: TranslationAPIRequestHandler;
   history: HistoryAPIRequestHandler;
 }
 
@@ -193,6 +196,44 @@ class _Router {
       this.#handlers.transcription.handleSubtitleRequest(req, res, req.params.id, req.params.filename)
     );
 
+    // Translation is an administrator's job for the same reasons transcription
+    // is: it spends a metered API and writes into the library. What comes out
+    // is served by the subtitle endpoints above, to anyone whose player asks.
+    this.#router.post('/api/media/:id/translate', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleTranslateRequest(req, res, req.params.id)
+    );
+
+    this.#router.delete('/api/media/:id/translate', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleCancelRequest(req, res, req.params.id)
+    );
+
+    // POST rather than DELETE: this stops work, it does not remove anything.
+    this.#router.post('/api/translations/stop', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleCancelAllRequest(req, res)
+    );
+
+    this.#router.get('/api/translation/status', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleStatusRequest(req, res)
+    );
+
+    // The Gemini key is set and cleared here. Administrators only, and the key
+    // itself is never in a response - see the handler.
+    this.#router.get('/api/translation/settings', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleGetSettingsRequest(req, res)
+    );
+
+    this.#router.put('/api/translation/settings', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleSaveSettingsRequest(req, res)
+    );
+
+    this.#router.delete('/api/translation/cache', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleClearCacheRequest(req, res)
+    );
+
+    this.#router.post('/api/translation/requests/reset', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleResetRequestCountRequest(req, res)
+    );
+
     this.#router.get([
       '/api/campaigns/:id/posts/filter_options',
       '/api/campaigns/:id/products/filter_options',
@@ -309,10 +350,16 @@ export function getRouter(
   historyStore: HistoryStore,
   pathToFFmpeg?: string | null,
   transcriptionConfig?: TranscriptionConfig | null,
-  logger?: Logger | null
+  logger?: Logger | null,
+  translationConfig?: TranslationConfig | null
 ) {
   const videoThumbnailer = new VideoThumbnailer(dataDir, pathToFFmpeg, logger);
   const transcription = createTranscriptionServices(dataDir, transcriptionConfig, pathToFFmpeg, logger);
+  // After transcription, and given its index and queue: a translation reads
+  // the subtitle a transcription wrote, and follows one when asked to.
+  const translation = createTranslationServices(
+    dataDir, transcription.index, transcription.queue, translationConfig, logger
+  );
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
@@ -324,6 +371,10 @@ export function getRouter(
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,
       transcription.index, transcription.queue, transcription.vad, transcription.settings,
+      logger
+    ),
+    translation: new TranslationAPIRequestHandler(
+      transcription.index, translation.queue, translation.settings, translation.cache,
       logger
     )
   }, authStore, db).router;

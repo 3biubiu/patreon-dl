@@ -7,6 +7,7 @@ import {
   type TranscriptionStage,
   type TranscriptionState
 } from '../../types/Transcription.js';
+import { type TranslationProgress, type TranslationState } from '../../types/Translation.js';
 
 export {
   type TranscriptionState,
@@ -67,6 +68,12 @@ export default class TranscriptionIndex {
         const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as IndexFile;
         if (parsed && typeof parsed === 'object' && parsed.records) {
           records = parsed.records;
+          // Written before translation existed, so the field is simply absent
+          // rather than null. Filled in here so nothing downstream has to
+          // distinguish the two.
+          for (const record of Object.values(records)) {
+            record.translation = record.translation || null;
+          }
         }
       }
       catch (error) {
@@ -99,6 +106,15 @@ export default class TranscriptionIndex {
         record.stage = null;
         record.error = 'Interrupted by a server restart';
         record.completedAt = new Date().toISOString();
+        interrupted++;
+      }
+      // A translation left running is in the same position. One left pending
+      // is not: the translation queue picks those up, and the transcription
+      // they were waiting on is resumed the same way.
+      if (record.translation?.state === 'running') {
+        record.translation.state = 'error';
+        record.translation.error = 'Interrupted by a server restart';
+        record.translation.completedAt = new Date().toISOString();
         interrupted++;
       }
     }
@@ -140,7 +156,11 @@ export default class TranscriptionIndex {
       cost: null,
       requestedAt: new Date().toISOString(),
       startedAt: null,
-      completedAt: null
+      completedAt: null,
+      // A fresh transcription is about to replace the subtitle any previous
+      // translation was made from, so that translation is no longer about
+      // anything. Whoever asks for this one says whether to translate it.
+      translation: null
     };
     this.#data.records[mediaId] = record;
     this.#write();
@@ -210,6 +230,115 @@ export default class TranscriptionIndex {
     });
   }
 
+  /**
+   * Records that a translation has been asked for.
+   *
+   * It starts pending whether or not the transcription is finished: when it is
+   * not, this is the flag that says to queue one as soon as it is - which is
+   * what the checkbox on the transcribe confirmation sets.
+   */
+  markTranslationPending(mediaId: string, targetLanguage: string) {
+    const record = this.#data.records[mediaId];
+    if (!record) {
+      return null;
+    }
+    const translation: TranslationProgress = {
+      state: 'pending',
+      targetLanguage,
+      percent: 0,
+      subtitlePath: null,
+      error: null,
+      done: 0,
+      total: 0,
+      requests: 0,
+      cached: 0,
+      requestedAt: new Date().toISOString(),
+      startedAt: null,
+      completedAt: null
+    };
+    record.translation = translation;
+    this.#write();
+    return record;
+  }
+
+  markTranslationRunning(mediaId: string, total: number) {
+    return this.#patchTranslation(mediaId, {
+      state: 'running',
+      percent: 0,
+      error: null,
+      done: 0,
+      total,
+      startedAt: new Date().toISOString()
+    });
+  }
+
+  /**
+   * Updates progress. Written at the same bounded rate as transcription
+   * progress - see `PROGRESS_WRITE_INTERVAL_MS`.
+   */
+  markTranslationProgress(mediaId: string, done: number, requests: number, cached: number) {
+    const translation = this.#data.records[mediaId]?.translation;
+    if (!translation) {
+      return null;
+    }
+    translation.done = done;
+    translation.requests = requests;
+    translation.cached = cached;
+    translation.percent = translation.total > 0 ?
+      Math.max(0, Math.min(99, Math.round((done / translation.total) * 100)))
+      : 0;
+    this.#scheduleWrite();
+    return translation;
+  }
+
+  markTranslationDone(
+    mediaId: string,
+    params: { subtitlePath: string; requests: number; cached: number }
+  ) {
+    return this.#patchTranslation(mediaId, {
+      state: 'done',
+      percent: 100,
+      error: null,
+      subtitlePath: params.subtitlePath,
+      requests: params.requests,
+      cached: params.cached,
+      completedAt: new Date().toISOString()
+    });
+  }
+
+  markTranslationError(mediaId: string, error: string) {
+    return this.#patchTranslation(mediaId, {
+      state: 'error',
+      error,
+      completedAt: new Date().toISOString()
+    });
+  }
+
+  markTranslationCancelled(mediaId: string) {
+    return this.#patchTranslation(mediaId, {
+      state: 'cancelled',
+      error: null,
+      completedAt: new Date().toISOString()
+    });
+  }
+
+  /** Every record whose translation is in one of `states`. */
+  listTranslations(states: TranslationState[]): TranscriptionRecord[] {
+    return Object.values(this.#data.records)
+      .filter((record) => !!record.translation && states.includes(record.translation.state))
+      .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt));
+  }
+
+  #patchTranslation(mediaId: string, patch: Partial<TranslationProgress>) {
+    const translation = this.#data.records[mediaId]?.translation;
+    if (!translation) {
+      return null;
+    }
+    Object.assign(translation, patch);
+    this.#write();
+    return translation;
+  }
+
   /** Forgets a record entirely, so its video looks untouched again. */
   remove(mediaId: string) {
     if (!this.#data.records[mediaId]) {
@@ -224,7 +353,9 @@ export default class TranscriptionIndex {
   clearFinished() {
     let removed = 0;
     for (const [ id, record ] of Object.entries(this.#data.records)) {
-      if (record.state !== 'pending' && record.state !== 'running') {
+      const translating = record.translation?.state === 'pending' ||
+        record.translation?.state === 'running';
+      if (record.state !== 'pending' && record.state !== 'running' && !translating) {
         delete this.#data.records[id];
         removed++;
       }

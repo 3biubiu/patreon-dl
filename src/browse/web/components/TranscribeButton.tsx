@@ -1,8 +1,10 @@
 import "../assets/styles/TranscribeButton.scss";
 import { useState } from "react";
-import { Popconfirm } from "antd";
+import { Checkbox, Popconfirm } from "antd";
 import Icon from "./Icon";
 import useTranscription from "../utils/useTranscription";
+import useTranslationAvailability from "../utils/useTranslationAvailability";
+import { readTranslatePreference, writeTranslatePreference } from "../utils/translatePreference";
 
 interface TranscribeButtonProps {
   mediaId: string;
@@ -18,12 +20,19 @@ interface TranscribeButtonProps {
  * lightbox, so every event it handles has to be stopped before it gets there -
  * otherwise starting a transcription would also start playing the video. The
  * confirmation itself is portalled to the end of the document, so clicks
- * inside it never reach the tile at all.
+ * inside it never reach the tile at all - which is also what makes it safe to
+ * put a checkbox in there.
  */
 function TranscribeButton(props: TranscribeButtonProps) {
   const { mediaId, enabled = true } = props;
-  const { running, captioned, percent, error, busy, start, cancel } = useTranscription(mediaId, enabled);
+  const {
+    running, captioned, percent, error, busy, translating, translated, start, cancel
+  } = useTranscription(mediaId, enabled);
+  const availability = useTranslationAvailability(enabled);
   const [ confirming, setConfirming ] = useState(false);
+  const [ translate, setTranslate ] = useState(readTranslatePreference);
+
+  const canTranslate = !!availability?.available;
 
   const stop = (e: React.MouseEvent | React.KeyboardEvent) => {
     // Both, and on the button rather than the anchor: `preventDefault` alone
@@ -41,8 +50,10 @@ function TranscribeButton(props: TranscribeButtonProps) {
 
   const handleConfirm = () => {
     setConfirming(false);
-    void (running ? cancel() : start());
+    void (running || translating ? cancel() : start(canTranslate && translate));
   };
+
+  const active = running || translating;
 
   let modifier = '';
   let icon = 'closed_caption';
@@ -55,11 +66,19 @@ function TranscribeButton(props: TranscribeButtonProps) {
     label = `${percent}%`;
     title = 'Transcribing - click to cancel';
   }
+  else if (translating) {
+    modifier = 'transcribe-button--running';
+    icon = 'translate';
+    label = 'AI';
+    title = 'Translating - click to cancel';
+  }
   else if (captioned) {
     modifier = 'transcribe-button--done';
     icon = 'closed_caption';
-    label = 'CC';
-    title = 'Subtitles available - click to transcribe again';
+    label = translated ? 'CC 中' : 'CC';
+    title = translated ?
+      'Subtitles and a Chinese translation are available - click to transcribe again'
+      : 'Subtitles available - click to transcribe again';
   }
   else if (error) {
     modifier = 'transcribe-button--error';
@@ -68,20 +87,44 @@ function TranscribeButton(props: TranscribeButtonProps) {
     title = error;
   }
 
+  const description = active ?
+    'Progress so far is discarded and nothing is written.'
+    : (
+      <>
+        <div>
+          {
+            captioned ?
+              'This video already has subtitles. Transcribing again replaces them.'
+              : 'It runs in the background and costs roughly $0.01 per hour of video.'
+          }
+        </div>
+        {
+          canTranslate ? (
+            <Checkbox
+              checked={translate}
+              onChange={(e) => {
+                setTranslate(e.target.checked);
+                // Remembered, so the answer given once is the answer offered
+                // next time rather than a click on every video.
+                writeTranslatePreference(e.target.checked);
+              }}
+              style={{ marginBlockStart: 8 }}
+            >
+              Also translate to Chinese
+            </Checkbox>
+          ) : null
+        }
+      </>
+    );
+
   return (
     <Popconfirm
       open={confirming}
-      title={running ? 'Cancel this transcription?' : 'Transcribe this video?'}
-      description={
-        running ?
-          'Progress so far is discarded and nothing is written.'
-          : captioned ?
-            'This video already has subtitles. Transcribing again replaces them.'
-            : 'It runs in the background and costs roughly $0.01 per hour of video.'
-      }
-      okText={running ? 'Cancel it' : 'Transcribe'}
+      title={active ? 'Cancel this?' : 'Transcribe this video?'}
+      description={description}
+      okText={active ? 'Cancel it' : 'Transcribe'}
       cancelText="Never mind"
-      okButtonProps={{ danger: running }}
+      okButtonProps={{ danger: active }}
       onConfirm={handleConfirm}
       onCancel={() => setConfirming(false)}
     >

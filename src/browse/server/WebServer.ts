@@ -10,6 +10,7 @@ import API from '../api/index.js';
 import AuthStore from './AuthStore.js';
 import HistoryStore from './HistoryStore.js';
 import { type TranscriptionConfig } from './transcription/Config.js';
+import { type TranslationConfig } from './translation/Config.js';
 
 export const DEFAULT_WEB_SERVER_PORT = 3000;
 
@@ -27,6 +28,11 @@ export interface WebServerConfig {
    * already sitting beside a video are served.
    */
   transcription?: TranscriptionConfig | null;
+  /**
+   * AI translation of what transcription produces. Left out, the feature stays
+   * off and transcription is unaffected.
+   */
+  translation?: TranslationConfig | null;
   logger?: Logger | null;
 }
 
@@ -86,7 +92,8 @@ export class WebServer {
       db, api, dataDir, authStore, historyStore,
       this.#config.pathToFFmpeg,
       this.#config.transcription,
-      this.#config.logger
+      this.#config.logger,
+      this.#config.translation
     );
 
     this.#app.use(express.json());

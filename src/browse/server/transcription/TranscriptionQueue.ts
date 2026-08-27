@@ -3,20 +3,33 @@ import path from 'path';
 import crypto from 'crypto';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
-import AudioExtractor from './AudioExtractor.js';
-import VoiceActivityDetector, { type SpeechInterval, type VADOptions } from './VoiceActivityDetector.js';
+import AudioExtractor, { snapToSpliceGrid } from './AudioExtractor.js';
+import VoiceActivityDetector, { type SpeechInterval, type TimeRange, type VADOptions } from './VoiceActivityDetector.js';
 import OpenRouterTranscriber, { TranscriptionError } from './OpenRouterTranscriber.js';
 import type TranscriptionIndex from './TranscriptionIndex.js';
 import { buildSRT, filterHallucinations, type Segment } from './SubtitleBuilder.js';
 
 /**
- * Longest clip sent in one request. The endpoint's upstreams give up after 60
+ * Most audio sent in one request. The endpoint's upstreams give up after 60
  * seconds of processing; 24 minutes of audio measured at 24 seconds, so this
- * leaves a wide margin while keeping the request count low.
+ * leaves a wide margin while keeping the request count low. At the 24 kbps
+ * the clips are encoded at it is a 5 MB upload, well inside the 25 MB the
+ * endpoint accepts.
+ *
+ * Half an hour of speech, not half an hour of video: the silence is spliced
+ * out before the clip is uploaded, so this is spent entirely on talking.
  */
-const MAX_CLIP_SECONDS = 900;
+const MAX_CLIP_SECONDS = 1800;
 /** Below this, splitting a failed clip further is not worth another attempt. */
 const MIN_CLIP_SECONDS = 30;
+/**
+ * How far a cut may travel from the even division to reach a silence, as a
+ * fraction of the part length.
+ *
+ * Held to a quarter so cuts stay in order and no part grows much past its
+ * share; the ceiling's own headroom caps it further.
+ */
+const SPLIT_TOLERANCE = 0.25;
 /** Detection is fast relative to upload, so it owns only the first slice. */
 const DETECT_SHARE = 0.1;
 
@@ -24,6 +37,21 @@ interface QueueEntry {
   mediaId: string;
   videoPath: string;
   controller: AbortController;
+}
+
+/**
+ * One request's worth of audio: the stretches of speech that go into it, in
+ * the video's own time.
+ *
+ * A clip is not a slice of the video. The silence between its pieces is left
+ * out of the file that gets uploaded, which is what lets the ceiling be spent
+ * on speech rather than on whatever the speech happens to be spread across -
+ * a sparse hour becomes one request instead of forty. The price is that a
+ * timestamp coming back has to be walked through `pieces` to find out where
+ * in the video it belongs, rather than shifted by the clip's start.
+ */
+interface Clip {
+  pieces: SpeechInterval[];
 }
 
 /**
@@ -237,9 +265,10 @@ export default class TranscriptionQueue {
     }
 
     const clips = this.#planClips(intervals);
-    const totalSeconds = clips.reduce((total, c) => total + (c.end - c.start), 0);
+    const totalSeconds = clips.reduce((total, c) => total + this.#clipDuration(c), 0);
     this.log('info',
-      `Transcribing "${path.basename(videoPath)}": ${clips.length} clips, ` +
+      `Transcribing "${path.basename(videoPath)}": ${clips.length} clip(s) spliced from ` +
+      `${clips.reduce((total, c) => total + c.pieces.length, 0)} pieces, ` +
       `${(totalSeconds / 60).toFixed(1)} min of speech`
     );
     this.#index.markStage(mediaId, 'transcribing');
@@ -259,17 +288,10 @@ export default class TranscriptionQueue {
           throw Error('Aborted');
         }
         const result = await this.#transcribeClip(videoPath, clip, language, workDir, signal);
-        // The clip was cut from the middle of the file, so what comes back is
-        // relative to the clip. One addition puts it back on the video's
-        // timeline - the clip is a contiguous slice, so there is nothing more
-        // involved than that.
-        for (const segment of result.segments) {
-          collected.push({
-            ...segment,
-            start: segment.start + clip.start,
-            end: segment.end + clip.start
-          });
-        }
+        // Already on the video's timeline: the clip is the only thing that
+        // knows which pieces it was spliced from, so it maps its own
+        // timestamps back before handing them over.
+        collected.push(...result.segments);
         // Pin the language after the first clip that identifies one, so a
         // later clip of mostly silence cannot come back as another language.
         if (!language && result.language) {
@@ -278,7 +300,7 @@ export default class TranscriptionQueue {
         if (result.cost) {
           cost += result.cost;
         }
-        doneSeconds += clip.end - clip.start;
+        doneSeconds += this.#clipDuration(clip);
         const fraction = DETECT_SHARE + (doneSeconds / totalSeconds) * (1 - DETECT_SHARE);
         this.#index.markProgress(mediaId, Math.min(99, fraction * 100), cost);
       }
@@ -325,17 +347,25 @@ export default class TranscriptionQueue {
    */
   async #transcribeClip(
     videoPath: string,
-    clip: SpeechInterval,
+    clip: Clip,
     language: string | null,
     workDir: string,
     signal: AbortSignal
   ): Promise<{ segments: Segment[]; language: string | null; cost: number | null }> {
-    const duration = clip.end - clip.start;
-    const file = path.resolve(workDir, `${clip.start.toFixed(0)}-${clip.end.toFixed(0)}.ogg`);
-    await this.#extractor.extractClip(videoPath, clip.start, duration, file, 24, signal);
+    const duration = this.#clipDuration(clip);
+    const span = this.#clipSpan(clip);
+    const file = path.resolve(workDir, `${span.start.toFixed(0)}-${span.end.toFixed(0)}.ogg`);
+    await this.#extractor.extractPieces(videoPath, clip.pieces, file, 24, signal);
     try {
       const result = await this.#transcriber.transcribe(file, language, signal);
-      return { segments: result.segments, language: result.language, cost: result.cost };
+      return {
+        // What comes back is on the spliced file's timeline, where the
+        // silence between the pieces does not exist. It goes home through
+        // the same piece list the file was cut with.
+        segments: result.segments.map((segment) => this.#toSourceTime(clip, segment)),
+        language: result.language,
+        cost: result.cost
+      };
     }
     catch (error) {
       const splittable =
@@ -346,30 +376,28 @@ export default class TranscriptionQueue {
       if (!splittable) {
         throw error;
       }
-      const middle = clip.start + duration / 2;
+      const [ first, second ] = this.#halve(clip);
+      if (first.pieces.length === 0 || second.pieces.length === 0) {
+        // Nowhere to divide it that leaves audio on both sides. Whatever the
+        // endpoint objected to, a second attempt at the same clip will not
+        // answer it.
+        throw error;
+      }
       this.log('debug',
-        `Clip ${clip.start.toFixed(0)}s-${clip.end.toFixed(0)}s failed (${(error as Error).message}); ` +
-        `splitting at ${middle.toFixed(0)}s`
+        `Clip ${span.start.toFixed(0)}s-${span.end.toFixed(0)}s failed ` +
+        `(${(error as Error).message}); splitting into ` +
+        `${first.pieces.length} + ${second.pieces.length} pieces`
       );
-      const first = await this.#transcribeClip(
-        videoPath, { start: clip.start, end: middle }, language, workDir, signal
-      );
-      const second = await this.#transcribeClip(
-        videoPath, { start: middle, end: clip.end }, first.language || language, workDir, signal
+      const head = await this.#transcribeClip(videoPath, first, language, workDir, signal);
+      const tail = await this.#transcribeClip(
+        videoPath, second, head.language || language, workDir, signal
       );
       return {
-        segments: [
-          ...first.segments,
-          // The second half was cut at `middle`, so its timestamps start from
-          // zero again and need shifting before the two halves are joined.
-          ...second.segments.map((s) => ({
-            ...s,
-            start: s.start + (middle - clip.start),
-            end: s.end + (middle - clip.start)
-          }))
-        ],
-        language: first.language || second.language,
-        cost: (first.cost || 0) + (second.cost || 0) || null
+        // Each half mapped its own timestamps on the way out, so joining them
+        // is just putting the two lists end to end.
+        segments: [ ...head.segments, ...tail.segments ],
+        language: head.language || tail.language,
+        cost: (head.cost || 0) + (tail.cost || 0) || null
       };
     }
     finally {
@@ -377,27 +405,195 @@ export default class TranscriptionQueue {
     }
   }
 
-  /** Splits any interval longer than the per-request ceiling into equal parts. */
-  #planClips(intervals: SpeechInterval[]) {
-    const clips: SpeechInterval[] = [];
-    for (const interval of intervals) {
-      const duration = interval.end - interval.start;
-      if (duration <= MAX_CLIP_SECONDS) {
-        clips.push(interval);
-        continue;
+  /**
+   * Turns the detected speech into as few requests as it will fit into.
+   *
+   * Anything longer than a single request can hold is divided first, and then
+   * consecutive pieces are packed together until the next one would not fit.
+   * Because the silence between pieces is dropped on the way out, packing
+   * costs nothing but the speech itself: the half hour a request is allowed
+   * is half an hour of talking, not half an hour of video with talking
+   * somewhere in it.
+   *
+   * This is also what settles the stray-fragment problem for free. A single
+   * second of speech surrounded by silence is never a request of its own -
+   * it is simply the next piece of whichever clip is currently being filled.
+   */
+  #planClips(intervals: SpeechInterval[]): Clip[] {
+    const clips: Clip[] = [];
+    let pieces: SpeechInterval[] = [];
+    let filled = 0;
+    for (const piece of intervals.flatMap((interval) => this.#divide(interval))) {
+      const duration = piece.end - piece.start;
+      if (pieces.length > 0 && filled + duration > MAX_CLIP_SECONDS) {
+        clips.push({ pieces });
+        pieces = [];
+        filled = 0;
       }
-      // Equal parts rather than a full clip plus a short remainder, which
-      // would leave a stub too small to give Whisper any context.
-      const parts = Math.ceil(duration / MAX_CLIP_SECONDS);
-      const size = duration / parts;
-      for (let i = 0; i < parts; i++) {
-        clips.push({
-          start: interval.start + i * size,
-          end: i === parts - 1 ? interval.end : interval.start + (i + 1) * size
-        });
-      }
+      pieces.push(piece);
+      filled += duration;
+    }
+    if (pieces.length > 0) {
+      clips.push({ pieces });
     }
     return clips;
+  }
+
+  /**
+   * Cuts an interval down to pieces a single request can hold, at the
+   * silences the detector recorded rather than at an arbitrary second.
+   *
+   * The number of parts is settled first and the interval divided evenly, so
+   * a long stretch never ends in a stub too short to give Whisper any
+   * context. Each of those even cut points is then walked to the nearest
+   * usable silence, which is what stops a cut from landing inside a word and
+   * losing it from both halves. The tolerance is also kept under whatever
+   * headroom the ceiling leaves, so moving a cut cannot push a part over it.
+   */
+  #divide(interval: SpeechInterval): SpeechInterval[] {
+    const duration = interval.end - interval.start;
+    if (duration <= MAX_CLIP_SECONDS) {
+      return [ this.#slice(interval, interval.start, interval.end) ];
+    }
+    const parts: SpeechInterval[] = [];
+    const count = Math.ceil(duration / MAX_CLIP_SECONDS);
+    const size = duration / count;
+    const tolerance = Math.min(size * SPLIT_TOLERANCE, (MAX_CLIP_SECONDS - size) / 2);
+    let start = interval.start;
+    for (let i = 1; i < count; i++) {
+      const at = this.#cutPoint(interval, interval.start + i * size, tolerance);
+      parts.push(this.#slice(interval, start, at));
+      start = at;
+    }
+    parts.push(this.#slice(interval, start, interval.end));
+    return parts;
+  }
+
+  /** How much audio a clip actually carries, silence excluded. */
+  #clipDuration(clip: Clip) {
+    return clip.pieces.reduce((total, piece) => total + (piece.end - piece.start), 0);
+  }
+
+  /** Where a clip begins and ends in the video, silence included. */
+  #clipSpan(clip: Clip): TimeRange {
+    return {
+      start: clip.pieces[0].start,
+      end: clip.pieces[clip.pieces.length - 1].end
+    };
+  }
+
+  /**
+   * Divides a clip in two for a retry.
+   *
+   * A seam is the natural place to stop - the pieces either side of it are
+   * already separated by silence in the video - so the halfway point is only
+   * cut into a piece when it falls well inside one. Either half can come back
+   * empty when the clip is a single short piece, which the caller reads as
+   * "there is nothing to divide".
+   */
+  #halve(clip: Clip): [ Clip, Clip ] {
+    const half = this.#clipDuration(clip) / 2;
+    const before: SpeechInterval[] = [];
+    const after: SpeechInterval[] = [];
+    let filled = 0;
+    for (const piece of clip.pieces) {
+      const duration = piece.end - piece.start;
+      if (filled + duration <= half) {
+        before.push(piece);
+      }
+      else if (filled >= half) {
+        after.push(piece);
+      }
+      else {
+        const at = this.#cutPoint(
+          piece, piece.start + (half - filled), duration * SPLIT_TOLERANCE);
+        before.push(this.#slice(piece, piece.start, at));
+        after.push(this.#slice(piece, at, piece.end));
+      }
+      filled += duration;
+    }
+    const usable = (pieces: SpeechInterval[]) => pieces.filter((p) => p.end > p.start);
+    return [ { pieces: usable(before) }, { pieces: usable(after) } ];
+  }
+
+  /**
+   * Puts one segment back on the video's timeline.
+   *
+   * The offset to add depends on which piece the timestamp lands in, so the
+   * pieces are walked until the time is accounted for. Anything past the end
+   * belongs to the last piece: a caption running over the edge is Whisper
+   * guessing at a duration, not a reason to place it elsewhere.
+   */
+  #toSourceTime(clip: Clip, segment: Segment): Segment {
+    const from = this.#locate(clip, segment.start);
+    const to = this.#locate(clip, segment.end);
+    return {
+      ...segment,
+      start: from.time,
+      // Held inside the piece it started in. A caption that appears to cross
+      // a seam would otherwise be stretched over the silence that was cut out
+      // between the two, and a seam is a silence long enough that the
+      // detector called it the end of the speech - not something one caption
+      // spans.
+      end: Math.max(from.time, Math.min(to.time, from.piece.end))
+    };
+  }
+
+  /** Which piece of `clip` its own timestamp `at` falls in, and where. */
+  #locate(clip: Clip, at: number) {
+    let offset = 0;
+    for (const piece of clip.pieces) {
+      const duration = piece.end - piece.start;
+      if (at < offset + duration) {
+        return { piece, time: piece.start + Math.max(0, at - offset) };
+      }
+      offset += duration;
+    }
+    const piece = clip.pieces[clip.pieces.length - 1];
+    return { piece, time: piece.end };
+  }
+
+  /**
+   * Where to cut `interval` near `target`: the middle of the longest silence
+   * within `tolerance`, or `target` itself when the stretch has none.
+   *
+   * The longest rather than the closest one. A cut in the middle of two
+   * seconds of nothing survives the detector's edges being slightly off,
+   * where one placed in a quarter-second breath does not, and the longest
+   * silence is also where Whisper is most likely to have started inventing -
+   * so ending a request there costs nothing that was worth keeping.
+   */
+  #cutPoint(interval: SpeechInterval, target: number, tolerance: number) {
+    let best: TimeRange | null = null;
+    for (const gap of interval.gaps) {
+      const middle = (gap.start + gap.end) / 2;
+      if (Math.abs(middle - target) > tolerance) {
+        continue;
+      }
+      if (!best || gap.end - gap.start > best.end - best.start) {
+        best = gap;
+      }
+    }
+    return best ? (best.start + best.end) / 2 : target;
+  }
+
+  /**
+   * The part of `interval` between `start` and `end`, with the silences it
+   * contains.
+   *
+   * Every piece is born here, and every piece is snapped to the splice grid
+   * on the way out: the durations added up to read a timestamp back have to
+   * be the durations ffmpeg wrote, or a subtitle drifts a little further out
+   * with each piece it is past.
+   */
+  #slice(interval: SpeechInterval, start: number, end: number): SpeechInterval {
+    const from = snapToSpliceGrid(start);
+    const to = snapToSpliceGrid(end);
+    return {
+      start: from,
+      end: to,
+      gaps: interval.gaps.filter((gap) => gap.start >= from && gap.end <= to)
+    };
   }
 
   protected log(level: LogLevel, ...msg: any[]) {

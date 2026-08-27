@@ -3,10 +3,21 @@ import type Logger from '../../../utils/logging/Logger.js';
 import AudioExtractor, { SAMPLE_RATE } from './AudioExtractor.js';
 import { ensureSileroModel } from './SileroModel.js';
 
-/** A stretch of the source file that contains speech, in seconds. */
-export interface SpeechInterval {
+/** A stretch of the source file, in seconds. */
+export interface TimeRange {
   start: number;
   end: number;
+}
+
+/**
+ * A stretch of the source file that contains speech.
+ *
+ * `gaps` holds the silences the merge swallowed, in order. They are the only
+ * places the interval can be cut without cutting through a word, so they
+ * travel with it for whoever has to split it later.
+ */
+export interface SpeechInterval extends TimeRange {
+  gaps: TimeRange[];
 }
 
 export interface VADOptions {
@@ -28,13 +39,17 @@ export interface VADOptions {
    */
   speechPad?: number;
   /**
-   * Intervals closer together than this are merged, in seconds.
+   * Silence up to this long is kept as part of the speech around it; anything
+   * longer is cut out of the upload. In seconds.
    *
    * Silero's raw output pauses at every breath - 293 intervals for a
-   * 54-minute video. Each interval becomes one upload, so they are merged
-   * until only the long silences remain as boundaries. Those long silences
-   * are also where Whisper invents captions, which is the point of the
-   * exercise.
+   * 54-minute video - and audio spliced at every one of those would be a
+   * jumble. Short pauses stay, so a sentence still sounds like a sentence.
+   * The long silences go, which is what the detector was run for.
+   *
+   * This decides how much silence is uploaded. It no longer decides how many
+   * requests are made: clips are packed to the ceiling out of whatever pieces
+   * are left, so cutting more silence does not cost more requests.
    */
   mergeGap?: number;
 }
@@ -47,7 +62,7 @@ const DEFAULTS: Required<VADOptions> = {
   minSpeechDuration: 0.25,
   maxSpeechDuration: 30,
   speechPad: 0.3,
-  mergeGap: 30
+  mergeGap: 5
 };
 
 /** Silero's frame size at 16 kHz. Not a free parameter. */
@@ -104,7 +119,12 @@ export default class VoiceActivityDetector {
   }
 
   /**
-   * Returns the speech intervals of `videoPath`, padded and merged.
+   * Returns the speech intervals of `videoPath`, padded and merged across the
+   * short pauses.
+   *
+   * What lies between them is silence the caller is expected to drop, and
+   * what lies inside them - `gaps` - is silence short enough to keep, and the
+   * only place an interval can be cut without cutting through a word.
    *
    * `onProgress` reports how much of the file has been scanned, 0 to 1.
    */
@@ -135,7 +155,7 @@ export default class VoiceActivityDetector {
       debug: false
     }, BUFFER_SECONDS);
 
-    const raw: SpeechInterval[] = [];
+    const raw: TimeRange[] = [];
     const drain = () => {
       while (!vad.isEmpty()) {
         const segment = vad.front();
@@ -185,7 +205,7 @@ export default class VoiceActivityDetector {
    * another. Padding first means two intervals separated by less than twice
    * the padding are joined rather than left overlapping.
    */
-  #mergeAndPad(raw: SpeechInterval[], duration: number, opts: Required<VADOptions>) {
+  #mergeAndPad(raw: TimeRange[], duration: number, opts: Required<VADOptions>) {
     const limit = duration || Number.POSITIVE_INFINITY;
     const padded = raw
       .map(({ start, end }) => ({
@@ -199,13 +219,29 @@ export default class VoiceActivityDetector {
     for (const interval of padded) {
       const last = merged[merged.length - 1];
       if (last && interval.start - last.end <= opts.mergeGap) {
-        last.end = Math.max(last.end, interval.end);
+        this.#join(last, interval);
       }
       else {
-        merged.push({ ...interval });
+        merged.push({ ...interval, gaps: [] });
       }
     }
     return merged;
+  }
+
+  /**
+   * Extends `target` over `next`, remembering the silence in between.
+   *
+   * That silence is the seam, and the only point inside the result where a
+   * later cut lands between words rather than inside one.
+   */
+  #join(target: SpeechInterval, next: TimeRange & { gaps?: TimeRange[] }) {
+    if (next.start > target.end) {
+      target.gaps.push({ start: target.end, end: next.start });
+    }
+    if (next.gaps) {
+      target.gaps.push(...next.gaps);
+    }
+    target.end = Math.max(target.end, next.end);
   }
 
   async #loadModule() {

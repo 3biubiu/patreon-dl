@@ -3,9 +3,33 @@ import fs from 'fs';
 import path from 'path';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
+// Type-only, so this does not close the import cycle with the detector.
+import type { TimeRange } from './VoiceActivityDetector.js';
 
 /** Silero is trained at this rate; feeding it anything else degrades it. */
 export const SAMPLE_RATE = 16000;
+
+/**
+ * The resolution a spliced clip's cut points are rounded to, in seconds.
+ *
+ * Ten milliseconds is far finer than the third of a second of padding either
+ * side of a piece, so nothing is lost at a boundary, and coarse enough that
+ * an hour of audio is only a few hundred thousand frames to step through.
+ */
+export const SPLICE_GRID = 0.01;
+
+/**
+ * Rounds a cut point onto the splice grid, where ffmpeg can hit it exactly.
+ *
+ * Every boundary that ends up in a clip goes through this - here and in the
+ * caller both - so that the duration the caller adds up and the duration
+ * ffmpeg writes are the same number. They have to be: the caller reads a
+ * timestamp back by counting piece durations, and a millisecond of
+ * disagreement per piece is a subtitle that slides as the clip goes on.
+ */
+export function snapToSpliceGrid(seconds: number) {
+  return Math.round(seconds / SPLICE_GRID) * SPLICE_GRID;
+}
 
 /**
  * The two ffmpeg passes transcription needs: raw PCM for the voice detector,
@@ -171,39 +195,95 @@ export default class AudioExtractor {
   }
 
   /**
-   * Writes `[start, start + duration)` to `outPath` as mono 16 kHz Opus.
+   * Writes `pieces` to `outPath` as one continuous mono 16 kHz Opus file,
+   * with everything between them left out.
    *
-   * Opus at this bitrate is about 11 MB per hour, which keeps a chunk well
+   * This is what lets a request carry half an hour of speech instead of half
+   * an hour of video: the silence the detector found never reaches the wire,
+   * so nothing is paid for it and Whisper is never given the empty stretches
+   * it invents captions to fill. What comes back is on the spliced file's own
+   * timeline, and the caller has to map it back.
+   *
+   * Opus at this bitrate is about 11 MB per hour, which keeps a clip well
    * inside the 25 MB the transcription endpoint accepts while staying far
    * above what Whisper actually needs - it resamples to 16 kHz regardless.
    */
-  async extractClip(
+  async extractPieces(
     videoPath: string,
-    start: number,
-    duration: number,
+    pieces: TimeRange[],
     outPath: string,
     bitrateKbps = 24,
     signal?: AbortSignal
   ) {
+    if (pieces.length === 0) {
+      throw Error('A clip needs at least one piece of audio');
+    }
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    // Written to a file rather than passed as an argument: a sparse hour can
+    // run to hundreds of pieces, which is past the command-line length
+    // Windows allows.
+    const scriptPath = `${outPath}.filtergraph`;
+    fs.writeFileSync(scriptPath, this.#spliceGraph(pieces), 'utf8');
     const args = [
       '-v', 'error',
       '-y',
-      // Before -i, so ffmpeg seeks instead of decoding up to the start point.
-      '-ss', start.toFixed(3),
-      '-t', duration.toFixed(3),
+      // No -ss to seek to the first piece: with the timeline shifted under
+      // it, every offset in the graph would have to be corrected by however
+      // much ffmpeg actually skipped, which is a packet boundary rather than
+      // the number asked for. Decoding from the start costs seconds and is
+      // exact.
       '-i', videoPath,
       '-vn',
+      '-filter_complex_script', scriptPath,
+      '-map', '[spliced]',
       '-ac', '1',
       '-ar', String(SAMPLE_RATE),
       '-c:a', 'libopus',
       '-b:a', `${bitrateKbps}k`,
       outPath
     ];
-    await this.#run(this.#ffmpegPath, args, signal);
-    if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
-      throw Error(`ffmpeg produced no audio for ${start.toFixed(1)}s-${(start + duration).toFixed(1)}s`);
+    try {
+      await this.#run(this.#ffmpegPath, args, signal);
     }
+    finally {
+      fs.rmSync(scriptPath, { force: true });
+    }
+    if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
+      const first = pieces[0].start;
+      const last = pieces[pieces.length - 1].end;
+      throw Error(`ffmpeg produced no audio for ${first.toFixed(1)}s-${last.toFixed(1)}s`);
+    }
+  }
+
+  /**
+   * The filtergraph that keeps `pieces` and drops the rest.
+   *
+   * `aselect` decides frame by frame, so the frames are cut down to the
+   * grid first: whatever length they arrive at is the resolution every boundary
+   * would otherwise be rounded to, and the rounding is what the caller's
+   * timestamps drift by. On a 10 ms frame the offsets in `SPLICE_GRID`
+   * multiples land exactly, so a clip's duration is the sum of its pieces
+   * and stays that way however many pieces it has.
+   *
+   * The comparisons are made against the middle of a frame rather than its
+   * edge, which is the same thing said in a way that does not depend on
+   * `t` and the offset rounding to the same double.
+   */
+  #spliceGraph(pieces: TimeRange[]) {
+    const edge = SPLICE_GRID / 2;
+    const keep = pieces
+      .map(({ start, end }) =>
+        `between(t,${(snapToSpliceGrid(start) - edge).toFixed(3)},` +
+        `${(snapToSpliceGrid(end) - edge).toFixed(3)})`)
+      .join('+');
+    return (
+      `[0:a]aformat=sample_fmts=fltp:sample_rates=${SAMPLE_RATE}:channel_layouts=mono,` +
+      `asetnsamples=n=${Math.round(SPLICE_GRID * SAMPLE_RATE)}:p=0,` +
+      `aselect=expr='${keep}',` +
+      // The kept frames still carry the timestamps they had in the source, so
+      // without this the file plays as one piece with long gaps in it.
+      `asetpts=N/SR/TB[spliced]`
+    );
   }
 
   #run(command: string, args: string[], signal?: AbortSignal) {

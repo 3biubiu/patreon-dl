@@ -8,6 +8,7 @@ import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
 import type VideoThumbnailer from '../VideoThumbnailer.js';
 import { isMediaElementRequest } from '../MediaAccessGuard.js';
+import mime from 'mime-types';
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
@@ -46,6 +47,16 @@ function looksLikeImage(filePath: string, mimeType?: string | null) {
   }
   return [ '.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.bmp', '.svg' ]
     .includes(path.extname(filePath).toLowerCase());
+}
+
+/**
+ * The type to serve a file as. Safari refuses to start a video whose
+ * `Content-Type` is missing or is not `video/*` - it sits on the spinner
+ * rather than sniff the bytes - so a mime type the DB never recorded is worked
+ * out from the extension instead of being left off.
+ */
+function resolveMimeType(filePath: string, mimeType?: string | null) {
+  return mimeType || mime.lookup(filePath) || null;
 }
 
 export default class MediaRequestHandler extends Basehandler {
@@ -128,40 +139,19 @@ export default class MediaRequestHandler extends Basehandler {
     if (isDownloadRequest) {
       res.setHeader('Content-Disposition', contentDisposition(path.basename(mediaFilePath)));
     }
-    const isVideo = downloaded.mimeType?.startsWith('video/');
-    if (isThumbnail || !isVideo || !req.headers.range) {
-      let mimeType: string | null;
-      if (isThumbnail) {
-        mimeType = downloaded.thumbnail?.mimeType || null;
-      }
-      else {
-        mimeType = downloaded.mimeType || null;
-      }
-      const headers = mimeType ? { 'Content-Type': mimeType } : undefined;
-      res.sendFile(mediaFilePath, { headers, dotfiles: 'allow' });
-    }
-    else {
-      const range = req.headers.range;
-        if (!range) {
-          res.status(416).send('Requires Range header');
-          return;
-        }
-        const fileSize = fs.statSync(mediaFilePath).size;
-        const chunkSize = 10 ** 6; // 1MB chunks
-        const start = Number(range.replace(/\D/g, ''));
-        const end = Math.min(start + chunkSize, fileSize - 1);
-
-        const headers = {
-          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-          'Accept-Ranges': 'bytes',
-          'Content-Length': end - start + 1,
-          'Content-Type': downloaded.mimeType || undefined
-        };
-
-        res.writeHead(206, headers);
-        const stream = fs.createReadStream(mediaFilePath, { start, end });
-        stream.pipe(res);
-    }
+    const mimeType = isThumbnail ?
+      resolveMimeType(mediaFilePath, downloaded.thumbnail?.mimeType) :
+      resolveMimeType(mediaFilePath, downloaded.mimeType);
+    // Range requests are left to express, whose implementation follows
+    // RFC 7233 - it honours the requested end, "bytes=-suffix", "If-Range" and
+    // answers 416 on a range it cannot satisfy. The hand-rolled one this
+    // replaces read the header by stripping every non-digit and calling what
+    // was left the start. Chrome and Firefox only ever ask open-ended
+    // ("bytes=0-"), so that happened to work; Safari opens every video with
+    // "bytes=0-1", which came out as byte 1, and iOS spun forever on a reply
+    // that began in the wrong place.
+    const headers = mimeType ? { 'Content-Type': mimeType } : undefined;
+    res.sendFile(mediaFilePath, { headers, dotfiles: 'allow', acceptRanges: true });
   }
 }
 

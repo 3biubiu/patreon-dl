@@ -12,23 +12,35 @@ export interface ProxyAgentInfo {
 const proxyAgents: Record<string, ProxyAgentInfo> = {};
 
 export function createProxyAgent(options: DownloaderOptions) {
-  if (!options.request?.proxy) {
+  return createProxyAgentFor(options.request?.proxy);
+}
+
+/**
+ * The same thing for a caller that has proxy options on their own rather than
+ * a whole `DownloaderOptions` - the web server's translation requests, which
+ * are configured per feature and not per download.
+ *
+ * Agents are cached by their options, so callers may ask on every request and
+ * still share one connection pool.
+ */
+export function createProxyAgentFor(proxy?: ProxyOptions | null) {
+  if (!proxy) {
     return null;
   }
-  const key = createHash('md5').update(JSON.stringify(options.request.proxy)).digest('hex');
+  const key = createHash('md5').update(JSON.stringify(proxy)).digest('hex');
   if (proxyAgents[key]) {
     return proxyAgents[key];
   }
-  const proxyURL = options.request.proxy.url;
+  const proxyURL = proxy.url;
   const urlObj = new URL(proxyURL);
   const protocol = urlObj.protocol.endsWith(':') ? urlObj.protocol.substring(0, urlObj.protocol.length - 1) : urlObj.protocol;
   if (protocolMatches(protocol, ['http', 'https'])) {
-    const agent = createHTTPProxyAgent(options.request.proxy);
+    const agent = createHTTPProxyAgent(proxy);
     proxyAgents[key] = { protocol, proxyURL, agent };
     return proxyAgents[key];
   }
   if (protocolMatches(protocol, ['socks4', 'socks5'])) {
-    const agent = createSocksProxyAgent(options.request.proxy);
+    const agent = createSocksProxyAgent(proxy);
     proxyAgents[key] = { protocol, proxyURL, agent };
     return proxyAgents[key];
   }

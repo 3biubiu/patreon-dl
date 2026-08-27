@@ -355,7 +355,12 @@ function TranscriptionHistory() {
           {
             // The second way in: translating a transcription that is already
             // finished, without transcribing it again.
-            canTranslate && record.state === 'done' ? (
+            //
+            // Shown whether or not a key is configured yet, so that a
+            // transcription without a translation always says how to get one.
+            // Without a key the server answers with what is missing, which is
+            // more use than a button that is simply not there.
+            record.state === 'done' ? (
               <Popconfirm
                 title={record.translation?.state === 'done' ? 'Translate again?' : 'Translate to Chinese?'}
                 description={

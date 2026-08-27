@@ -3,8 +3,25 @@ import { useAPI } from "../contexts/APIProvider";
 import { getMediaIdFromVideo } from "../utils/useActiveVideo";
 import PlayerMenuButton from "./PlayerMenuButton";
 import { type SubtitleFile } from "../../types/Transcription";
+import { TARGET_LANGUAGE } from "../../types/Translation";
 
 const OFF = '';
+
+/**
+ * Which track a video opens on.
+ *
+ * The Chinese translation wins whenever there is one - it is the reason it was
+ * made, and having to reach for the menu on every video would undo that.
+ * Otherwise the first of whatever is there, so a video with only its original
+ * captions still opens with them showing.
+ */
+function pickDefault(subtitles: SubtitleFile[]) {
+  const translated = subtitles.find((subtitle) =>
+    subtitle.language === TARGET_LANGUAGE ||
+    subtitle.language?.startsWith(`${TARGET_LANGUAGE}-`)
+  );
+  return translated?.filename || subtitles[0]?.filename || OFF;
+}
 
 /** Marks the tracks this control put there, so it only ever removes its own. */
 const MANAGED = 'data-subtitle-control';
@@ -81,7 +98,7 @@ function SubtitleControl(props: SubtitleControlProps) {
           setSubtitles(found);
           // Whatever the player was given to start with is replaced by this
           // list, which is a superset of it.
-          setSelected(found.length > 0 ? found[0].filename : OFF);
+          setSelected(pickDefault(found));
         }
       }
       catch {

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import { type Logger } from '../../../utils/logging/index.js';
+import { DEFAULT_PROXY_URL } from './GeminiTranslator.js';
 
 /**
  * Source characters aimed at per call, and the ceiling on lines per call.
@@ -26,6 +27,12 @@ interface SettingsFile {
   apiKey: string | null;
   model: string | null;
   baseUrl: string | null;
+  /**
+   * Proxy for the Gemini requests. `null` means the default is in use; the
+   * empty string means an administrator turned it off and wants to go direct,
+   * which is why the two are not the same value here.
+   */
+  proxyUrl: string | null;
   /** The editable half of the prompt; `null` means the default is in use. */
   prompt: string | null;
   batchCharacters: number | null;
@@ -39,6 +46,7 @@ const EMPTY: SettingsFile = {
   apiKey: null,
   model: null,
   baseUrl: null,
+  proxyUrl: null,
   prompt: null,
   batchCharacters: null,
   batchLines: null,
@@ -82,6 +90,7 @@ export default class TranslationSettingsStore {
           apiKey: parsed.apiKey || null,
           model: parsed.model || null,
           baseUrl: parsed.baseUrl || null,
+          proxyUrl: parsed.proxyUrl ?? null,
           prompt: parsed.prompt || null,
           batchCharacters: parsed.batchCharacters || null,
           batchLines: parsed.batchLines || null,
@@ -120,6 +129,24 @@ export default class TranslationSettingsStore {
 
   getBaseUrl(): string | null {
     return this.#data.baseUrl || process.env.GEMINI_BASE_URL || null;
+  }
+
+  /**
+   * The proxy the Gemini requests go through, or `null` to go direct.
+   *
+   * Unset means the built-in default, which is a local proxy: Gemini is not
+   * reachable from everywhere. An administrator who saves an empty value gets
+   * `''` stored, which is honoured as "no proxy" rather than falling back to
+   * the default again.
+   */
+  getProxyUrl(): string | null {
+    if (this.#data.proxyUrl !== null) {
+      return this.#data.proxyUrl || null;
+    }
+    if (process.env.GEMINI_PROXY_URL !== undefined) {
+      return process.env.GEMINI_PROXY_URL || null;
+    }
+    return DEFAULT_PROXY_URL;
   }
 
   /** `null` when the default is in use, which is what the form shows as such. */
@@ -169,6 +196,7 @@ export default class TranslationSettingsStore {
     apiKey?: string | null;
     model?: string | null;
     baseUrl?: string | null;
+    proxyUrl?: string | null;
     prompt?: string | null;
     batchCharacters?: number | null;
     batchLines?: number | null;
@@ -182,6 +210,10 @@ export default class TranslationSettingsStore {
     }
     if (params.baseUrl !== undefined) {
       this.#data.baseUrl = params.baseUrl || null;
+    }
+    if (params.proxyUrl !== undefined) {
+      // Kept verbatim, empty string included - see `getProxyUrl`.
+      this.#data.proxyUrl = params.proxyUrl;
     }
     if (params.prompt !== undefined) {
       this.#data.prompt = params.prompt || null;

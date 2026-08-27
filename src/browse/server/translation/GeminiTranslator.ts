@@ -1,5 +1,7 @@
+import { fetch, type Response } from 'undici';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
+import { createProxyAgentFor } from '../../../utils/Proxy.js';
 import { type TranslationKeyDescription } from '../../types/Translation.js';
 import { buildSystemPrompt } from './TranslationPrompt.js';
 
@@ -7,6 +9,12 @@ export { type TranslationKeyDescription } from '../../types/Translation.js';
 
 export const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 export const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+/**
+ * Gemini is not reachable from everywhere, so translation goes through a local
+ * proxy unless one is configured otherwise or the setting is cleared. This is
+ * the address the usual local proxies listen on.
+ */
+export const DEFAULT_PROXY_URL = 'http://127.0.0.1:17890';
 
 /**
  * Long enough for a large batch on a cold model, short enough that a wedged
@@ -53,8 +61,48 @@ export interface TranslatorSettings {
   apiKey: string | null;
   model: string;
   baseUrl: string;
+  /** `null` sends the request directly, which is what an empty setting means. */
+  proxyUrl: string | null;
   prompt: string | null;
   disableThinking: boolean;
+}
+
+/**
+ * The undici dispatcher for `proxyUrl`, or `undefined` to go direct.
+ *
+ * A bad proxy URL is not worth failing the request over before the request has
+ * been tried: it is reported and the call goes direct, which produces the
+ * clearer of the two errors.
+ */
+/**
+ * What actually went wrong with a request.
+ *
+ * undici reports every transport failure as "fetch failed" and puts the reason
+ * - a refused connection, an unresolved host - in `cause`. Unwrapped here
+ * because the common failure of this feature is a proxy that is not listening,
+ * and "fetch failed" alone gives an administrator nothing to act on.
+ */
+function describeFetchError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const cause = error.cause;
+  const detail = cause instanceof Error ? cause.message : null;
+  return detail && detail !== error.message ? `${error.message} (${detail})` : error.message;
+}
+
+function dispatcherFor(proxyUrl: string | null | undefined, logger?: Logger | null) {
+  if (!proxyUrl) {
+    return undefined;
+  }
+  try {
+    return createProxyAgentFor({ url: proxyUrl })?.agent;
+  }
+  catch (error) {
+    commonLog(logger, 'warn', 'GeminiTranslator',
+      `Ignoring the translation proxy "${proxyUrl}":`, error);
+    return undefined;
+  }
 }
 
 /**
@@ -135,16 +183,24 @@ export default class GeminiTranslator {
     apiKey: string,
     baseUrl = DEFAULT_BASE_URL,
     model = DEFAULT_MODEL,
+    proxyUrl: string | null = DEFAULT_PROXY_URL,
     signal?: AbortSignal
   ): Promise<TranslationKeyDescription> {
     const url = `${baseUrl.replace(/\/+$/, '')}/models?pageSize=1000`;
     let response: Response;
     try {
-      response = await fetch(url, { headers: { 'x-goog-api-key': apiKey }, signal });
+      // Through the same proxy the translations themselves go through, so
+      // that a key verified here is a key that will work there.
+      response = await fetch(url, {
+        headers: { 'x-goog-api-key': apiKey },
+        dispatcher: dispatcherFor(proxyUrl),
+        signal
+      });
     }
     catch (error) {
       throw new TranslationError(
-        `Could not reach Gemini: ${error instanceof Error ? error.message : String(error)}`
+        `Could not reach Gemini${proxyUrl ? ` through ${proxyUrl}` : ''}: ` +
+        describeFetchError(error)
       );
     }
     if (response.status === 400 || response.status === 401 || response.status === 403) {
@@ -207,7 +263,7 @@ export default class GeminiTranslator {
   ): Promise<Map<number, string>> {
     // Read once per call: an administrator can change the key, model or
     // prompt between one batch and the next.
-    const { apiKey, model, baseUrl, prompt, disableThinking } = this.#settings();
+    const { apiKey, model, baseUrl, proxyUrl, prompt, disableThinking } = this.#settings();
 
     const said: string[] = [];
     if (context.length > 0) {
@@ -251,6 +307,7 @@ export default class GeminiTranslator {
           method: 'POST',
           headers: { 'x-goog-api-key': apiKey as string, 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          dispatcher: dispatcherFor(proxyUrl, this.#logger),
           signal: controller.signal
         }
       );
@@ -260,9 +317,11 @@ export default class GeminiTranslator {
         throw Error('Aborted');
       }
       // A model that ran out of time closes the connection rather than
-      // answering, so a smaller batch may well survive.
+      // answering, so a smaller batch may well survive. A proxy that is not
+      // listening looks the same from here, which is why it is named.
       throw new TranslationError(
-        `Request failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Request failed${proxyUrl ? ` (through ${proxyUrl})` : ''}: ` +
+        describeFetchError(error),
         null,
         true
       );

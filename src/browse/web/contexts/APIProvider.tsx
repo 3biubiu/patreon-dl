@@ -477,6 +477,7 @@ class API {
     apiKey?: string;
     model?: string;
     baseUrl?: string;
+    proxyUrl?: string;
     prompt?: string;
     batchCharacters?: number;
     batchLines?: number;

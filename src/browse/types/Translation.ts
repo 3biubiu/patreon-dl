@@ -76,6 +76,10 @@ export interface TranslationSettings {
   source: 'file' | 'env' | null;
   model: string;
   baseUrl: string;
+  /** Proxy the Gemini requests go through. Empty means straight out. */
+  proxyUrl: string;
+  /** What `proxyUrl` is when nobody has set one. */
+  defaultProxyUrl: string;
   /**
    * The editable half of the prompt. The half that fixes the output contract
    * is not editable - see `TranslationPrompt.ts`.

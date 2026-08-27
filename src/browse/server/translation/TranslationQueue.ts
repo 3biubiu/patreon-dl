@@ -231,6 +231,16 @@ export default class TranslationQueue {
       throw Error('The subtitle to translate is no longer where it was');
     }
     const videoPath = path.resolve(this.#dataDir, record.videoPath);
+    const outFile = path.resolve(
+      path.dirname(videoPath),
+      `${path.basename(videoPath, path.extname(videoPath))}.${TARGET_LANGUAGE}.srt`
+    );
+    // A video that was spoken in Chinese transcribes to this very file, and
+    // translating it would replace its own source with a near-copy. Checked
+    // before any work, so it costs nothing rather than a whole file of calls.
+    if (path.resolve(sourcePath) === outFile) {
+      throw Error('This transcription is already in Chinese, so there is nothing to translate');
+    }
 
     const cues = parseSRT(fs.readFileSync(sourcePath, 'utf-8'));
     if (cues.length === 0) {
@@ -286,10 +296,6 @@ export default class TranslationQueue {
       this.log('warn', `${missing} of ${cues.length} captions were left untranslated`);
     }
 
-    const outFile = path.resolve(
-      path.dirname(videoPath),
-      `${path.basename(videoPath, path.extname(videoPath))}.${TARGET_LANGUAGE}.srt`
-    );
     fs.writeFileSync(outFile, buildTranslatedSRT(cues, translations), 'utf8');
     this.log('info',
       `Wrote "${path.basename(outFile)}" - ${cues.length} captions, ` +

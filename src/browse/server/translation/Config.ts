@@ -21,6 +21,12 @@ export interface TranslationConfig {
   /** Translation model, from Gemini AI Studio. */
   model?: string | null;
   baseUrl?: string | null;
+  /**
+   * Proxy the Gemini requests go through. Gemini is not reachable everywhere,
+   * so this defaults to a local proxy rather than to going direct - see
+   * `DEFAULT_PROXY_URL`. An empty string turns it off.
+   */
+  proxyUrl?: string | null;
 }
 
 export interface TranslationServices {
@@ -58,6 +64,7 @@ export function createTranslationServices(
       apiKey: config?.apiKey || settings.getApiKey(),
       model: config?.model || settings.getModel() || DEFAULT_MODEL,
       baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL,
+      proxyUrl: config?.proxyUrl !== undefined ? config.proxyUrl || null : settings.getProxyUrl(),
       prompt: settings.getPrompt(),
       disableThinking: settings.getDisableThinking()
     }),

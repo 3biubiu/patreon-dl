@@ -10,6 +10,7 @@ interface FormValues {
   apiKey: string;
   model: string;
   baseUrl: string;
+  proxyUrl: string;
   batchCharacters: number;
   batchLines: number;
   disableThinking: boolean;
@@ -64,6 +65,7 @@ function TranslationSettings() {
       apiKey: '',
       model: result.model,
       baseUrl: result.baseUrl,
+      proxyUrl: result.proxyUrl,
       batchCharacters: result.batchCharacters,
       batchLines: result.batchLines,
       disableThinking: result.disableThinking
@@ -105,6 +107,7 @@ function TranslationSettings() {
     const params: Parameters<typeof api.saveTranslationSettings>[0] = {
       model: values.model,
       baseUrl: values.baseUrl,
+      proxyUrl: values.proxyUrl ?? '',
       batchCharacters: values.batchCharacters,
       batchLines: values.batchLines,
       disableThinking: values.disableThinking
@@ -148,6 +151,9 @@ function TranslationSettings() {
                 : <Tag color="orange">No API key</Tag>
             }
             {fromEnvironment ? <Tag>From GEMINI_API_KEY</Tag> : null}
+          </Descriptions.Item>
+          <Descriptions.Item label="Proxy">
+            {settings.proxyUrl || 'None - connecting straight out'}
           </Descriptions.Item>
           {
             settings.key ? (
@@ -229,6 +235,18 @@ function TranslationSettings() {
 
           <Form.Item name="baseUrl" label="API base URL">
             <Input placeholder="https://generativelanguage.googleapis.com/v1beta" />
+          </Form.Item>
+
+          <Form.Item
+            name="proxyUrl"
+            label="Proxy"
+            extra={
+              `Every Gemini request goes through this, key checks included. HTTP, HTTPS ` +
+              `and SOCKS are all understood. Defaults to ${settings.defaultProxyUrl}; ` +
+              `clear it to connect straight out.`
+            }
+          >
+            <Input placeholder={settings.defaultProxyUrl} allowClear />
           </Form.Item>
 
           <Form.Item

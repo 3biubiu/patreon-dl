@@ -5,7 +5,7 @@ import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type TranslationQueue from '../translation/TranslationQueue.js';
 import type TranslationSettingsStore from '../translation/TranslationSettingsStore.js';
 import type TranslationCache from '../translation/TranslationCache.js';
-import GeminiTranslator, { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../translation/GeminiTranslator.js';
+import GeminiTranslator, { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_PROXY_URL } from '../translation/GeminiTranslator.js';
 import { DEFAULT_PROMPT } from '../translation/TranslationPrompt.js';
 import { type TranslationSettings } from '../../types/Translation.js';
 
@@ -65,6 +65,8 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       source: this.#settings.getApiKeySource(),
       model: this.#settings.getModel() || DEFAULT_MODEL,
       baseUrl: this.#settings.getBaseUrl() || DEFAULT_BASE_URL,
+      proxyUrl: this.#settings.getProxyUrl() || '',
+      defaultProxyUrl: DEFAULT_PROXY_URL,
       prompt: this.#settings.getPrompt() || DEFAULT_PROMPT,
       defaultPrompt: DEFAULT_PROMPT,
       batchCharacters: this.#settings.getBatchCharacters(),
@@ -77,7 +79,7 @@ export default class TranslationAPIRequestHandler extends Basehandler {
     if (apiKey) {
       try {
         settings.key = await GeminiTranslator.describeKey(
-          apiKey, settings.baseUrl, settings.model
+          apiKey, settings.baseUrl, settings.model, settings.proxyUrl || null
         );
       }
       catch (error) {
@@ -105,6 +107,11 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       patch.baseUrl = typeof body.baseUrl === 'string' && body.baseUrl.trim() ?
         body.baseUrl.trim()
         : null;
+    }
+    if (body.proxyUrl !== undefined) {
+      // Stored verbatim, empty string included: that is how an administrator
+      // says "no proxy" rather than "use the default".
+      patch.proxyUrl = typeof body.proxyUrl === 'string' ? body.proxyUrl.trim() : '';
     }
     if (body.prompt !== undefined) {
       // Blank means "use the default", which is also what the reset button
@@ -134,8 +141,14 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       else {
         const baseUrl = patch.baseUrl || this.#settings.getBaseUrl() || DEFAULT_BASE_URL;
         const model = patch.model || this.#settings.getModel() || DEFAULT_MODEL;
+        // Through whatever proxy is being saved alongside, not the stored one:
+        // the two arrive in the same request, and checking the key against the
+        // old proxy would reject a key that is about to work.
+        const proxyUrl = patch.proxyUrl !== undefined ?
+          patch.proxyUrl || null
+          : this.#settings.getProxyUrl();
         try {
-          await GeminiTranslator.describeKey(apiKey, baseUrl, model);
+          await GeminiTranslator.describeKey(apiKey, baseUrl, model, proxyUrl);
         }
         catch (error) {
           res.status(400).json({

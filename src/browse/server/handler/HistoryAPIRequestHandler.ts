@@ -6,6 +6,8 @@ import type HistoryStore from '../HistoryStore.js';
 import { type AuthenticatedRequest } from '../AuthGuard.js';
 import { canSeeCampaign } from '../CampaignAccessGuard.js';
 import {
+  MAX_FAVORITES,
+  type FavoriteListItem,
   type ViewedPostListItem,
   type WatchedVideo,
   type WatchedVideoListItem
@@ -157,6 +159,66 @@ export default class HistoryAPIRequestHandler extends Basehandler {
       viewedAt: new Date().toISOString()
     });
     res.json({ ok: true });
+  }
+
+  handleListFavoritesRequest(req: Request, res: Response) {
+    const userId = this.#userId(req, res);
+    if (!userId) {
+      return;
+    }
+    const favorites: FavoriteListItem[] = this.#store.listFavorites(userId)
+      .filter((favorite) => canSeeCampaign(req, favorite.campaignId))
+      .map(({ postId, favoritedAt }) => {
+        const summary = this.#db.getContentSummary(postId, 'post');
+        return {
+          postId,
+          favoritedAt,
+          title: summary?.title || null,
+          campaignName: summary?.campaignName || null,
+          thumbnailMediaId: this.#db.getExistingMediaId([
+            `post:${postId}:thumbnail`,
+            `post:${postId}:cover`
+          ])
+        };
+      });
+    res.json({ favorites });
+  }
+
+  /** Whether one post is saved, for the toggle to show the right state. */
+  handleGetFavoriteRequest(req: Request, res: Response, postId: string) {
+    const userId = this.#userId(req, res);
+    if (!userId) {
+      return;
+    }
+    res.json({ favorite: this.#store.isFavorite(userId, postId) });
+  }
+
+  handleAddFavoriteRequest(req: Request, res: Response, postId: string) {
+    const userId = this.#userId(req, res);
+    if (!userId) {
+      return;
+    }
+    const { full } = this.#store.addFavorite(userId, {
+      postId,
+      campaignId: this.#db.getCampaignIdForContent(postId, 'post'),
+      favoritedAt: new Date().toISOString()
+    });
+    if (full) {
+      res.status(409).json({
+        error: `The favorites list is full (${MAX_FAVORITES} at most). Remove one to make room.`
+      });
+      return;
+    }
+    res.json({ ok: true, favorite: true });
+  }
+
+  handleRemoveFavoriteRequest(req: Request, res: Response, postId: string) {
+    const userId = this.#userId(req, res);
+    if (!userId) {
+      return;
+    }
+    this.#store.removeFavorite(userId, postId);
+    res.json({ ok: true, favorite: false });
   }
 
   /**

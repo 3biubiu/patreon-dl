@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Card, Descriptions, Form, Input, Popconfirm, Space, Tag } from "antd";
-import { Link } from "react-router";
-import { useAPI } from "../contexts/APIProvider";
-import { useDocument } from "../contexts/DocumentProvider";
-import { LoadingBlock } from "../components/Loading";
-import { type TranscriptionSettings as Settings } from "../../types/Transcription";
+import { useAPI } from "../../contexts/APIProvider";
+import { LoadingBlock } from "../Loading";
+import { type TranscriptionSettings as Settings } from "../../../types/Transcription";
 
 interface FormValues {
   apiKey: string;
@@ -17,27 +15,22 @@ function formatMoney(value: number | null | undefined) {
 }
 
 /**
- * Where the OpenRouter key is set. Administrators only - the route is hidden
- * from everyone else, and the server refuses these endpoints to them
- * regardless.
+ * The OpenRouter key, model and base URL. Lifted out of what used to be its own
+ * page so it can sit in a tab of the settings drawer beside the translation
+ * one - the behaviour is unchanged from that page.
  *
  * The key is write-only by design: it is sent when it is set and never comes
  * back. What the form shows instead is the masked label OpenRouter reports for
  * it, which is enough to tell one key from another without the value ever
  * being in a page again.
  */
-function TranscriptionSettings() {
+function TranscriptionSettingsPanel() {
   const { api } = useAPI();
-  const { setTitle } = useDocument();
   const [ settings, setSettings ] = useState<Settings | null>(null);
   const [ error, setError ] = useState<string | null>(null);
   const [ saved, setSaved ] = useState(false);
   const [ submitting, setSubmitting ] = useState(false);
   const [ form ] = Form.useForm<FormValues>();
-
-  useEffect(() => {
-    setTitle('Transcription');
-  }, [ setTitle ]);
 
   const refresh = useCallback(async () => {
     try {
@@ -102,11 +95,7 @@ function TranscriptionSettings() {
   const fromEnvironment = settings.source === 'env';
 
   return (
-    <Space orientation="vertical" size="middle" style={{ display: 'flex', maxWidth: '44rem' }}>
-      <Link to="/transcription">
-        <Button>Back to history</Button>
-      </Link>
-
+    <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
       <Card title="OpenRouter">
         <Descriptions column={1} size="small">
           <Descriptions.Item label="Status">
@@ -208,4 +197,4 @@ function TranscriptionSettings() {
   );
 }
 
-export default TranscriptionSettings;
+export default TranscriptionSettingsPanel;

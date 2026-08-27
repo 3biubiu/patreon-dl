@@ -10,7 +10,7 @@ import type VoiceActivityDetector from '../transcription/VoiceActivityDetector.j
 import type TranscriptionSettingsStore from '../transcription/TranscriptionSettingsStore.js';
 import OpenRouterTranscriber, { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../transcription/OpenRouterTranscriber.js';
 import { listSubtitlesFor, readSubtitleAsVTT } from '../transcription/SubtitleLibrary.js';
-import { type TranscriptionSettings } from '../../types/Transcription.js';
+import { type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription.js';
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
@@ -73,6 +73,21 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
       return null;
     }
     return file;
+  }
+
+  /**
+   * Fills in `postId` / `contentType` from the media-to-content link, so the
+   * history list can send a row back to the post the video is in. Done on the
+   * way out rather than stored: the link belongs to the library, not to the
+   * transcription, and a record outlives nothing by carrying a stale copy.
+   */
+  #withContentRef(record: TranscriptionRecord): TranscriptionRecord {
+    const ref = this.#db.getMediaContentRef(record.mediaId);
+    return { ...record, postId: ref?.contentId ?? null, contentType: ref?.contentType ?? null };
+  }
+
+  #withContentRefs(records: TranscriptionRecord[]): TranscriptionRecord[] {
+    return records.map((record) => this.#withContentRef(record));
   }
 
   /** Why transcription cannot run, or `null` when it can. */
@@ -174,7 +189,7 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     }
     const record = this.#queue.enqueue(id, video);
     this.log('info', `Transcription queued for media "${id}"`);
-    res.json({ record });
+    res.json({ record: this.#withContentRef(record) });
   }
 
   handleCancelRequest(_req: Request, res: Response, id: string) {
@@ -186,17 +201,18 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
   handleCancelAllRequest(_req: Request, res: Response) {
     const stopped = this.#queue.cancelAll();
     this.log('info', `Stopped ${stopped} transcription(s) on request`);
-    res.json({ stopped, records: this.#index.list() });
+    res.json({ stopped, records: this.#withContentRefs(this.#index.list()) });
   }
 
   /** One video's transcription, at whatever stage it has reached. */
   handleJobRequest(_req: Request, res: Response, id: string) {
-    res.json({ record: this.#index.get(id) });
+    const record = this.#index.get(id);
+    res.json({ record: record ? this.#withContentRef(record) : null });
   }
 
   /** The whole history, newest request first. */
   handleListJobsRequest(_req: Request, res: Response) {
-    res.json({ records: this.#index.list() });
+    res.json({ records: this.#withContentRefs(this.#index.list()) });
   }
 
   /**
@@ -206,7 +222,7 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
    */
   handleClearHistoryRequest(_req: Request, res: Response) {
     const removed = this.#index.clearFinished();
-    res.json({ removed, records: this.#index.list() });
+    res.json({ removed, records: this.#withContentRefs(this.#index.list()) });
   }
 
   /** Forgets one record, so its video looks untranscribed again. */

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
+import { MAX_FAVORITES } from '../types/History.js';
 
 /**
  * How much of each kind is kept per account. Small on purpose: this is what
@@ -31,9 +32,21 @@ interface StoredPost {
   viewedAt: string;
 }
 
+/**
+ * A saved post. `campaignId` is the same bookkeeping the other kinds carry, so
+ * a favorite made before an account was narrowed stops being handed back.
+ */
+interface StoredFavorite {
+  postId: string;
+  campaignId: string | null;
+  favoritedAt: string;
+}
+
 interface UserHistory {
   videos: StoredVideo[];
   posts: StoredPost[];
+  /** Written before favorites existed, so this can be absent on load. */
+  favorites?: StoredFavorite[];
 }
 
 interface HistoryFile {
@@ -42,7 +55,7 @@ interface HistoryFile {
 }
 
 function emptyUserHistory(): UserHistory {
-  return { videos: [], posts: [] };
+  return { videos: [], posts: [], favorites: [] };
 }
 
 /**
@@ -128,6 +141,50 @@ export default class HistoryStore {
       (post) => post.postId === entry.postId
     );
     this.#save();
+  }
+
+  /** Newest saved first. */
+  listFavorites(userId: string): StoredFavorite[] {
+    return this.#data.users[userId]?.favorites || [];
+  }
+
+  isFavorite(userId: string, postId: string): boolean {
+    return this.listFavorites(userId).some((favorite) => favorite.postId === postId);
+  }
+
+  /**
+   * Saves a post. Unlike the history kinds this does not evict anything: a
+   * favorite is kept until the user removes it. When the ceiling is already
+   * reached and this post is not one of the ones held, nothing is stored and
+   * `full` comes back true so the caller can say why.
+   */
+  addFavorite(userId: string, entry: StoredFavorite): { added: boolean; full: boolean } {
+    const history = this.#userHistory(userId);
+    if (!history.favorites) {
+      history.favorites = [];
+    }
+    const favorites = history.favorites;
+    if (favorites.some((favorite) => favorite.postId === entry.postId)) {
+      return { added: false, full: false };
+    }
+    if (favorites.length >= MAX_FAVORITES) {
+      return { added: false, full: true };
+    }
+    history.favorites = [ entry, ...favorites ];
+    this.#save();
+    return { added: true, full: false };
+  }
+
+  /** Removes a saved post. Returns whether one was there to remove. */
+  removeFavorite(userId: string, postId: string): boolean {
+    const history = this.#data.users[userId];
+    const favorites = history?.favorites;
+    if (!history || !favorites || !favorites.some((favorite) => favorite.postId === postId)) {
+      return false;
+    }
+    history.favorites = favorites.filter((favorite) => favorite.postId !== postId);
+    this.#save();
+    return true;
   }
 
   /**

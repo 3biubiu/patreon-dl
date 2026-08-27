@@ -3,6 +3,7 @@
  * Shared so the two cannot drift, in the way `Auth.ts` is shared.
  */
 
+import { type ContentType } from './Content.js';
 import { type TranslationProgress } from './Translation.js';
 
 export type TranscriptionState =
@@ -30,6 +31,14 @@ export interface TranscriptionRecord {
   videoPath: string;
   /** File name alone, so a list has something readable to show. */
   videoName: string;
+  /**
+   * The post or product this video belongs to, and which of the two, so the
+   * history can link a row back to where the video is. Filled in when the
+   * history is read rather than stored - see the transcription handler. Absent
+   * when the media is not tied to any content the database knows about.
+   */
+  postId?: string | null;
+  contentType?: ContentType | null;
   subtitlePath: string | null;
   language: string | null;
   state: TranscriptionState;

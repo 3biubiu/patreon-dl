@@ -19,6 +19,19 @@ export interface ViewedPost {
 }
 
 /**
+ * A post the user has explicitly saved. Unlike the viewed-post history this is
+ * a deliberate act and is not evicted by newer entries - it only leaves when
+ * the user removes it, up to a fixed ceiling.
+ */
+export interface Favorite {
+  postId: string;
+  favoritedAt: string;
+}
+
+/** How many favorites one account may keep. Enforced by the server. */
+export const MAX_FAVORITES = 100;
+
+/**
  * A history entry with the details needed to show it in a list.
  *
  * Resolved from the database when the list is asked for, rather than copied
@@ -34,6 +47,13 @@ export interface WatchedVideoListItem extends WatchedVideo {
 }
 
 export interface ViewedPostListItem extends ViewedPost {
+  title: string | null;
+  campaignName: string | null;
+  /** A picture to show for it, if one was downloaded. */
+  thumbnailMediaId: string | null;
+}
+
+export interface FavoriteListItem extends Favorite {
   title: string | null;
   campaignName: string | null;
   /** A picture to show for it, if one was downloaded. */

@@ -183,6 +183,25 @@ export function MediaDBMixin<TBase extends DBConstructor>(Base: TBase) {
       } : null;
     }
 
+    /**
+     * The post or product a media belongs to, or `null`. Used to link a
+     * transcription back to the content the video came from - `content_media`
+     * has one row per media, keyed by media id, so this is a single lookup.
+     */
+    getMediaContentRef(id: string): { contentId: string; contentType: ContentType } | null {
+      const result = this.get(
+        `
+        SELECT content_id, content_type
+        FROM content_media
+        WHERE media_id = ?
+        `,
+        [id]
+      );
+      return result?.content_id ?
+        { contentId: result.content_id as string, contentType: result.content_type as ContentType }
+        : null;
+    }
+
     getMediaList<T extends ContentType>(params: GetMediaListParams<T>): MediaList<T> {
       const { campaign, sourceType, isViewable, mediaTypes, datePublished, sortBy, limit, offset } = params;
       const campaignId = !campaign ? null : (typeof campaign === 'string' ? campaign : campaign.id );

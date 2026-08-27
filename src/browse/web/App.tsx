@@ -25,8 +25,6 @@ import { DocumentProvider } from "./contexts/DocumentProvider";
 import { SidebarProvider } from "./contexts/SidebarProvider";
 import { AuthProvider } from "./contexts/AuthProvider";
 import Users from "./pages/Users";
-import TranscriptionSettings from "./pages/TranscriptionSettings";
-import TranslationSettings from "./pages/TranslationSettings";
 import TranscriptionHistory from "./pages/TranscriptionHistory";
 import { DARK_SCHEME_QUERY, useMediaQuery } from "./utils/useMediaQuery";
 import PlayerControls from "./components/PlayerControls";
@@ -99,8 +97,6 @@ function App() {
                       <Route path="history" element={<History />} />
                       <Route path="users" element={<Users />} />
                       <Route path="transcription" element={<TranscriptionHistory />} />
-                      <Route path="transcription/settings" element={<TranscriptionSettings />} />
-                      <Route path="transcription/translation" element={<TranslationSettings />} />
                       <Route path=":vanity" element={<CampaignLayout />}>
                         {campaignSubRoutes}
                       </Route>

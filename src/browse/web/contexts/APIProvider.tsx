@@ -10,6 +10,7 @@ import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUse
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
 import {
+  type FavoriteListItem,
   type RecordWatchedVideoRequest,
   type ViewedPostListItem,
   type WatchedVideo,
@@ -364,6 +365,30 @@ class API {
 
   async recordViewedPost(postId: string): Promise<void> {
     await apiFetch(`/api/history/posts/${encodeURIComponent(postId)}`, { method: 'PUT' });
+  }
+
+  /** The posts this account has saved, newest first. */
+  async listFavorites(): Promise<FavoriteListItem[]> {
+    const data = await readJSON(await apiFetch('/api/history/favorites'));
+    return data.favorites as FavoriteListItem[];
+  }
+
+  /** Whether one post is among this account's saved posts. */
+  async isFavorite(postId: string): Promise<boolean> {
+    const data = await readJSON(await apiFetch(`/api/history/favorites/${encodeURIComponent(postId)}`));
+    return !!data.favorite;
+  }
+
+  /**
+   * Saves a post. Throws when the list is already full - the message on the
+   * error is what the server said the ceiling is.
+   */
+  async addFavorite(postId: string): Promise<void> {
+    await readJSON(await apiFetch(`/api/history/favorites/${encodeURIComponent(postId)}`, { method: 'PUT' }));
+  }
+
+  async removeFavorite(postId: string): Promise<void> {
+    await readJSON(await apiFetch(`/api/history/favorites/${encodeURIComponent(postId)}`, { method: 'DELETE' }));
   }
 
   /**

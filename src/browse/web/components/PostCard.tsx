@@ -17,16 +17,19 @@ import lgVideo from 'lightgallery/plugins/video';
 import FadeContent from "./FadeContent";
 import { getCampaignBaseUrl, getContentUrl, getFileIcon } from "../utils/Misc";
 import Icon from "./Icon";
+import FavoriteButton from "./FavoriteButton";
 
 interface PostCardProps {
   post: Post;
   showCampaign?: boolean;
   useShowMore?: boolean;
   contextQS?: string;
+  /** Show the save-to-favorites toggle beside the title. Detail page only. */
+  showFavorite?: boolean;
 }
 
 function PostCard(props: PostCardProps) {
-  const { post, showCampaign = false, useShowMore = false, contextQS } = props;
+  const { post, showCampaign = false, useShowMore = false, contextQS, showFavorite = false } = props;
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -247,11 +250,18 @@ function PostCard(props: PostCardProps) {
     <Stack>
       <Stack direction="horizontal" className="mb-3 justify-content-between gap-4">
         <Card.Title className="m-0">{titleEl}</Card.Title>
-        {
-          !post.isViewable ? (
-            <Icon name="lock" className="text-body-secondary" />
-          ) : null
-        }
+        <Stack direction="horizontal" gap={2} className="align-items-center flex-shrink-0">
+          {
+            !post.isViewable ? (
+              <Icon name="lock" className="text-body-secondary" />
+            ) : null
+          }
+          {
+            showFavorite && post.id ? (
+              <FavoriteButton postId={post.id} />
+            ) : null
+          }
+        </Stack>
       </Stack>
       <Stack direction="horizontal" className="mb-2 text-body-secondary" gap={4}>
         {

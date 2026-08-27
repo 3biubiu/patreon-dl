@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Popconfirm, Space, Switch, Tag } from "antd";
-import { Link } from "react-router";
-import { useAPI } from "../contexts/APIProvider";
-import { useDocument } from "../contexts/DocumentProvider";
-import { LoadingBlock } from "../components/Loading";
-import { type TranslationSettings as Settings } from "../../types/Translation";
+import { useAPI } from "../../contexts/APIProvider";
+import { LoadingBlock } from "../Loading";
+import { type TranslationSettings as Settings } from "../../../types/Translation";
 
 interface FormValues {
   apiKey: string;
@@ -34,17 +32,16 @@ function callsPerHour(batchCharacters: number, batchLines: number) {
 }
 
 /**
- * Where the Gemini key, the batch size and the translation prompt are set.
- * Administrators only - the route is hidden from everyone else, and the server
- * refuses these endpoints to them regardless.
+ * The Gemini key, the batch size and the translation prompt. Lifted out of what
+ * used to be its own page so it can sit in a tab of the settings drawer beside
+ * the transcription one - the behaviour is unchanged from that page.
  *
  * The key is write-only by design, as the transcription key is: it is sent
  * when it is set and never comes back. What returns is whether one is
  * configured and what Gemini said when it was checked.
  */
-function TranslationSettings() {
+function TranslationSettingsPanel() {
   const { api } = useAPI();
-  const { setTitle } = useDocument();
   const [ settings, setSettings ] = useState<Settings | null>(null);
   const [ prompt, setPrompt ] = useState('');
   const [ error, setError ] = useState<string | null>(null);
@@ -53,10 +50,6 @@ function TranslationSettings() {
   const [ form ] = Form.useForm<FormValues>();
   const batchCharacters = Form.useWatch('batchCharacters', form);
   const batchLines = Form.useWatch('batchLines', form);
-
-  useEffect(() => {
-    setTitle('Translation');
-  }, [ setTitle ]);
 
   const apply = useCallback((result: Settings) => {
     setSettings(result);
@@ -132,16 +125,7 @@ function TranslationSettings() {
   );
 
   return (
-    <Space orientation="vertical" size="middle" style={{ display: 'flex', maxWidth: '44rem' }}>
-      <Space wrap>
-        <Link to="/transcription">
-          <Button>Back to history</Button>
-        </Link>
-        <Link to="/transcription/settings">
-          <Button>Transcription settings</Button>
-        </Link>
-      </Space>
-
+    <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
       <Card title="Gemini">
         <Descriptions column={1} size="small">
           <Descriptions.Item label="Status">
@@ -360,4 +344,4 @@ function TranslationSettings() {
   );
 }
 
-export default TranslationSettings;
+export default TranslationSettingsPanel;

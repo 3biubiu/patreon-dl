@@ -39,6 +39,23 @@
     line-height: 1.3;
   }
 
+  // The name is a link back to the post whenever the server could tie the
+  // video to one; keep it reading as a link rather than as body text.
+  &__name--link {
+    color: var(--bs-link-color);
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  // The list toolbar rides in the tab bar's extra slot. On a phone the tab
+  // labels and the buttons will not fit on one line, so let it wrap under.
+  .ant-tabs-nav {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+
   &__state {
     display: flex;
     flex-direction: column;

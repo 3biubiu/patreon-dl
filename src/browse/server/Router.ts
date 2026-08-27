@@ -143,6 +143,25 @@ class _Router {
       this.#handlers.history.handleRecordPostRequest(req, res, req.params.id)
     );
 
+    // Favorites: a saved-post list the user builds by hand. Guarded the same
+    // way as the viewed-post history, so an account cannot save - or read
+    // back - a post for a creator it was never allowed to see.
+    this.#router.get('/api/history/favorites', (req, res) =>
+      this.#handlers.history.handleListFavoritesRequest(req, res)
+    );
+
+    this.#router.get('/api/history/favorites/:id', inScope(byContentParam('post')), (req, res) =>
+      this.#handlers.history.handleGetFavoriteRequest(req, res, req.params.id)
+    );
+
+    this.#router.put('/api/history/favorites/:id', inScope(byContentParam('post')), (req, res) =>
+      this.#handlers.history.handleAddFavoriteRequest(req, res, req.params.id)
+    );
+
+    this.#router.delete('/api/history/favorites/:id', inScope(byContentParam('post')), (req, res) =>
+      this.#handlers.history.handleRemoveFavoriteRequest(req, res, req.params.id)
+    );
+
     // Making captions is an administrator's job; reading them is not, so an
     // ordinary viewer's player can still list and load what is already there.
     this.#router.post('/api/media/:id/transcribe', requireAdmin, (req, res) =>

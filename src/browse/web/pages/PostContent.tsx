@@ -157,7 +157,7 @@ function PostContent() {
     <>
       <ContentColumn settings={settings}>
         <div className={nav ? 'pt-4' : 'py-4'}>
-          <PostCard post={post} showCampaign />
+          <PostCard post={post} showCampaign showFavorite />
         </div>
       </ContentColumn>
       { nav }

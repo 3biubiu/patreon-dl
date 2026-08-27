@@ -1,11 +1,12 @@
 import "../assets/styles/TranscriptionHistory.scss";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Checkbox, Empty, Popconfirm, Progress, Space, Table, Tag, Tooltip } from "antd";
+import { Alert, Button, Checkbox, Empty, Popconfirm, Progress, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import { Link } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
 import Icon from "../components/Icon";
+import TranscriptionSettingsDrawer from "../components/TranscriptionSettingsDrawer";
 import { useMediaQuery, DESKTOP_QUERY } from "../utils/useMediaQuery";
 import useTranslationAvailability from "../utils/useTranslationAvailability";
 import { readTranslatePreference, writeTranslatePreference } from "../utils/translatePreference";
@@ -19,6 +20,8 @@ import { isTranslationActive, type TranslationState } from "../../types/Translat
 
 /** How often the list refreshes while anything is still moving. */
 const POLL_INTERVAL_MS = 2000;
+
+type ListTab = 'transcription' | 'translation';
 
 const STATE_LABEL: Record<TranscriptionState, string> = {
   pending: 'Queued',
@@ -111,11 +114,43 @@ function VideoThumbnail(props: { mediaId: string }) {
 }
 
 /**
- * Every transcription that has been asked for and what became of it.
+ * Thumbnail plus the file name. The name links back to the post (or product)
+ * the video is in when the server could tie the two together; otherwise it is
+ * plain text, because a link that goes nowhere is worse than none.
+ */
+function VideoCell(props: { record: TranscriptionRecord }) {
+  const { record } = props;
+  const target = record.postId ?
+    record.contentType === 'product' ?
+      `/products/${record.postId}`
+      : `/posts/${record.postId}`
+    : null;
+  return (
+    <div className="transcription-history__video">
+      <VideoThumbnail mediaId={record.mediaId} />
+      <Tooltip title={record.videoPath}>
+        {
+          target ?
+            <Link to={target} className="transcription-history__name transcription-history__name--link">
+              {record.videoName}
+            </Link>
+            : <span className="transcription-history__name">{record.videoName}</span>
+        }
+      </Tooltip>
+    </div>
+  );
+}
+
+/**
+ * Every transcription that has been asked for and what became of it, and
+ * beside it every translation that has followed one.
  *
  * The server writes each step to its index as it happens, so this is a plain
  * read of that file rather than anything this page has to keep in sync. It
- * polls only while something is still moving.
+ * polls only while something is still moving. The two queues get a tab each -
+ * they run independently, and a translation outlives the transcription it
+ * came from - but there is still one list of records underneath, so a video
+ * only ever shows up once per tab.
  */
 function TranscriptionHistory() {
   const { api } = useAPI();
@@ -126,6 +161,8 @@ function TranscriptionHistory() {
   const [ busyId, setBusyId ] = useState<string | null>(null);
   const [ anyActive, setAnyActive ] = useState(false);
   const [ translate, setTranslate ] = useState(readTranslatePreference);
+  const [ tab, setTab ] = useState<ListTab>('transcription');
+  const [ settingsOpen, setSettingsOpen ] = useState(false);
   const availability = useTranslationAvailability();
   const canTranslate = !!availability?.available;
 
@@ -178,14 +215,7 @@ function TranscriptionHistory() {
   const videoColumn = {
     title: 'Video',
     key: 'video',
-    render: (_: unknown, record: TranscriptionRecord) => (
-      <div className="transcription-history__video">
-        <VideoThumbnail mediaId={record.mediaId} />
-        <Tooltip title={record.videoPath}>
-          <span className="transcription-history__name">{record.videoName}</span>
-        </Tooltip>
-      </div>
-    )
+    render: (_: unknown, record: TranscriptionRecord) => <VideoCell record={record} />
   };
 
   const stateColumn = {
@@ -235,10 +265,10 @@ function TranscriptionHistory() {
    * price: Gemini AI Studio bills by the call, so that is the number worth
    * watching, and the one the batch size in the settings moves.
    */
-  const translationColumn = {
-    title: 'Translation',
-    key: 'translation',
-    width: 170,
+  const translationStateColumn = {
+    title: 'State',
+    key: 'translation-state',
+    width: isDesktop ? 220 : 130,
     render: (_: unknown, record: TranscriptionRecord) => {
       const translation = record.translation;
       if (!translation) {
@@ -274,7 +304,7 @@ function TranscriptionHistory() {
     }
   };
 
-  /** The box that says to translate as well, shared by both confirmations. */
+  /** The box that says to translate as well, shown on the transcribe-again confirmation. */
   const translateCheckbox = canTranslate ? (
     <Checkbox
       checked={translate}
@@ -398,13 +428,62 @@ function TranscriptionHistory() {
     }
   };
 
-  // A phone keeps the four that say what this is and what it is doing. The
+  /** The translation tab's own actions: cancel while it runs, retry once it can. */
+  const translationActionsColumn = {
+    title: '',
+    key: 'translation-actions',
+    width: isDesktop ? 160 : 96,
+    render: (_: unknown, record: TranscriptionRecord) => {
+      const busy = busyId === record.mediaId;
+      if (isTranslationActive(record.translation)) {
+        return (
+          <Popconfirm
+            title="Cancel this translation?"
+            description="Progress so far is discarded."
+            okText="Cancel it"
+            cancelText="Never mind"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => void run(record.mediaId, () => api.cancelTranslation(record.mediaId))}
+          >
+            {
+              isDesktop ?
+                <Button size="small" danger loading={busy}>Cancel</Button>
+                : <Button size="small" danger loading={busy} icon={<Icon name="close" />} aria-label="Cancel" />
+            }
+          </Popconfirm>
+        );
+      }
+      if (record.state === 'done') {
+        return (
+          <Popconfirm
+            title={record.translation?.state === 'done' ? 'Translate again?' : 'Translate to Chinese?'}
+            description={
+              record.translation?.state === 'done' ?
+                'The existing Chinese subtitle file is replaced.'
+                : 'The subtitles are translated in the background and written beside the video.'
+            }
+            okText="Translate"
+            cancelText="Never mind"
+            onConfirm={() => void run(record.mediaId, () => api.startTranslation(record.mediaId))}
+          >
+            {
+              isDesktop ?
+                <Button size="small" loading={busy}>Retry</Button>
+                : <Button size="small" loading={busy} icon={<Icon name="refresh" />} aria-label="Retry" />
+            }
+          </Popconfirm>
+        );
+      }
+      return null;
+    }
+  };
+
+  // A phone keeps the ones that say what this is and what it is doing. The
   // rest are for reading afterwards, and are what would push the table past
   // the screen and put a scrollbar under it.
-  const columns = isDesktop ? [
+  const transcriptionColumns = isDesktop ? [
     videoColumn,
     stateColumn,
-    translationColumn,
     languageColumn,
     {
       title: 'Cost',
@@ -434,13 +513,122 @@ function TranscriptionHistory() {
     actionsColumn
   ];
 
+  const translationRecords = records.filter((record) => !!record.translation);
+
+  const translationColumns = isDesktop ? [
+    videoColumn,
+    translationStateColumn,
+    {
+      title: 'Requested',
+      key: 'translation-requested',
+      width: 160,
+      render: (_: unknown, record: TranscriptionRecord) =>
+        formatTime(record.translation?.requestedAt ?? null)
+    },
+    translationActionsColumn
+  ] : [
+    videoColumn,
+    translationStateColumn,
+    translationActionsColumn
+  ];
+
   const active = records.filter(isActive).length;
   const translatingCount = records.filter((record) => isTranslationActive(record.translation)).length;
   // Nothing that is still moving, on either queue, counts as finished - the
-  // button below offers to clear these, and the server keeps the rest.
+  // button offers to clear these, and the server keeps the rest.
   const finished = records.filter((record) =>
     !isActive(record) && !isTranslationActive(record.translation)
   ).length;
+
+  const settingsButton = (
+    <Button icon={<Icon name="tune" />} onClick={() => setSettingsOpen(true)}>
+      Settings
+    </Button>
+  );
+
+  const transcriptionActions = (
+    <Space wrap>
+      {settingsButton}
+      {
+        active > 0 ? (
+          <Popconfirm
+            title={`Stop ${active} job${active > 1 ? 's' : ''}?`}
+            description="The running one is aborted and the rest are taken off the queue. Progress so far is discarded."
+            okText="Stop all"
+            cancelText="Never mind"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => void run('', async () => { setRecords(await api.stopAllTranscriptions()); })}
+          >
+            <Button danger>Stop all ({active})</Button>
+          </Popconfirm>
+        ) : null
+      }
+      {
+        finished > 0 ? (
+          <Popconfirm
+            title="Clear finished records?"
+            description="Anything queued or running is kept. Subtitle files stay on disk."
+            okText="Clear"
+            cancelText="Never mind"
+            onConfirm={() => void run('', async () => { setRecords(await api.clearTranscriptionHistory()); })}
+          >
+            <Button>Clear finished ({finished})</Button>
+          </Popconfirm>
+        ) : null
+      }
+    </Space>
+  );
+
+  const translationActions = (
+    <Space wrap>
+      {settingsButton}
+      {
+        translatingCount > 0 ? (
+          <Popconfirm
+            title={`Stop ${translatingCount} translation${translatingCount > 1 ? 's' : ''}?`}
+            description="The running one is aborted and the rest are taken off the queue. Progress so far is discarded."
+            okText="Stop all"
+            cancelText="Never mind"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => void run('', async () => {
+              await api.stopAllTranslations();
+              await refresh();
+            })}
+          >
+            <Button danger>Stop all ({translatingCount})</Button>
+          </Popconfirm>
+        ) : null
+      }
+    </Space>
+  );
+
+  const transcriptionPane = records.length === 0 ? (
+    <Empty description="Nothing has been transcribed yet. Use the CC button on a video." />
+  ) : (
+    <Table
+      rowKey="mediaId"
+      size="small"
+      columns={transcriptionColumns}
+      dataSource={records}
+      pagination={{ pageSize: 20, hideOnSinglePage: true }}
+      // No horizontal scroll: the column set is trimmed to fit instead, which
+      // is the point of dropping columns on a phone.
+      tableLayout="fixed"
+    />
+  );
+
+  const translationPane = translationRecords.length === 0 ? (
+    <Empty description="Nothing has been translated yet. Ask for one from the Transcription tab." />
+  ) : (
+    <Table
+      rowKey="mediaId"
+      size="small"
+      columns={translationColumns}
+      dataSource={translationRecords}
+      pagination={{ pageSize: 20, hideOnSinglePage: true }}
+      tableLayout="fixed"
+    />
+  );
 
   return (
     <Space
@@ -455,67 +643,31 @@ function TranscriptionHistory() {
           : null
       }
 
-      <Space wrap style={{ justifyContent: 'space-between', width: '100%' }}>
-        <Space wrap>
-          <Link to="/transcription/settings">
-            <Button>Settings</Button>
-          </Link>
-          <Link to="/transcription/translation">
-            <Button>Translation</Button>
-          </Link>
-        </Space>
-        <Space wrap>
+      <Tabs
+        activeKey={tab}
+        onChange={(key) => setTab(key as ListTab)}
+        tabBarExtraContent={{
+          right: tab === 'transcription' ? transcriptionActions : translationActions
+        }}
+        items={[
           {
-            active + translatingCount > 0 ? (
-              <Popconfirm
-                title={`Stop ${active + translatingCount} job${active + translatingCount > 1 ? 's' : ''}?`}
-                description="The running ones are aborted and the rest are taken off the queue. Progress so far is discarded."
-                okText="Stop all"
-                cancelText="Never mind"
-                okButtonProps={{ danger: true }}
-                onConfirm={() => void run('', async () => {
-                  // Translations first, so a transcription stopping does not
-                  // hand over to one that is about to be cancelled anyway.
-                  await api.stopAllTranslations();
-                  setRecords(await api.stopAllTranscriptions());
-                })}
-              >
-                <Button danger>Stop all ({active + translatingCount})</Button>
-              </Popconfirm>
-            ) : null
-          }
+            key: 'transcription',
+            label: `Transcription${records.length ? ` (${records.length})` : ''}`,
+            children: transcriptionPane
+          },
           {
-            finished > 0 ? (
-              <Popconfirm
-                title="Clear finished records?"
-                description="Anything queued or running is kept. Subtitle files stay on disk."
-                okText="Clear"
-                cancelText="Never mind"
-                onConfirm={() => void run('', async () => { setRecords(await api.clearTranscriptionHistory()); })}
-              >
-                <Button>Clear finished ({finished})</Button>
-              </Popconfirm>
-            ) : null
+            key: 'translation',
+            label: `Translation${translationRecords.length ? ` (${translationRecords.length})` : ''}`,
+            children: translationPane
           }
-        </Space>
-      </Space>
+        ]}
+      />
 
-      {
-        records.length === 0 ?
-          <Empty description="Nothing has been transcribed yet. Use the CC button on a video." />
-          : (
-            <Table
-              rowKey="mediaId"
-              size="small"
-              columns={columns}
-              dataSource={records}
-              pagination={{ pageSize: 20, hideOnSinglePage: true }}
-              // No horizontal scroll: the column set is trimmed to fit instead,
-              // which is the point of dropping columns on a phone.
-              tableLayout="fixed"
-            />
-          )
-      }
+      <TranscriptionSettingsDrawer
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        defaultTab={tab}
+      />
     </Space>
   );
 }

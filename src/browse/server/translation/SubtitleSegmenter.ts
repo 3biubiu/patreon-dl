@@ -311,7 +311,96 @@ export interface SegmentResult {
   hardRuns: HardRun[];
 }
 
-/** Cuts `units` into lines. */
+/**
+ * Cost of ending a line where no word ends.
+ *
+ * Payable rather than illegal, so that the one stretch with no word end at
+ * all - a single word longer than the whole line allowance - still gets cut
+ * somewhere. Large enough that it is never paid while any legal split exists.
+ */
+const UNBREAKABLE_PENALTY = 1000;
+
+/**
+ * The break positions - exclusive end indices - that maximise the summed
+ * score of every line in `units[from, to)`, each line scored as its end
+ * boundary's strength minus its length's penalty.
+ *
+ * The same trade the greedy loop used to make, settled for the whole stretch
+ * at once instead of one line at a time. That difference is backtracking: a
+ * greedy cut takes the strongest boundary its own window can see and moves
+ * on, and when the window after it holds no punctuation, the line it left
+ * behind ends on nothing. The right answer was often already visible - end
+ * the first line early, at the short clause and its comma, so the punctuation
+ * sitting just past the window falls within the next line's reach - but only
+ * a search that scores whole segmentations can prefer it, because the cheap
+ * first line only pays off on the line after it.
+ */
+function bestBreaks(
+  units: Unit[],
+  from: number,
+  to: number,
+  max: number,
+  min: number,
+  strengthAfter: (i: number) => number,
+  penalty: (length: number) => number
+): number[] {
+  const size = to - from;
+  const best = new Array<number>(size + 1).fill(-Infinity);
+  const cameFrom = new Array<number>(size + 1).fill(-1);
+  best[0] = 0;
+
+  for (let j = 1; j <= size; j++) {
+    const isTail = j === size;
+    const strength = strengthAfter(from + j - 1);
+    const wordCost = !isTail && !units[from + j - 1].breakable ? UNBREAKABLE_PENALTY : 0;
+    for (let length = 1; length <= Math.min(max, j); length++) {
+      if (best[j - length] === -Infinity) {
+        continue;
+      }
+      // Below the comfortable minimum only a finished sentence may end a
+      // line; below the floor nothing may. The stretch's own tail is exempt:
+      // it ends where it ends.
+      if (!isTail) {
+        if (length < FLOOR_UNITS) {
+          continue;
+        }
+        if (length < min && strength < SENTENCE_SCORE) {
+          continue;
+        }
+      }
+      const score = best[j - length] + strength - penalty(length) - wordCost;
+      if (score > best[j]) {
+        best[j] = score;
+        cameFrom[j] = j - length;
+      }
+    }
+  }
+
+  if (best[size] === -Infinity) {
+    // No legal segmentation at all, which the guards above make practically
+    // impossible. Even chops keep the caller moving rather than looping.
+    const breaks: number[] = [];
+    for (let j = max; j < size; j += max) {
+      breaks.push(from + j);
+    }
+    breaks.push(to);
+    return breaks;
+  }
+  const breaks: number[] = [];
+  for (let j = size; j > 0; j = cameFrom[j]) {
+    breaks.push(from + j);
+  }
+  return breaks.reverse();
+}
+
+/**
+ * Cuts `units` into lines.
+ *
+ * Forced pauses are cut first and are not the optimiser's to trade away:
+ * someone stopped talking, and no score on the far side of that silence
+ * justifies holding a caption across it. Between forced pauses, the breaks
+ * are chosen for the whole stretch at once - see `bestBreaks`.
+ */
 export function segmentUnits(
   units: Unit[],
   options: SegmenterOptions
@@ -343,77 +432,39 @@ export function segmentUnits(
 
   const lines: Unit[][] = [];
   const hardRuns: HardRun[] = [];
-  let start = 0;
 
-  while (start < units.length) {
-    const last = units.length - 1;
-    const limit = Math.min(start + max - 1, last);
-    let bestIndex = -1;
-    let bestScore = -Infinity;
-    let sawBoundary = false;
-
-    for (let i = start; i <= limit; i++) {
-      // Someone stopped talking. Nothing downstream is worth carrying a line
-      // across it, so the search ends here whatever it had found.
-      if (i < last && units[i + 1].gapBefore >= FORCED_PAUSE_SECONDS && i - start + 1 >= FLOOR_UNITS) {
-        bestIndex = i;
-        sawBoundary = true;
-        break;
-      }
-      // Mid-word. Whatever the punctuation and length rules make of this
-      // position, a line cannot end here.
-      if (i < last && !units[i].breakable) {
-        continue;
-      }
-      const length = i - start + 1;
-      const strength = strengthAfter(i);
-      // Below the comfortable minimum only a finished sentence may end a line.
-      // Above it, everything competes on its merits.
-      if (length < min && i < last && strength < SENTENCE_SCORE) {
-        continue;
-      }
-      if (length < FLOOR_UNITS && i < last) {
-        continue;
-      }
-      if (strength > 0) {
-        sawBoundary = true;
-      }
-      const score = strength - penalty(length);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
+  let from = 0;
+  for (let to = 1; to <= units.length; to++) {
+    if (to < units.length && units[to].gapBefore < FORCED_PAUSE_SECONDS) {
+      continue;
     }
-
-    if (bestIndex < 0) {
-      // The tail is shorter than the minimum, so it is simply the last line.
-      // Backed off to the last position a word ends at, so the fallback cannot
-      // do what the search above was just stopped from doing. A window with no
-      // word end in it at all - one word longer than the whole line allowance -
-      // is let through rather than left with nowhere to cut.
-      bestIndex = limit;
-      for (let i = limit; i > start; i--) {
-        if (units[i].breakable) {
-          bestIndex = i;
+    let start = from;
+    for (const end of bestBreaks(units, from, to, max, min, strengthAfter, penalty)) {
+      // Cut on length alone, with no boundary anywhere in it - the one case a
+      // language model could do better. Reported so a caller may offer to,
+      // and joined to the run before it when they touch, since one long
+      // unpunctuated stretch is one question, not one per line it was chopped
+      // into.
+      let sawBoundary = false;
+      for (let i = start; i < end; i++) {
+        if (strengthAfter(i) > 0) {
+          sawBoundary = true;
           break;
         }
       }
-    }
-    if (!sawBoundary && bestIndex < last) {
-      // Cut on length alone, which is the one case a language model could do
-      // better. Reported so a caller may offer to - and joined to the run
-      // before it when they touch, since one long unpunctuated stretch is one
-      // question, not one per line it was chopped into.
-      const previous = hardRuns[hardRuns.length - 1];
-      if (previous && previous.end === start) {
-        previous.end = bestIndex + 1;
+      if (!sawBoundary && end < units.length) {
+        const previous = hardRuns[hardRuns.length - 1];
+        if (previous && previous.end === start) {
+          previous.end = end;
+        }
+        else {
+          hardRuns.push({ start, end });
+        }
       }
-      else {
-        hardRuns.push({ start, end: bestIndex + 1 });
-      }
+      lines.push(units.slice(start, end));
+      start = end;
     }
-    lines.push(units.slice(start, bestIndex + 1));
-    start = bestIndex + 1;
+    from = to;
   }
 
   return { segments: mergeStrays(lines, max, min), hardRuns };

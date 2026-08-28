@@ -6,7 +6,7 @@ import { type BrowseSettings, type BrowseSettingOptions as BrowseSettingOptions 
 import { type Filter, type FilterSearchParams, type FilterData, type MediaFilterSearchParams, type PostFilterSearchParams } from '../../types/Filter';
 import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
-import { type AuthSession, type AuthUser, type CreateUserRequest, type UpdateUserRequest } from '../../types/Auth';
+import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogEntry, type UpdateUserRequest } from '../../types/Auth';
 import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
@@ -347,6 +347,25 @@ class API {
 
   async deleteUser(id: string): Promise<void> {
     await readJSON(await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE' }));
+  }
+
+  /**
+   * The most recent sign-ins, newest first, successful and failed alike.
+   * Given a user id, only that account's - failed attempts in its name
+   * included.
+   *
+   * Slower than the other listings when it runs into addresses the server has
+   * not placed before, since it looks those up as it answers. Asked for on its
+   * own, when somebody opens the panel, rather than with the user table.
+   */
+  async listLoginLog(limit = 10, userId?: string): Promise<LoginLogEntry[]> {
+    const urlObj = new URL('/api/auth/login-log', window.location.href);
+    urlObj.searchParams.set('limit', String(limit));
+    if (userId) {
+      urlObj.searchParams.set('userId', userId);
+    }
+    const data = await readJSON(await apiFetch(urlObj.toString()));
+    return data.entries as LoginLogEntry[];
   }
 
   /**

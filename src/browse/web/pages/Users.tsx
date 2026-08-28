@@ -1,9 +1,9 @@
 import "../assets/styles/Users.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tag, Tooltip } from "antd";
-import { DeleteOutlined, EditOutlined, UserAddOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, HistoryOutlined, ReloadOutlined, UserAddOutlined } from "@ant-design/icons";
 import { type FormInstance } from "antd";
-import { type AuthUser, type UserRole } from "../../types/Auth";
+import { type AuthUser, type LoginLogEntry, type UserRole } from "../../types/Auth";
 import { DEFAULT_USER_QUOTA, type UserQuota } from "../../types/Quota";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
@@ -69,6 +69,19 @@ function describeLimit(limit: number | null) {
 const CAMPAIGN_FETCH_SIZE = 500;
 
 /**
+ * How many sign-ins the panel shows. Deliberately short: this is a glance at
+ * who has been in lately, not an audit tool, and the server keeps more than
+ * this for anyone who needs to go further back.
+ */
+const LOGIN_LOG_SIZE = 10;
+
+/** A sign-in time in full - the date alone would not say enough here. */
+function describeLoginTime(at: string) {
+  const date = new Date(at);
+  return Number.isNaN(date.getTime()) ? at : date.toLocaleString();
+}
+
+/**
  * User management, reachable only by administrators - the route is hidden from
  * everyone else, and the server refuses these endpoints to them regardless.
  */
@@ -81,6 +94,10 @@ function Users() {
   const [ error, setError ] = useState<string | null>(null);
   const [ editing, setEditing ] = useState<AuthUser | 'new' | null>(null);
   const [ submitting, setSubmitting ] = useState(false);
+  const [ signInsFor, setSignInsFor ] = useState<AuthUser | null>(null);
+  const [ loginLog, setLoginLog ] = useState<LoginLogEntry[] | null>(null);
+  const [ loginLogError, setLoginLogError ] = useState<string | null>(null);
+  const [ loginLogLoading, setLoginLogLoading ] = useState(false);
   const [ form ] = Form.useForm<UserFormValues>();
 
   useEffect(() => {
@@ -100,6 +117,35 @@ function Users() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  /**
+   * Asked for only when somebody opens the panel, and never with the user
+   * table: placing addresses the server has not seen before means asking a
+   * lookup service, and that is not a wait to put in front of a page that is
+   * mostly opened to add a user.
+   */
+  const refreshLoginLog = useCallback(async (user: AuthUser) => {
+    setLoginLogLoading(true);
+    try {
+      setLoginLog(await api.listLoginLog(LOGIN_LOG_SIZE, user.id));
+      setLoginLogError(null);
+    }
+    catch (e) {
+      setLoginLogError(e instanceof Error ? e.message : 'Could not load sign-ins');
+    }
+    finally {
+      setLoginLogLoading(false);
+    }
+  }, [api]);
+
+  const openSignIns = useCallback((user: AuthUser) => {
+    // Cleared rather than left showing the previous account's rows while the
+    // new ones load - they look enough alike to be misread.
+    setLoginLog(null);
+    setLoginLogError(null);
+    setSignInsFor(user);
+    void refreshLoginLog(user);
+  }, [refreshLoginLog]);
 
   // The creators to choose from. An administrator is unrestricted, so this is
   // the full list - which is also what makes it the right list to grant from.
@@ -330,6 +376,15 @@ function Users() {
             align: 'right',
             render: (_, user) => (
               <Space size={4}>
+                <Tooltip title="Recent sign-ins">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<HistoryOutlined />}
+                    aria-label={`Recent sign-ins for ${user.username}`}
+                    onClick={() => openSignIns(user)}
+                  />
+                </Tooltip>
                 <Button
                   type="text"
                   size="small"
@@ -398,6 +453,87 @@ function Users() {
           />
           <QuotaFields form={form} />
         </Form>
+      </Modal>
+      <Modal
+        open={!!signInsFor}
+        title={`Recent sign-ins${signInsFor ? ` - ${signInsFor.username}` : ''}`}
+        width={760}
+        onCancel={() => setSignInsFor(null)}
+        footer={[
+          <Button
+            key="refresh"
+            icon={<ReloadOutlined />}
+            loading={loginLogLoading}
+            onClick={() => signInsFor && void refreshLoginLog(signInsFor)}
+          >
+            Refresh
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setSignInsFor(null)}>
+            Close
+          </Button>
+        ]}
+      >
+        {
+          loginLogError ? (
+            <Alert className="mb-3" type="error" title={loginLogError} showIcon
+              closable={{ onClose: () => setLoginLogError(null) }} />
+          ) : null
+        }
+        <Table<LoginLogEntry>
+          className="users__login-log"
+          rowKey={(entry, index) => `${entry.at}-${index ?? 0}`}
+          dataSource={loginLog || []}
+          loading={loginLog === null && loginLogLoading}
+          pagination={false}
+          size="small"
+          locale={{ emptyText: 'Nothing recorded for this account yet' }}
+          columns={[
+            {
+              title: 'When',
+              dataIndex: 'at',
+              render: (at: string) => describeLoginTime(at)
+            },
+            {
+              title: 'IP',
+              dataIndex: 'ip'
+            },
+            {
+              title: 'Location',
+              dataIndex: 'location',
+              render: (location: string | null, entry) => (
+                // An address that could not be placed is left blank rather
+                // than called unknown - the lookup may simply have been
+                // unreachable, which says nothing about the sign-in itself.
+                <Space size={4} wrap>
+                  <span>{location || '—'}</span>
+                  {entry.isp ? <Tag>{entry.isp}</Tag> : null}
+                </Space>
+              )
+            },
+            {
+              title: 'Client',
+              dataIndex: 'userAgent',
+              ellipsis: true,
+              render: (userAgent: string | null) => (
+                <Tooltip title={userAgent || undefined}>
+                  <span className="users__user-agent">{userAgent || '—'}</span>
+                </Tooltip>
+              )
+            },
+            {
+              title: 'Result',
+              key: 'result',
+              align: 'right',
+              render: (_, entry) => (
+                entry.success ? <Tag color="green">Signed in</Tag> : (
+                  <Tooltip title="The password did not match">
+                    <Tag color="red">Failed</Tag>
+                  </Tooltip>
+                )
+              )
+            }
+          ]}
+        />
       </Modal>
     </div>
   );

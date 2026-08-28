@@ -17,6 +17,7 @@ import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHan
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
 import type QuotaStore from './QuotaStore.js';
+import type LoginLogStore from './LoginLogStore.js';
 import { requirePostQuota } from './QuotaGuard.js';
 import { createTranscriptionServices, type TranscriptionConfig } from './transcription/Config.js';
 import TranslationAPIRequestHandler from './handler/TranslationAPIRequestHandler.js';
@@ -129,6 +130,12 @@ class _Router {
 
     this.#router.delete('/api/auth/users/:id', requireAdmin, (req, res) =>
       this.#handlers.auth.handleDeleteUserRequest(req, res, req.params.id)
+    );
+
+    // Who signed in, from where. An administrator's route: it is everybody's
+    // addresses, not the asking account's own.
+    this.#router.get('/api/auth/login-log', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleLoginLogRequest(req, res)
     );
 
     // Watch history. Recording is guarded the same way the content itself is,
@@ -385,6 +392,7 @@ export function getRouter(
   authStore: AuthStore,
   historyStore: HistoryStore,
   quotaStore: QuotaStore,
+  loginLogStore: LoginLogStore,
   pathToFFmpeg?: string | null,
   transcriptionConfig?: TranscriptionConfig | null,
   logger?: Logger | null,
@@ -403,7 +411,7 @@ export function getRouter(
     media: new MediaRequestHandler(db, dataDir, videoThumbnailer, quotaStore, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
-    auth: new AuthAPIRequestHandler(authStore, historyStore, quotaStore, logger),
+    auth: new AuthAPIRequestHandler(authStore, historyStore, quotaStore, loginLogStore, logger),
     history: new HistoryAPIRequestHandler(db, historyStore, logger),
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,

@@ -10,6 +10,13 @@
     gap: 0.75rem;
     margin-bottom: 1.5rem;
   }
+
+  // The client column of the sign-in log: there to be recognised at a glance,
+  // not read, so it gives way to the columns that matter.
+  &__user-agent {
+    opacity: 0.65;
+    font-size: 0.85em;
+  }
 }
 
 @media (min-width: 768px) {

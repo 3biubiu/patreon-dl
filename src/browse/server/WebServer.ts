@@ -10,10 +10,25 @@ import API from '../api/index.js';
 import AuthStore from './AuthStore.js';
 import HistoryStore from './HistoryStore.js';
 import QuotaStore from './QuotaStore.js';
+import LoginLogStore from './LoginLogStore.js';
 import { type TranscriptionConfig } from './transcription/Config.js';
 import { type TranslationConfig } from './translation/Config.js';
 
 export const DEFAULT_WEB_SERVER_PORT = 3000;
+
+/**
+ * How many reverse proxies to believe about who the client is.
+ *
+ * One by default, because that is how this is nearly always run - a proxy
+ * terminating the domain and forwarding to this port. With it, `req.ip` is the
+ * address at the far end rather than the proxy's own, which is the difference
+ * between a sign-in log worth reading and a column of `127.0.0.1`.
+ *
+ * Set it to `0` when nothing sits in front, so that a forged
+ * `X-Forwarded-For` on a request straight to the port cannot write a fictional
+ * address into the log.
+ */
+export const DEFAULT_TRUST_PROXY_HOPS = 1;
 
 export interface WebServerConfig {
   dataDir?: string;
@@ -29,6 +44,12 @@ export interface WebServerConfig {
    * already sitting beside a video are served.
    */
   transcription?: TranscriptionConfig | null;
+  /**
+   * How many reverse proxies sit in front of this server, or an Express
+   * `trust proxy` setting of any other form. Defaults to
+   * `DEFAULT_TRUST_PROXY_HOPS`; use `0` when the port is reached directly.
+   */
+  trustProxy?: number | boolean | string | null;
   /**
    * AI translation of what transcription produces. Left out, the feature stays
    * off and transcription is unaffected.
@@ -96,14 +117,26 @@ export class WebServer {
       path.resolve(dataDir, '.patreon-dl', 'quota.json'),
       this.#config.logger
     );
+    // Who signed in and from where. Its own file again, and kept even when an
+    // account is deleted - see `LoginLogStore` for why.
+    const loginLogStore = LoginLogStore.load(
+      path.resolve(dataDir, '.patreon-dl', 'login-log.json'),
+      this.#config.logger
+    );
     const router = getRouter(
-      db, api, dataDir, authStore, historyStore, quotaStore,
+      db, api, dataDir, authStore, historyStore, quotaStore, loginLogStore,
       this.#config.pathToFFmpeg,
       this.#config.transcription,
       this.#config.logger,
       this.#config.translation
     );
 
+    // Before anything reads `req.ip`: without this, every request behind a
+    // reverse proxy appears to come from the proxy.
+    this.#app.set(
+      'trust proxy',
+      this.#config.trustProxy ?? DEFAULT_TRUST_PROXY_HOPS
+    );
     this.#app.use(express.json());
     this.#app.use(express.urlencoded({ extended: true }));
     this.#app.use('/assets', express.static(path.resolve(import.meta.dirname, '../web/assets')));

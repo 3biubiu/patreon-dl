@@ -65,3 +65,26 @@ export interface UpdateUserRequest {
   /** Omit a field to leave it as it is; send `null` to lift that limit. */
   quota?: Partial<UserQuota> | null;
 }
+
+/**
+ * One sign-in attempt as the administrator's page sees it.
+ *
+ * Failures are kept alongside successes and look the same on the wire - an
+ * account being guessed at from somewhere unfamiliar is the thing this log
+ * exists to make visible, and it is only visible next to the successes.
+ */
+export interface LoginLogEntry {
+  at: string;
+  username: string;
+  /** `null` for a failed attempt: no account was signed in to. */
+  userId: string | null;
+  ip: string;
+  userAgent: string | null;
+  success: boolean;
+  /**
+   * Where the address is, already joined for display - or `null` when it could
+   * not be worked out, which is not the same as the sign-in being suspect.
+   */
+  location: string | null;
+  isp: string | null;
+}

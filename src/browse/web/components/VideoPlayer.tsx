@@ -46,6 +46,18 @@ const VOLUME_STORAGE_KEY = 'patreon-dl.playerVolume';
 const DRAG_THRESHOLD_PX = 4;
 /** How long the bar stays up after the pointer stops, in fullscreen. */
 const BAR_IDLE_MS = 2500;
+/**
+ * How much larger than its frame the picture is drawn.
+ *
+ * The frame is whole pixels and the picture's ratio is whatever the file says,
+ * so the two can disagree by up to a pixel - which `object-fit: contain` pays
+ * for with a hairline of frame, black, along two edges. Browsers add their own
+ * hairline anyway when a video is resampled into a box it does not exactly fit,
+ * this time on all four. Growing the picture a fraction of a percent puts both
+ * outside the frame, which clips them; what it costs is half a pixel of picture
+ * at the edges, which nobody has ever missed.
+ */
+const EDGE_BLEED = 1.006;
 
 // Safari only ever shipped the prefixed Fullscreen API, and on iPhone not even
 // that: there the only fullscreen is the native video player, which would take
@@ -168,14 +180,13 @@ function VideoPlayer(props: VideoPlayerProps) {
       Math.min(MIN_FRAME_HEIGHT, widthBoundHeight)
     )
     : 0;
-  // Whole pixels for the height, with the width taken from it, so the frame
-  // holds the picture's exact ratio. Rounding the two apart leaves the frame a
-  // fraction of a pixel off, and `object-fit: contain` pays for that with a
-  // hairline of frame - black - along two of the edges. Rounding down, so the
-  // frame cannot come out wider than the space measured for it and be clamped
-  // by `max-width` back into the same mismatch.
+  // Whole pixels both ways: a box of fractional size has its own edges
+  // antialiased, which against a black frame is itself a hairline. Rounding
+  // down, so the frame cannot come out wider than the space measured for it and
+  // be clamped by `max-width`. What that costs in ratio is covered by
+  // `EDGE_BLEED`.
   const frameHeight = Math.floor(fitHeight);
-  const frameWidth = frameHeight * aspectRatio;
+  const frameWidth = Math.floor(frameHeight * aspectRatio);
 
   const maxPanX = (frameWidth * (scale - 1)) / 2;
   const maxPanY = (frameHeight * (scale - 1)) / 2;
@@ -376,10 +387,12 @@ function VideoPlayer(props: VideoPlayerProps) {
     };
   }, [ pseudoFullscreen ]);
 
-  // Out of the way while watching, back the moment the pointer moves. The bar
-  // is drawn over the picture, so it is in the way in the page as well.
+  // Out of the way while watching, back the moment the pointer moves. Only in
+  // fullscreen: in the page the player is one thing among many and a bar that
+  // came and went under the pointer would be a nuisance - and being drawn over
+  // the picture, it costs the video nothing to leave up.
   useEffect(() => {
-    if (!playing) {
+    if (!fullscreen || !playing) {
       setBarVisible(true);
       return;
     }
@@ -400,7 +413,7 @@ function VideoPlayer(props: VideoPlayerProps) {
       root?.removeEventListener('pointermove', show);
       root?.removeEventListener('pointerdown', show);
     };
-  }, [ playing ]);
+  }, [ fullscreen, playing ]);
 
   /* Dragging the picture. */
 
@@ -607,7 +620,7 @@ function VideoPlayer(props: VideoPlayerProps) {
           preload="metadata"
           controlsList="nodownload"
           disablePictureInPicture
-          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }}
+          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale * EDGE_BLEED})` }}
         />
         <SubtitleOverlay video={video} />
         {

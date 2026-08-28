@@ -96,7 +96,9 @@
 .video-player__captions {
   position: absolute;
   left: 50%;
-  bottom: var(--caption-bottom, 6%);
+  // Clear of the control bar while it is up - which in the page is always.
+  bottom: calc(var(--caption-bottom, 6%) + var(--caption-bar-offset, 2.25rem));
+  transition: bottom 0.2s linear;
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -350,7 +352,12 @@
 
 /* Fullscreen. */
 
+.video-player--bar-hidden .video-player__captions {
+  --caption-bar-offset: 0rem;
+}
+
 .video-player--fullscreen {
+  --caption-bar-offset: 2.75rem;
   justify-content: center;
   width: 100%;
   height: 100%;

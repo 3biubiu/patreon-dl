@@ -72,6 +72,19 @@ type FullscreenElement = HTMLElement & {
   webkitRequestFullscreen?: () => Promise<void> | void;
 };
 
+/**
+ * The one fullscreen an iPhone has: the video element's own, which is the
+ * system player. It is the only way to a picture that fills the screen and
+ * turns with the phone - a page can neither hide Safari's chrome nor lock the
+ * orientation, so a player built out of HTML can only ever fill what Safari
+ * leaves it, upright.
+ */
+type IOSVideoElement = HTMLVideoElement & {
+  webkitEnterFullscreen?: () => void;
+  webkitExitFullscreen?: () => void;
+  webkitDisplayingFullscreen?: boolean;
+};
+
 function getFullscreenElement() {
   const doc = document as FullscreenDocument;
   return doc.fullscreenElement || doc.webkitFullscreenElement || null;
@@ -350,6 +363,25 @@ function VideoPlayer(props: VideoPlayerProps) {
     const doc = document as FullscreenDocument;
     const request = root.requestFullscreen || root.webkitRequestFullscreen;
     if (!request) {
+      const iosVideo = video as IOSVideoElement | null;
+      // Handing the picture to the system player loses this player's bar and
+      // its own drawing of the cues, which is a real cost - but it is that or a
+      // portrait video inside Safari's chrome.
+      if (iosVideo?.webkitEnterFullscreen) {
+        try {
+          if (iosVideo.webkitDisplayingFullscreen) {
+            iosVideo.webkitExitFullscreen?.();
+          }
+          else {
+            iosVideo.webkitEnterFullscreen();
+          }
+          return;
+        }
+        catch (_error) {
+          // Asked for before the metadata is in, which is the one state it
+          // refuses. Covering the page is better than doing nothing.
+        }
+      }
       setPseudoFullscreen((current) => !current);
       return;
     }
@@ -362,7 +394,7 @@ function VideoPlayer(props: VideoPlayerProps) {
       // is no worse than the button having done nothing.
       void Promise.resolve(request.call(root)).catch(() => undefined);
     }
-  }, []);
+  }, [ video ]);
 
   useEffect(() => {
     const handleChange = () => setNativeFullscreen(getFullscreenElement() === rootRef.current);
@@ -373,6 +405,33 @@ function VideoPlayer(props: VideoPlayerProps) {
       document.removeEventListener('webkitfullscreenchange', handleChange);
     };
   }, []);
+
+  // The system player draws the cues itself, and only the ones it is shown -
+  // so the track this player keeps `hidden` to draw by hand is handed over for
+  // as long as that player is up, and taken back after. `SubtitleOverlay`
+  // draws hidden tracks only, so it stands down on its own meanwhile.
+  useEffect(() => {
+    const element = video as IOSVideoElement | null;
+    if (!element?.webkitEnterFullscreen) {
+      return;
+    }
+    const handover = (from: TextTrackMode, to: TextTrackMode) => () => {
+      const tracks = element.textTracks;
+      for (let i = 0; i < tracks.length; i++) {
+        if (tracks[i].mode === from) {
+          tracks[i].mode = to;
+        }
+      }
+    };
+    const begin = handover('hidden', 'showing');
+    const end = handover('showing', 'hidden');
+    element.addEventListener('webkitbeginfullscreen', begin);
+    element.addEventListener('webkitendfullscreen', end);
+    return () => {
+      element.removeEventListener('webkitbeginfullscreen', begin);
+      element.removeEventListener('webkitendfullscreen', end);
+    };
+  }, [ video ]);
 
   // Nothing behind a player that covers the viewport should scroll away under
   // it; real fullscreen gets this from the browser.

@@ -89,23 +89,67 @@ export interface KeyDescription {
   isFreeTier: boolean | null;
 }
 
-/**
- * The transcription settings as the browser is allowed to see them.
- *
- * There is deliberately no field for the key. It goes to the server when an
- * administrator sets it and is never sent back - what returns is `configured`
- * and the masked `label`, which is all a settings form needs to show.
- */
-export interface TranscriptionSettings {
+/** Which service does the transcribing. */
+export type TranscriptionProvider = 'openrouter' | 'gemini';
+
+/** One provider's half of the settings form. */
+export interface ProviderSettings {
   configured: boolean;
   /** Where the key in use comes from: saved here, or the environment. */
   source: 'file' | 'env' | null;
   model: string;
   baseUrl: string;
-  /** Absent when the key could not be checked, e.g. OpenRouter unreachable. */
+  /**
+   * What the provider says about the key. OpenRouter reports spend and limit;
+   * Gemini reports nothing about a key beyond whether it works, so this stays
+   * null there and `configured` is the whole story.
+   */
   key: KeyDescription | null;
   /** Why the key could not be checked, when it could not. */
   keyError: string | null;
+}
+
+/** Gemini's half, which has a proxy of its own. */
+export interface GeminiProviderSettings extends ProviderSettings {
+  /**
+   * Proxy the Gemini requests go through. Empty means straight out. Gemini is
+   * not reachable everywhere, so this is set by default.
+   */
+  proxyUrl: string;
+}
+
+/**
+ * The domain terms a provider that accepts them is steered towards.
+ *
+ * The text is the file verbatim - comments, blank lines and all - because the
+ * file is the thing being edited, whether that happens here or in an editor.
+ */
+export interface VocabularySettings {
+  /** Where the file is, so it can be found without the browser. */
+  path: string;
+  text: string;
+  termCount: number;
+  /** Set when the list has grown past the point where biasing still helps. */
+  warning: string | null;
+  /** False on a provider with no biasing, so the form can say why it is idle. */
+  supported: boolean;
+}
+
+/**
+ * The transcription settings as the browser is allowed to see them.
+ *
+ * There is deliberately no field for either key. A key goes to the server when
+ * an administrator sets it and is never sent back - what returns is
+ * `configured` and, where the provider offers one, a masked label, which is
+ * all a settings form needs to show.
+ */
+export interface TranscriptionSettings {
+  provider: TranscriptionProvider;
+  /** Whether the provider in use has a key. This is what gates the feature. */
+  configured: boolean;
+  openrouter: ProviderSettings;
+  gemini: GeminiProviderSettings;
+  vocabulary: VocabularySettings;
 }
 
 /** A record is still moving while it is in one of these states. */

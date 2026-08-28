@@ -9,6 +9,41 @@ import type { TimeRange } from './VoiceActivityDetector.js';
 /** Silero is trained at this rate; feeding it anything else degrades it. */
 export const SAMPLE_RATE = 16000;
 
+/** How a clip is encoded for whichever provider is going to be given it. */
+export interface AudioFormat {
+  /** ffmpeg encoder name. */
+  codec: string;
+  /** Extension, dot included, so the container matches the codec. */
+  ext: string;
+  /** What the provider is told the bytes are. */
+  mimeType: string;
+  bitrateKbps: number;
+}
+
+/**
+ * Opus at 24 kbps is about 11 MB per hour - well inside what an endpoint will
+ * accept, and far above what a speech model needs given it resamples to 16 kHz
+ * regardless.
+ */
+export const OPUS_FORMAT: AudioFormat = {
+  codec: 'libopus',
+  ext: '.ogg',
+  mimeType: 'audio/ogg',
+  bitrateKbps: 24
+};
+
+/**
+ * For providers whose documented format list does not include Opus. MP3 is on
+ * every such list, and 48 kbps is chosen over Opus's 24 because the codec is
+ * two decades older and needs the room to say the same thing.
+ */
+export const MP3_FORMAT: AudioFormat = {
+  codec: 'libmp3lame',
+  ext: '.mp3',
+  mimeType: 'audio/mp3',
+  bitrateKbps: 48
+};
+
 /**
  * The resolution a spliced clip's cut points are rounded to, in seconds.
  *
@@ -195,7 +230,7 @@ export default class AudioExtractor {
   }
 
   /**
-   * Writes `pieces` to `outPath` as one continuous mono 16 kHz Opus file,
+   * Writes `pieces` to `outPath` as one continuous mono 16 kHz audio file,
    * with everything between them left out.
    *
    * This is what lets a request carry half an hour of speech instead of half
@@ -204,15 +239,14 @@ export default class AudioExtractor {
    * it invents captions to fill. What comes back is on the spliced file's own
    * timeline, and the caller has to map it back.
    *
-   * Opus at this bitrate is about 11 MB per hour, which keeps a clip well
-   * inside the 25 MB the transcription endpoint accepts while staying far
-   * above what Whisper actually needs - it resamples to 16 kHz regardless.
+   * The codec is the provider's choice rather than this file's, because not
+   * every one of them accepts Opus - see `AudioFormat`.
    */
   async extractPieces(
     videoPath: string,
     pieces: TimeRange[],
     outPath: string,
-    bitrateKbps = 24,
+    format: AudioFormat = OPUS_FORMAT,
     signal?: AbortSignal
   ) {
     if (pieces.length === 0) {
@@ -238,8 +272,8 @@ export default class AudioExtractor {
       '-map', '[spliced]',
       '-ac', '1',
       '-ar', String(SAMPLE_RATE),
-      '-c:a', 'libopus',
-      '-b:a', `${bitrateKbps}k`,
+      '-c:a', format.codec,
+      '-b:a', `${format.bitrateKbps}k`,
       outPath
     ];
     try {

@@ -5,7 +5,7 @@ import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
 import AudioExtractor, { snapToSpliceGrid } from './AudioExtractor.js';
 import VoiceActivityDetector, { type SpeechInterval, type TimeRange, type VADOptions } from './VoiceActivityDetector.js';
-import OpenRouterTranscriber, { TranscriptionError } from './OpenRouterTranscriber.js';
+import { TranscriptionError, type Transcriber } from './Transcriber.js';
 import type TranscriptionIndex from './TranscriptionIndex.js';
 import { buildSRT, filterHallucinations, type Segment } from './SubtitleBuilder.js';
 
@@ -77,7 +77,7 @@ export default class TranscriptionQueue {
   #dataDir: string;
   #extractor: AudioExtractor;
   #vad: VoiceActivityDetector;
-  #transcriber: OpenRouterTranscriber;
+  #transcriber: Transcriber;
   #index: TranscriptionIndex;
   #vadOptions?: VADOptions;
   #logger?: Logger | null;
@@ -91,7 +91,7 @@ export default class TranscriptionQueue {
     dataDir: string,
     extractor: AudioExtractor,
     vad: VoiceActivityDetector,
-    transcriber: OpenRouterTranscriber,
+    transcriber: Transcriber,
     index: TranscriptionIndex,
     vadOptions?: VADOptions,
     logger?: Logger | null
@@ -363,8 +363,14 @@ export default class TranscriptionQueue {
   ): Promise<{ segments: Segment[]; language: string | null; cost: number | null }> {
     const duration = this.#clipDuration(clip);
     const span = this.#clipSpan(clip);
-    const file = path.resolve(workDir, `${span.start.toFixed(0)}-${span.end.toFixed(0)}.ogg`);
-    await this.#extractor.extractPieces(videoPath, clip.pieces, file, 24, signal);
+    // Asked per clip rather than once per job, so a provider changed in the
+    // settings mid-video is encoded for from the next clip on.
+    const format = this.#transcriber.audioFormat;
+    const file = path.resolve(
+      workDir,
+      `${span.start.toFixed(0)}-${span.end.toFixed(0)}${format.ext}`
+    );
+    await this.#extractor.extractPieces(videoPath, clip.pieces, file, format, signal);
     try {
       const result = await this.#transcriber.transcribe(file, language, signal);
       return {

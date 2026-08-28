@@ -9,8 +9,33 @@ import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type VoiceActivityDetector from '../transcription/VoiceActivityDetector.js';
 import type TranscriptionSettingsStore from '../transcription/TranscriptionSettingsStore.js';
 import OpenRouterTranscriber, { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../transcription/OpenRouterTranscriber.js';
+import GeminiTranscriber, {
+  DEFAULT_BASE_URL as GEMINI_DEFAULT_BASE_URL,
+  DEFAULT_MODEL as GEMINI_DEFAULT_MODEL
+} from '../transcription/GeminiTranscriber.js';
+import VocabularyStore, { RECOMMENDED_TERMS } from '../transcription/VocabularyStore.js';
 import { listSubtitlesFor, readSubtitleAsVTT } from '../transcription/SubtitleLibrary.js';
-import { type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription.js';
+import {
+  type GeminiProviderSettings,
+  type ProviderSettings,
+  type TranscriptionProvider,
+  type TranscriptionRecord,
+  type TranscriptionSettings
+} from '../../types/Transcription.js';
+
+const PROVIDER_LABELS: Record<TranscriptionProvider, string> = {
+  openrouter: 'OpenRouter',
+  gemini: 'Gemini'
+};
+
+function readProvider(value: unknown): TranscriptionProvider | null {
+  return value === 'openrouter' || value === 'gemini' ? value : null;
+}
+
+/** A trimmed string, or null for anything that is not usable text. */
+function readText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
@@ -39,6 +64,7 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
   #index: TranscriptionIndex;
   #vad: VoiceActivityDetector;
   #settings: TranscriptionSettingsStore;
+  #vocabulary: VocabularyStore;
 
   constructor(
     db: DBInstance,
@@ -47,6 +73,7 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     queue: TranscriptionQueue,
     vad: VoiceActivityDetector,
     settings: TranscriptionSettingsStore,
+    vocabulary: VocabularyStore,
     logger?: Logger | null
   ) {
     super(logger);
@@ -56,6 +83,7 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     this.#index = index;
     this.#vad = vad;
     this.#settings = settings;
+    this.#vocabulary = vocabulary;
   }
 
   /**
@@ -92,9 +120,10 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
 
   /** Why transcription cannot run, or `null` when it can. */
   async #getBlockedReason(): Promise<string | null> {
-    if (!this.#settings.getApiKey()) {
-      return 'No OpenRouter API key is configured. An administrator can set one in the ' +
-        'transcription settings.';
+    if (!this.#settings.getActiveApiKey()) {
+      const provider = PROVIDER_LABELS[this.#settings.getProvider()];
+      return `No ${provider} API key is configured. An administrator can set one in ` +
+        'the transcription settings, or switch to the other provider there.';
     }
     return await this.#vad.getUnavailableReason();
   }
@@ -105,13 +134,10 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     res.json(blocked ? { available: false, reason: blocked } : { available: true, reason: null });
   }
 
-  /**
-   * The settings as the browser may see them: never the key itself, only
-   * whether one is set and the masked label OpenRouter reports for it.
-   */
-  async handleGetSettingsRequest(_req: Request, res: Response) {
+  /** One provider's half of the form: never a key, only what is known of it. */
+  async #describeOpenRouter(): Promise<ProviderSettings> {
     const apiKey = this.#settings.getApiKey();
-    const settings: TranscriptionSettings = {
+    const provider: ProviderSettings = {
       configured: !!apiKey,
       source: this.#settings.getApiKeySource(),
       model: this.#settings.getModel() || DEFAULT_MODEL,
@@ -121,34 +147,124 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     };
     if (apiKey) {
       try {
-        settings.key = await OpenRouterTranscriber.describeKey(apiKey, settings.baseUrl);
+        provider.key = await OpenRouterTranscriber.describeKey(apiKey, provider.baseUrl);
       }
       catch (error) {
         // A key that cannot be checked right now is still configured; say so
         // rather than reporting it as absent.
-        settings.keyError = error instanceof Error ? error.message : String(error);
+        provider.keyError = error instanceof Error ? error.message : String(error);
       }
     }
+    return provider;
+  }
+
+  async #describeGemini(): Promise<GeminiProviderSettings> {
+    const apiKey = this.#settings.getGeminiApiKey();
+    const proxyUrl = this.#settings.getGeminiProxyUrl();
+    const provider: GeminiProviderSettings = {
+      configured: !!apiKey,
+      source: this.#settings.getGeminiApiKeySource(),
+      model: this.#settings.getGeminiModel() || GEMINI_DEFAULT_MODEL,
+      baseUrl: this.#settings.getGeminiBaseUrl() || GEMINI_DEFAULT_BASE_URL,
+      proxyUrl: proxyUrl || '',
+      // Gemini reports nothing about a key beyond whether it is accepted, so
+      // there is no description to fill in - only an error when it is not.
+      key: null,
+      keyError: null
+    };
+    if (apiKey) {
+      try {
+        // Through the proxy the transcriptions will use, so that a key
+        // reported as working here is one that will work there.
+        await GeminiTranscriber.describeKey(apiKey, provider.baseUrl, proxyUrl);
+      }
+      catch (error) {
+        provider.keyError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    return provider;
+  }
+
+  #describeVocabulary(provider: TranscriptionProvider) {
+    const text = this.#vocabulary.getText();
+    const terms = VocabularyStore.parse(text);
+    return {
+      path: this.#vocabulary.filePath,
+      text,
+      termCount: terms.length,
+      warning: terms.length > RECOMMENDED_TERMS ?
+        `${terms.length} terms. Biasing works best at up to ${RECOMMENDED_TERMS}; ` +
+        'past that, ordinary words in the list start pulling the transcript ' +
+        'towards themselves.'
+        : null,
+      // Whisper through OpenRouter takes no vocabulary. The list is shown as
+      // idle rather than hidden, because hiding it would leave no way to see
+      // that switching provider is what turns it on.
+      supported: provider === 'gemini'
+    };
+  }
+
+  /**
+   * The settings as the browser may see them: never a key itself, only whether
+   * one is set and whatever the provider says about it.
+   */
+  async handleGetSettingsRequest(_req: Request, res: Response) {
+    const provider = this.#settings.getProvider();
+    // Both are checked whichever is in use, so the form can show at a glance
+    // which one is ready to switch to.
+    const [ openrouter, gemini ] = await Promise.all([
+      this.#describeOpenRouter(),
+      this.#describeGemini()
+    ]);
+    const settings: TranscriptionSettings = {
+      provider,
+      configured: !!this.#settings.getActiveApiKey(),
+      openrouter,
+      gemini,
+      vocabulary: this.#describeVocabulary(provider)
+    };
     res.json({ settings });
   }
 
   /**
-   * Saves the settings, after checking any new key against OpenRouter so a
+   * Saves the settings, checking any new key against its own provider so a
    * mistyped one is rejected here rather than at the first video.
    */
   async handleSaveSettingsRequest(req: Request, res: Response) {
-    const body = (req.body || {}) as { apiKey?: unknown; model?: unknown; baseUrl?: unknown };
-    const patch: { apiKey?: string | null; model?: string | null; baseUrl?: string | null } = {};
+    const body = (req.body || {}) as Record<string, unknown>;
+    const patch: Parameters<TranscriptionSettingsStore['update']>[0] = {};
 
+    if (body.provider !== undefined) {
+      const provider = readProvider(body.provider);
+      if (!provider) {
+        res.status(400).json({ error: 'Unknown transcription provider' });
+        return;
+      }
+      patch.provider = provider;
+    }
     if (body.model !== undefined) {
-      patch.model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
+      patch.model = readText(body.model);
     }
     if (body.baseUrl !== undefined) {
-      patch.baseUrl = typeof body.baseUrl === 'string' && body.baseUrl.trim() ? body.baseUrl.trim() : null;
+      patch.baseUrl = readText(body.baseUrl);
+    }
+    if (body.geminiModel !== undefined) {
+      patch.geminiModel = readText(body.geminiModel);
+    }
+    if (body.geminiBaseUrl !== undefined) {
+      patch.geminiBaseUrl = readText(body.geminiBaseUrl);
+    }
+    if (body.geminiProxyUrl !== undefined) {
+      // Stored verbatim rather than through `readText`: an empty value here is
+      // a decision - "go direct" - and must not read as "unset", which would
+      // put the default proxy back.
+      patch.geminiProxyUrl = typeof body.geminiProxyUrl === 'string' ?
+        body.geminiProxyUrl.trim()
+        : null;
     }
 
     if (body.apiKey !== undefined) {
-      const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : '';
+      const apiKey = readText(body.apiKey);
       if (!apiKey) {
         // An empty value clears the saved key and falls back to the
         // environment, which is the only way to undo this from the browser.
@@ -161,7 +277,9 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
         }
         catch (error) {
           res.status(400).json({
-            error: error instanceof Error ? error.message : 'Could not verify this API key'
+            error: error instanceof Error ?
+              error.message
+              : 'Could not verify this OpenRouter API key'
           });
           return;
         }
@@ -169,8 +287,53 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
       }
     }
 
+    if (body.geminiApiKey !== undefined) {
+      const apiKey = readText(body.geminiApiKey);
+      if (!apiKey) {
+        patch.geminiApiKey = null;
+      }
+      else {
+        const baseUrl = patch.geminiBaseUrl ||
+          this.#settings.getGeminiBaseUrl() ||
+          GEMINI_DEFAULT_BASE_URL;
+        // The proxy being saved alongside, not the one saved before it: a key
+        // and the proxy it has to be reached through are commonly set together.
+        const proxyUrl = patch.geminiProxyUrl !== undefined ?
+          patch.geminiProxyUrl || null
+          : this.#settings.getGeminiProxyUrl();
+        try {
+          await GeminiTranscriber.describeKey(apiKey, baseUrl, proxyUrl);
+        }
+        catch (error) {
+          res.status(400).json({
+            error: error instanceof Error ?
+              error.message
+              : 'Could not verify this Gemini API key'
+          });
+          return;
+        }
+        patch.geminiApiKey = apiKey;
+      }
+    }
+
+    // The vocabulary is a file rather than a settings field, so it is written
+    // on its own. After the keys have been checked, so a form rejected for a
+    // bad key does not leave the list changed behind it.
+    if (typeof body.vocabulary === 'string') {
+      try {
+        this.#vocabulary.setText(body.vocabulary);
+      }
+      catch (error) {
+        res.status(500).json({
+          error: `Could not write the vocabulary file: ${
+            error instanceof Error ? error.message : String(error)}`
+        });
+        return;
+      }
+    }
+
     this.#settings.update(patch);
-    // Never log the key, and never echo it back - the response is the same
+    // Never log a key, and never echo one back - the response is the same
     // masked view as a plain read.
     this.log('info', 'Transcription settings updated');
     await this.handleGetSettingsRequest(req, res);

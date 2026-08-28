@@ -438,6 +438,7 @@ export function getRouter(
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,
       transcription.index, transcription.queue, transcription.vad, transcription.settings,
+      transcription.vocabulary,
       logger
     ),
     translation: new TranslationAPIRequestHandler(

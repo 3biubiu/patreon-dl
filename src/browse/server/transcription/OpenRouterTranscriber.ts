@@ -4,8 +4,13 @@ import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
 import { type Segment } from './SubtitleBuilder.js';
 import { type KeyDescription } from '../../types/Transcription.js';
+import { OPUS_FORMAT } from './AudioExtractor.js';
+import { TranscriptionError, type TranscribeResult, type Transcriber } from './Transcriber.js';
 
 export { type KeyDescription } from '../../types/Transcription.js';
+// Both used to live here, and both are now shared with the other providers.
+// Re-exported so the modules that import them from this one still can.
+export { TranscriptionError, type TranscribeResult } from './Transcriber.js';
 
 export const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 export const DEFAULT_MODEL = 'openai/whisper-large-v3-turbo';
@@ -19,27 +24,6 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
  */
 const REQUEST_TIMEOUT_MS = 300_000;
 const MAX_ATTEMPTS = 3;
-
-export class TranscriptionError extends Error {
-  status: number | null;
-  /** True when splitting the clip and retrying is worth trying. */
-  retryableBySplitting: boolean;
-
-  constructor(message: string, status: number | null = null, retryableBySplitting = false) {
-    super(message);
-    this.name = 'TranscriptionError';
-    this.status = status;
-    this.retryableBySplitting = retryableBySplitting;
-  }
-}
-
-export interface TranscribeResult {
-  segments: Segment[];
-  language: string | null;
-  /** Seconds of audio billed, as reported by the API. */
-  seconds: number | null;
-  cost: number | null;
-}
 
 interface APISegment {
   start: number;
@@ -65,7 +49,7 @@ export interface TranscriberSettings {
   baseUrl: string;
 }
 
-export default class OpenRouterTranscriber {
+export default class OpenRouterTranscriber implements Transcriber {
   name = 'OpenRouterTranscriber';
 
   #getSettings: () => TranscriberSettings;
@@ -83,6 +67,11 @@ export default class OpenRouterTranscriber {
 
   get model() {
     return this.#getSettings().model;
+  }
+
+  /** Opus, which every OpenAI-compatible upstream this talks to accepts. */
+  get audioFormat() {
+    return OPUS_FORMAT;
   }
 
   #settings() {

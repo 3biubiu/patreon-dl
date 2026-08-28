@@ -8,7 +8,7 @@ import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogEntry, type Registration, type UpdateUserRequest } from '../../types/Auth';
 import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
-import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
+import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionProvider, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
 import {
   type FavoriteListItem,
@@ -511,9 +511,17 @@ class API {
    * having to type the key again.
    */
   async saveTranscriptionSettings(params: {
+    provider?: TranscriptionProvider;
     apiKey?: string;
     model?: string;
     baseUrl?: string;
+    geminiApiKey?: string;
+    geminiModel?: string;
+    geminiBaseUrl?: string;
+    /** Empty turns the proxy off; Gemini is then reached directly. */
+    geminiProxyUrl?: string;
+    /** The vocabulary file, verbatim. Omitted leaves it alone. */
+    vocabulary?: string;
   }): Promise<TranscriptionSettings> {
     const data = await readJSON(await apiFetch('/api/transcription/settings', {
       method: 'PUT',

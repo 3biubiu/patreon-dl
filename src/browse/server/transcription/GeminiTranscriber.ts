@@ -271,7 +271,15 @@ export default class GeminiTranscriber implements Transcriber {
         'transcription settings.'
       );
     }
-    return { ...settings, baseUrl: settings.baseUrl.replace(/\/+$/, '') };
+    return {
+      ...settings,
+      // Repeated after the spread rather than left to it: the check above
+      // narrows `apiKey` to a string, and spreading widens it back to the
+      // declared `string | null`, which every call below would then have to
+      // re-check for a case that cannot reach them.
+      apiKey: settings.apiKey,
+      baseUrl: settings.baseUrl.replace(/\/+$/, '')
+    };
   }
 
   /**

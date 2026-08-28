@@ -79,6 +79,24 @@ export function parseVTT(text: string): Cue[] {
   return cues;
 }
 
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/**
+ * Joined for reading, not for a caption box: no space between two CJK
+ * characters, one everywhere else. A Chinese line split mid-word across two
+ * cues comes back together without a hole in the word.
+ */
+function joinTexts(texts: string[]) {
+  let joined = '';
+  for (const text of texts) {
+    if (joined && !(CJK.test(joined.slice(-1)) && CJK.test(text.charAt(0)))) {
+      joined += ' ';
+    }
+    joined += text;
+  }
+  return joined;
+}
+
 /**
  * Lines the two languages up by the seconds they cover.
  *
@@ -86,6 +104,11 @@ export function parseVTT(text: string): Cue[] {
  * reads as Chinese, so the two files rarely have the same number of cues and
  * pairing them by index would put the transcript out of step with itself a
  * minute in. Overlap in time is the one thing the two agree on.
+ *
+ * Each target cue lands on exactly one row - the source cue it overlaps the
+ * most. Handing it to every row it merely touches is what this did before, and
+ * a Chinese line spanning two English cues then appeared under both, which
+ * read as the transcript repeating itself.
  *
  * Both sides are in play order, so this walks them together rather than
  * searching the whole of one for every cue of the other.
@@ -100,26 +123,31 @@ export function alignCues(source: Cue[], target: Cue[]): CuePair[] {
       target: cue.text
     }));
   }
-  const pairs: CuePair[] = [];
+  const matched: string[][] = source.map(() => []);
   let from = 0;
-  source.forEach((cue, index) => {
+  for (const cue of target) {
     // Everything that finished before this cue began is behind us for good.
-    while (from < target.length && target[from].end <= cue.start) {
+    while (from < source.length - 1 && source[from].end <= cue.start) {
       from++;
     }
-    const matched: string[] = [];
-    for (let i = from; i < target.length && target[i].start < cue.end; i++) {
-      matched.push(target[i].text);
+    let best = from;
+    let mostOverlap = -Infinity;
+    for (let i = from; i < source.length && source[i].start < cue.end; i++) {
+      const overlap = Math.min(cue.end, source[i].end) - Math.max(cue.start, source[i].start);
+      if (overlap > mostOverlap) {
+        mostOverlap = overlap;
+        best = i;
+      }
     }
-    pairs.push({
-      key: index,
-      start: cue.start,
-      end: cue.end,
-      source: cue.text,
-      target: matched.join(' ')
-    });
-  });
-  return pairs;
+    matched[best].push(cue.text);
+  }
+  return source.map((cue, index) => ({
+    key: index,
+    start: cue.start,
+    end: cue.end,
+    source: cue.text,
+    target: joinTexts(matched[index])
+  }));
 }
 
 /** `1:02:03` for anything past an hour, `02:03` below it. */

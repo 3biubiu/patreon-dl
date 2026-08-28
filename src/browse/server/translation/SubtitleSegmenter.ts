@@ -95,8 +95,18 @@ const FULL_PAUSE_SECONDS = 1.2;
  */
 const FORCED_PAUSE_SECONDS = 1.6;
 
-/** Worst penalty for a line at the length ceiling, in boundary-score terms. */
-const OVER_PENALTY = 90;
+/**
+ * Worst penalty for a line at the length ceiling, in boundary-score terms.
+ *
+ * Deliberately under `COMMA_SCORE`. At 90 the arithmetic quietly inverted the
+ * rule this file opens with: a comma three characters past the comfortable
+ * target lost to a bare cut at the target - 35 against 54 of penalty - and a
+ * line ended mid-phrase with a comma in plain sight. Kept under 35, a comma
+ * anywhere inside the window beats every cut that has nothing to say for
+ * itself, and length goes back to deciding between boundaries of equal
+ * standing, which is all it was ever meant to do.
+ */
+const OVER_PENALTY = 30;
 /** Worst penalty for a very short line. Mild - short lines are often right. */
 const UNDER_PENALTY = 20;
 
@@ -195,15 +205,16 @@ export function toUnits(segments: Segment[]): Unit[] {
   let previousEnd: number | null = null;
   const locale = wordLocale(segments.map((segment) => segment.text).join(''));
 
-  for (const segment of segments) {
+  for (let k = 0; k < segments.length; k++) {
+    const segment = segments[k];
     const text = segment.text;
     const matches = [ ...text.matchAll(UNIT) ];
     if (matches.length === 0) {
       continue;
     }
     // Per segment, because a unit's offsets are into its own segment's text.
-    // The last unit of a segment always ends where the text does, so a caption
-    // boundary is always breakable however the dictionary reads the words.
+    // The one boundary this cannot see - the join between two segments - is
+    // checked separately below, on the two texts put together.
     const ends = wordEnds(text, locale);
     const duration = Math.max(segment.end - segment.start, 0);
     const phonemes = matches.map((m) => Math.ceil(m[0].length / CHARS_PER_PHONEME));
@@ -220,6 +231,24 @@ export function toUnits(segments: Segment[]): Unit[] {
       const end = i === matches.length - 1 ?
         segment.end
         : Math.min(cursor + perPhoneme * phonemes[i], segment.end);
+      // Only CJK is held to the dictionary. The unit pattern already matches
+      // a spaced language a whole word at a time, so applying it there could
+      // only take away breaks that are legitimate.
+      let breakable = !ends || !CJK.test(match[0]) || ends.has(from + match[0].length);
+      if (i === matches.length - 1) {
+        // A segment's last unit was breakable unconditionally - its offset is
+        // the end of its own text, which a per-segment dictionary always calls
+        // a word end. But the translator writes one caption at a time, and a
+        // word it split across two captions - "惊" ending one, "艳成果"
+        // opening the next - is invisible to a check that never reads past the
+        // join. So when CJK meets CJK at the join, the two texts are read as
+        // one and the join is only a break if a word ends there.
+        const nextText = segments[k + 1]?.text ?? '';
+        if (CJK.test(text.slice(-1)) && CJK.test(nextText.charAt(0))) {
+          const pair = wordEnds(text + nextText, locale);
+          breakable = !pair || pair.has(text.length);
+        }
+      }
       units.push({
         text: text.slice(from, to),
         core: match[0],
@@ -229,10 +258,7 @@ export function toUnits(segments: Segment[]): Unit[] {
           Math.max(0, segment.start - previousEnd)
           : 0,
         startsSegment: i === 0,
-        // Only CJK is held to the dictionary. The unit pattern already matches
-        // a spaced language a whole word at a time, so applying it there could
-        // only take away breaks that are legitimate.
-        breakable: !ends || !CJK.test(match[0]) || ends.has(from + match[0].length)
+        breakable
       });
       cursor = end;
     }

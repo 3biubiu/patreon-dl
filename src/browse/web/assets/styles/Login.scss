@@ -38,4 +38,19 @@
   &__error {
     margin-bottom: 1rem;
   }
+
+  // The line under the form that swaps between signing in and applying.
+  // Centred and quiet: it is the way out for the few who need it, not a
+  // second thing to choose between on arrival.
+  &__switch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    margin-top: 1rem;
+    font-size: 0.9em;
+    opacity: 0.8;
+    text-align: center;
+  }
 }

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
-import { type AuthUser, type UserRole } from '../types/Auth.js';
+import { type AuthUser, type Registration, type UserRole } from '../types/Auth.js';
 import {
   DEFAULT_USER_QUOTA,
   UNLIMITED_QUOTA,
@@ -20,6 +20,16 @@ interface StoredUser extends AuthUser {
   passwordHash: string;
 }
 
+/**
+ * An application as stored. The password is hashed the moment it arrives and
+ * kept exactly as a user's is, so approving one is a move between two lists
+ * rather than anything that has to handle a password again.
+ */
+interface StoredRegistration extends Registration {
+  salt: string;
+  passwordHash: string;
+}
+
 interface AuthFile {
   /**
    * Signs session cookies. Kept with the users rather than regenerated per
@@ -27,11 +37,30 @@ interface AuthFile {
    */
   secret: string;
   users: StoredUser[];
+  /**
+   * Applications waiting on an administrator, in a list of their own.
+   *
+   * This is the whole of how a pending applicant is kept out: nothing that
+   * signs anybody in ever looks here. There is no flag to forget to check and
+   * no state an account could be left in - until one of these is approved, the
+   * account it asks for does not exist.
+   *
+   * Absent in files written before applications existed.
+   */
+  registrations?: StoredRegistration[];
 }
 
 const SCRYPT_KEY_LENGTH = 64;
 const SALT_BYTES = 16;
 const MIN_PASSWORD_LENGTH = 6;
+/** Long enough for any name worth having, short enough not to break a table. */
+const MAX_USERNAME_LENGTH = 32;
+/**
+ * A ceiling on the queue, because the form behind it is reachable by anyone
+ * who can reach the login page. Past this the server stops accepting rather
+ * than letting a stranger grow the credentials file without bound.
+ */
+const MAX_PENDING_REGISTRATIONS = 50;
 
 /**
  * The stored form of a campaign restriction.
@@ -150,6 +179,11 @@ export default class AuthStore {
         // made from here on start on `DEFAULT_USER_QUOTA`.
         user.quota = normalizeQuota(user.quota, user.role, UNLIMITED_QUOTA);
       }
+      // Absent in files written before applications existed, which is simply
+      // an empty queue.
+      if (!Array.isArray(data.registrations)) {
+        data.registrations = [];
+      }
       return new AuthStore(filePath, data, logger);
     }
 
@@ -159,6 +193,7 @@ export default class AuthStore {
     const salt = crypto.randomBytes(SALT_BYTES).toString('base64');
     const store = new AuthStore(filePath, {
       secret: crypto.randomBytes(32).toString('base64'),
+      registrations: [],
       users: [
         {
           id: crypto.randomUUID(),
@@ -297,8 +332,125 @@ export default class AuthStore {
     this.#save();
   }
 
+  /** The queue an administrator is looking at, oldest first. */
+  listRegistrations(): Registration[] {
+    return this.#pendingList().map((registration) => this.#toRegistration(registration));
+  }
+
+  /**
+   * Files an application. Reachable by anyone who can reach the login page, so
+   * it is the one entry point here that is not behind an administrator - which
+   * is why it validates as strictly as it does and why the queue has a ceiling.
+   *
+   * A name already taken is refused plainly. That does tell the person asking
+   * that the name exists, which is the same thing every registration form in
+   * the world says; the alternative is accepting an application that could
+   * never be approved and leaving them waiting on it.
+   */
+  createRegistration(params: { username: string; password: string; }): Registration {
+    const username = params.username.trim();
+    if (!username) {
+      throw Error('Username is required');
+    }
+    if (username.length > MAX_USERNAME_LENGTH) {
+      throw Error(`Username must be at most ${MAX_USERNAME_LENGTH} characters`);
+    }
+    if (this.#usernameTaken(username)) {
+      throw Error(`"${username}" is not available`);
+    }
+    this.#assertPassword(params.password);
+    const pending = this.#pendingList();
+    if (pending.length >= MAX_PENDING_REGISTRATIONS) {
+      throw Error('There are too many applications waiting. Try again later.');
+    }
+    const salt = crypto.randomBytes(SALT_BYTES).toString('base64');
+    const registration: StoredRegistration = {
+      id: crypto.randomUUID(),
+      username,
+      requestedAt: new Date().toISOString(),
+      salt,
+      passwordHash: hashPassword(params.password, salt)
+    };
+    pending.push(registration);
+    this.#save();
+    return this.#toRegistration(registration);
+  }
+
+  /**
+   * Turns an application into an account, carrying the password across as the
+   * hash it has been since it arrived - approving one never handles a password.
+   *
+   * The new account starts where an account an administrator adds without
+   * saying otherwise starts: an ordinary user, every creator visible, on the
+   * default daily allowance. Narrowing it is the same edit as for any other.
+   */
+  approveRegistration(id: string): AuthUser {
+    const pending = this.#pendingList();
+    const index = pending.findIndex((r) => r.id === id);
+    if (index === -1) {
+      throw Error('Application not found');
+    }
+    const registration = pending[index];
+    // Checked again rather than trusted from when it was filed: an
+    // administrator may have created the name by hand in the meantime, and two
+    // accounts answering to one name is not something to discover at sign-in.
+    if (this.#data.users.some(
+      (u) => u.username.toLowerCase() === registration.username.toLowerCase()
+    )) {
+      throw Error(`A user named "${registration.username}" already exists`);
+    }
+    const user: StoredUser = {
+      id: crypto.randomUUID(),
+      username: registration.username,
+      role: 'user',
+      createdAt: new Date().toISOString(),
+      visibleCampaigns: null,
+      quota: { ...DEFAULT_USER_QUOTA },
+      salt: registration.salt,
+      passwordHash: registration.passwordHash
+    };
+    // Removed from the queue and added to the users in one write, so there is
+    // no moment where the file holds both or neither.
+    pending.splice(index, 1);
+    this.#data.users.push(user);
+    this.#save();
+    return this.#toAuthUser(user);
+  }
+
+  /** Turns one down. The application goes; nothing was ever created. */
+  rejectRegistration(id: string) {
+    const pending = this.#pendingList();
+    const index = pending.findIndex((r) => r.id === id);
+    if (index === -1) {
+      throw Error('Application not found');
+    }
+    pending.splice(index, 1);
+    this.#save();
+  }
+
   log(level: LogLevel, ...msg: any[]) {
     commonLog(this.#logger, level, this.name, ...msg);
+  }
+
+  #pendingList(): StoredRegistration[] {
+    if (!this.#data.registrations) {
+      this.#data.registrations = [];
+    }
+    return this.#data.registrations;
+  }
+
+  /** By an account or by an application already waiting - either way, taken. */
+  #usernameTaken(username: string) {
+    const name = username.toLowerCase();
+    return (
+      this.#data.users.some((u) => u.username.toLowerCase() === name) ||
+      this.#pendingList().some((r) => r.username.toLowerCase() === name)
+    );
+  }
+
+  #toRegistration(registration: StoredRegistration): Registration {
+    const { id, username, requestedAt } = registration;
+    return { id, username, requestedAt };
   }
 
   #countAdmins() {

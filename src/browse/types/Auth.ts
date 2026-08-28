@@ -40,6 +40,24 @@ export interface AuthSession {
   user: AuthUser | null;
 }
 
+/**
+ * An application for an account, waiting on an administrator.
+ *
+ * Never an `AuthUser`, and deliberately not a user with a flag on it: an
+ * applicant has no account at all until someone approves one, so there is
+ * nothing for a session to name and nothing for a sign-in to find.
+ */
+export interface Registration {
+  id: string;
+  username: string;
+  requestedAt: string;
+}
+
+export interface RegisterRequest {
+  username: string;
+  password: string;
+}
+
 export interface LoginRequest {
   username: string;
   password: string;

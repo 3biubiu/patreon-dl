@@ -75,6 +75,13 @@ class _Router {
       this.#handlers.auth.handleLoginRequest(req, res)
     );
 
+    // Reachable while signed out for the same reason the sign-in is: this is
+    // the way to ask for an account when you have none. It creates an
+    // application and nothing else - no account, no session.
+    this.#router.post('/api/auth/register', (req, res) =>
+      this.#handlers.auth.handleRegisterRequest(req, res)
+    );
+
     this.#router.post('/api/auth/logout', (req, res) =>
       this.#handlers.auth.handleLogoutRequest(req, res)
     );
@@ -130,6 +137,21 @@ class _Router {
 
     this.#router.delete('/api/auth/users/:id', requireAdmin, (req, res) =>
       this.#handlers.auth.handleDeleteUserRequest(req, res, req.params.id)
+    );
+
+    // The applications waiting on an administrator, and the two ways one is
+    // answered. Approving is what creates the account; until then there is
+    // nothing to sign in as.
+    this.#router.get('/api/auth/registrations', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleListRegistrationsRequest(req, res)
+    );
+
+    this.#router.post('/api/auth/registrations/:id/approve', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleApproveRegistrationRequest(req, res, req.params.id)
+    );
+
+    this.#router.delete('/api/auth/registrations/:id', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleRejectRegistrationRequest(req, res, req.params.id)
     );
 
     // Who signed in, from where. An administrator's route: it is everybody's

@@ -6,7 +6,7 @@ import { type BrowseSettings, type BrowseSettingOptions as BrowseSettingOptions 
 import { type Filter, type FilterSearchParams, type FilterData, type MediaFilterSearchParams, type PostFilterSearchParams } from '../../types/Filter';
 import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
-import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogEntry, type UpdateUserRequest } from '../../types/Auth';
+import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogEntry, type Registration, type UpdateUserRequest } from '../../types/Auth';
 import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
@@ -314,6 +314,26 @@ class API {
   }
 
   /**
+   * Applies for an account. Plain `fetch` for the same reason the sign-in
+   * uses one: it is called by somebody with no session, so a refusal is an
+   * answer to show them rather than a session that has lapsed.
+   *
+   * Returns nothing - an application is not a way in, and there is nothing
+   * here for the caller to mistake for one.
+   */
+  async register(username: string, password: string): Promise<void> {
+    const result = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await result.json() as { ok?: boolean; error?: string };
+    if (!result.ok || !data.ok) {
+      throw Error(data?.error || 'Could not send the application');
+    }
+  }
+
+  /**
    * Where this account stands against its daily limits. Administrators come
    * back unlimited, so the caller can ask without knowing who is signed in.
    */
@@ -347,6 +367,23 @@ class API {
 
   async deleteUser(id: string): Promise<void> {
     await readJSON(await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE' }));
+  }
+
+  async listRegistrations(): Promise<Registration[]> {
+    const data = await readJSON(await apiFetch('/api/auth/registrations'));
+    return data.registrations as Registration[];
+  }
+
+  /** Approving is what creates the account, and answers with it. */
+  async approveRegistration(id: string): Promise<AuthUser> {
+    const data = await readJSON(await apiFetch(`/api/auth/registrations/${id}/approve`, {
+      method: 'POST'
+    }));
+    return data.user as AuthUser;
+  }
+
+  async rejectRegistration(id: string): Promise<void> {
+    await readJSON(await apiFetch(`/api/auth/registrations/${id}`, { method: 'DELETE' }));
   }
 
   /**

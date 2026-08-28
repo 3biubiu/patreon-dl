@@ -177,6 +177,61 @@ export default class AuthAPIRequestHandler extends Basehandler {
     res.json({ entries: await this.#loginLogStore.listRecent(limit, account) });
   }
 
+  /**
+   * Files an application for an account. The one route here that is open to
+   * anyone who can reach the login page.
+   *
+   * Answers with nothing but an acknowledgement: an application is not a
+   * session, and there is deliberately no state the browser could mistake for
+   * one. Nothing is written to the sign-in log either - nobody signed in.
+   */
+  handleRegisterRequest(req: Request, res: Response) {
+    const { username, password } = (req.body || {}) as { username?: string; password?: string; };
+    if (!username || !password) {
+      res.status(400).json({ error: 'Username and password are required' });
+      return;
+    }
+    try {
+      const registration = this.#store.createRegistration({ username, password });
+      this.log('info', `Account application filed for "${registration.username}"`);
+      res.json({ ok: true });
+    }
+    catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Could not send the application'
+      });
+    }
+  }
+
+  handleListRegistrationsRequest(_req: Request, res: Response) {
+    res.json({ registrations: this.#store.listRegistrations() });
+  }
+
+  handleApproveRegistrationRequest(req: Request, res: Response, id: string) {
+    try {
+      const user = this.#store.approveRegistration(id);
+      this.log('info', `Account application for "${user.username}" approved`);
+      res.json({ user });
+    }
+    catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Could not approve the application'
+      });
+    }
+  }
+
+  handleRejectRegistrationRequest(req: Request, res: Response, id: string) {
+    try {
+      this.#store.rejectRegistration(id);
+      res.json({ ok: true });
+    }
+    catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Could not reject the application'
+      });
+    }
+  }
+
   handleLogoutRequest(_req: Request, res: Response) {
     clearSession(res);
     res.json({ user: null });

@@ -3,8 +3,8 @@ import { type Logger } from '../../../utils/logging/index.js';
 import { commonLog } from '../../../utils/logging/Logger.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type TranscriptionQueue from '../transcription/TranscriptionQueue.js';
+import SentenceSplitter from '../transcription/SentenceSplitter.js';
 import GeminiTranslator, { DEFAULT_BASE_URL, DEFAULT_MODEL } from './GeminiTranslator.js';
-import TranslationCache from './TranslationCache.js';
 import TranslationQueue from './TranslationQueue.js';
 import TranslationSettingsStore from './TranslationSettingsStore.js';
 
@@ -32,7 +32,6 @@ export interface TranslationConfig {
 export interface TranslationServices {
   queue: TranslationQueue;
   settings: TranslationSettingsStore;
-  cache: TranslationCache;
 }
 
 /**
@@ -54,11 +53,6 @@ export function createTranslationServices(
     logger
   );
 
-  const cache = TranslationCache.load(
-    path.resolve(dataDir, '.patreon-dl', 'translation-cache.json'),
-    logger
-  );
-
   const translator = new GeminiTranslator(
     () => ({
       apiKey: config?.apiKey || settings.getApiKey(),
@@ -71,7 +65,31 @@ export function createTranslationServices(
     logger
   );
 
-  const queue = new TranslationQueue(dataDir, translator, index, cache, settings, logger);
+  const queue = new TranslationQueue(dataDir, translator, index, settings, logger);
+
+  // Runs during transcription rather than after it, and spends this key: the
+  // sentences it looks for are the source language's, and the words it reads
+  // the timings off only exist before the subtitle is written.
+  transcriptionQueue.setSentenceSplitter(
+    new SentenceSplitter(
+      () => ({
+        apiKey: config?.apiKey || settings.getApiKey(),
+        model: config?.model || settings.getModel() || DEFAULT_MODEL,
+        baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL,
+        proxyUrl: config?.proxyUrl !== undefined ?
+          config.proxyUrl || null
+          : settings.getProxyUrl(),
+        disableThinking: settings.getDisableThinking(),
+        // The same ceilings the translated file is re-cut to. They are limits
+        // on how much text a caption may hold, which is a property of the
+        // screen rather than of the language it is read in.
+        maxCjk: settings.getMaxLineCjk(),
+        maxLatin: settings.getMaxLineLatin()
+      }),
+      logger
+    ),
+    () => settings.getSourceSegmentation()
+  );
 
   // The other half of the checkbox on the transcribe confirmation: asking to
   // translate marks the record pending, and this is what turns that into a
@@ -99,5 +117,5 @@ export function createTranslationServices(
       'settings; transcription is unaffected.');
   }
 
-  return { queue, settings, cache };
+  return { queue, settings };
 }

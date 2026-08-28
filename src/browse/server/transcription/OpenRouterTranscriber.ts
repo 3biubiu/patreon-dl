@@ -2,9 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
-import { type Segment } from './SubtitleBuilder.js';
 import { type KeyDescription } from '../../types/Transcription.js';
 import { OPUS_FORMAT } from './AudioExtractor.js';
+import { toSegments, type Word } from './CaptionAssembler.js';
 import { TranscriptionError, type TranscribeResult, type Transcriber } from './Transcriber.js';
 
 export { type KeyDescription } from '../../types/Transcription.js';
@@ -25,23 +25,28 @@ const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 300_000;
 const MAX_ATTEMPTS = 3;
 
-interface APISegment {
+/** One word of Whisper's `verbose_json`, which names the field `word`. */
+interface APIWord {
+  word?: string;
   start: number;
   end: number;
-  text: string;
-  avg_logprob?: number;
-  no_speech_prob?: number;
 }
 
 /**
  * Transcribes audio clips through OpenRouter's speech-to-text endpoint.
  *
  * Two things about that endpoint shape the code here. It refuses to emit SRT
- * or VTT, so subtitles are assembled locally from the segment list. And
- * segment timestamps only come back under `verbose_json`, which OpenRouter
- * only honours for OpenAI-compatible upstreams - the default model is served
- * by one, but a model substituted for it might not be, in which case
- * timestamps go missing and there is nothing to build subtitles from.
+ * or VTT, so subtitles are assembled locally. And timestamps only come back
+ * under `verbose_json`, which OpenRouter only honours for OpenAI-compatible
+ * upstreams - the default model is served by one, but a model substituted for
+ * it might not be, in which case they go missing and there is nothing to build
+ * subtitles from.
+ *
+ * Word timestamps are asked for rather than Whisper's own segments, and the
+ * captions are cut from the words by the same rule Gemini's are. Whisper's
+ * segment list is the provider's opinion about where captions go, and taking
+ * it meant the same audio came out shaped one way through this path and
+ * another way through the other one.
  */
 export interface TranscriberSettings {
   apiKey: string | null;
@@ -189,8 +194,11 @@ export default class OpenRouterTranscriber implements Transcriber {
     const data = fs.readFileSync(audioPath);
     form.append('file', new Blob([ data ], { type: 'audio/ogg' }), path.basename(audioPath));
     form.append('model', model);
-    // Without these two the response carries plain text and no timestamps.
+    // Without these the response carries plain text and no timestamps.
     form.append('response_format', 'verbose_json');
+    // Both, because asking for words alone makes some upstreams drop `text`,
+    // which is what the captions are sliced out of.
+    form.append('timestamp_granularities[]', 'word');
     form.append('timestamp_granularities[]', 'segment');
     if (language) {
       form.append('language', language);
@@ -242,7 +250,8 @@ export default class OpenRouterTranscriber implements Transcriber {
     }
 
     let json: {
-      segments?: APISegment[];
+      words?: APIWord[];
+      segments?: { text?: string }[];
       language?: string;
       text?: string;
       usage?: { seconds?: number; cost?: number };
@@ -254,25 +263,28 @@ export default class OpenRouterTranscriber implements Transcriber {
       throw new TranscriptionError(`Response was not JSON: ${body.slice(0, 200)}`);
     }
 
-    if (!Array.isArray(json.segments)) {
+    const words: Word[] = (Array.isArray(json.words) ? json.words : [])
+      .filter((w) => typeof w.start === 'number' && typeof w.end === 'number' && !!w.word)
+      .map((w) => ({ text: w.word as string, start: w.start, end: Math.max(w.start, w.end) }));
+
+    if (words.length === 0) {
       throw new TranscriptionError(
-        `Response carried no timestamped segments, so subtitles cannot be built. ` +
+        `Response carried no word timestamps, so subtitles cannot be built. ` +
         `Model "${model}" may be served by an upstream that does not support ` +
-        `verbose_json.`
+        `verbose_json with timestamp_granularities[]=word.`
       );
     }
 
-    const segments: Segment[] = json.segments
-      .filter((s) => typeof s.start === 'number' && typeof s.end === 'number')
-      .map((s) => ({
-        start: s.start,
-        end: s.end,
-        text: typeof s.text === 'string' ? s.text : '',
-        avgLogprob: typeof s.avg_logprob === 'number' ? s.avg_logprob : null
-      }));
+    // The transcript the words are sliced out of. `text` is what the endpoint
+    // is supposed to return; the segment texts joined are the same string on
+    // an upstream that omits it.
+    const text = typeof json.text === 'string' && json.text ?
+      json.text
+      : (json.segments || []).map((s) => s.text || '').join('');
 
     return {
-      segments,
+      segments: toSegments(text, words),
+      words,
       language: json.language || null,
       seconds: json.usage?.seconds ?? null,
       cost: json.usage?.cost ?? null

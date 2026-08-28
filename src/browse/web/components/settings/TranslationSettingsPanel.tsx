@@ -13,6 +13,7 @@ interface FormValues {
   batchLines: number;
   disableThinking: boolean;
   segmentation: boolean;
+  sourceSegmentation: boolean;
   maxLineCjk: number;
   maxLineLatin: number;
 }
@@ -66,6 +67,7 @@ function TranslationSettingsPanel() {
       batchLines: result.batchLines,
       disableThinking: result.disableThinking,
       segmentation: result.segmentation,
+      sourceSegmentation: result.sourceSegmentation,
       maxLineCjk: result.maxLineCjk,
       maxLineLatin: result.maxLineLatin
     });
@@ -111,6 +113,7 @@ function TranslationSettingsPanel() {
       batchLines: values.batchLines,
       disableThinking: values.disableThinking,
       segmentation: values.segmentation,
+      sourceSegmentation: values.sourceSegmentation,
       maxLineCjk: values.maxLineCjk,
       maxLineLatin: values.maxLineLatin
     };
@@ -262,7 +265,7 @@ function TranslationSettingsPanel() {
             type="info"
             showIcon
             title={`About ${estimate} call${estimate === 1 ? '' : 's'} per hour of video`}
-            description="For an hour of ordinary speech, before any retry. Batches already translated are read from a cache and cost nothing, so a job that failed part way through and is retried only pays for the part that never finished."
+            description="For an hour of ordinary speech, before any retry. Every batch is sent, every time: a translation asked for a second time is asked for because something about the first one was wrong, so it is paid for again."
             style={{ marginBlockEnd: 24 }}
           />
 
@@ -271,6 +274,24 @@ function TranslationSettingsPanel() {
             label="Disable thinking"
             valuePropName="checked"
             extra="Sends a zero thinking budget with each call. Faster and cheaper on models that support it, but a model that does not know the setting rejects the request outright - leave it off unless you know this model takes it."
+          >
+            <Switch />
+          </Form.Item>
+
+          <Divider size="small" />
+
+          <Form.Item
+            name="sourceSegmentation"
+            label="Split the source sentences"
+            valuePropName="checked"
+            extra={
+              'Asks the model where the sentences end in the transcript, instead of guessing ' +
+              'from pauses and full stops alone. Runs while a video is transcribed, and the ' +
+              'break lands on the word it was put next to, so the timing is exact rather than ' +
+              'estimated. Unlike the setting below this one costs calls - about five per hour ' +
+              'of speech - and it changes the subtitle the transcription itself writes. It is ' +
+              'skipped when no key is set.'
+            }
           >
             <Switch />
           </Form.Item>
@@ -361,26 +382,6 @@ function TranslationSettingsPanel() {
           >
             Save prompt
           </Button>
-          <Popconfirm
-            title="Clear the translation cache?"
-            description="Batches already translated are re-translated, and paid for, the next time they come up. Worth doing after a change here if you want existing work redone."
-            onConfirm={() => void (async () => {
-              setSubmitting(true);
-              setSaved(null);
-              try {
-                const removed = await api.clearTranslationCache();
-                setSaved(`Cleared ${removed} cached batch${removed === 1 ? '' : 'es'}`);
-              }
-              catch (e) {
-                setError(e instanceof Error ? e.message : 'Could not clear the cache');
-              }
-              finally {
-                setSubmitting(false);
-              }
-            })()}
-          >
-            <Button disabled={submitting}>Clear cache</Button>
-          </Popconfirm>
         </Space>
       </Card>
     </Space>

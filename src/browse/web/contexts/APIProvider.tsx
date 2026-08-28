@@ -639,12 +639,6 @@ class API {
     return (data.records || []) as TranscriptionRecord[];
   }
 
-  /** Empties the cache of already-translated batches. */
-  async clearTranslationCache(): Promise<number> {
-    const data = await readJSON(await apiFetch('/api/translation/cache', { method: 'DELETE' }));
-    return (data.removed || 0) as number;
-  }
-
   /** Puts the running count of Gemini calls back to zero. */
   async resetTranslationRequestCount(): Promise<TranslationSettings> {
     const data = await readJSON(await apiFetch(

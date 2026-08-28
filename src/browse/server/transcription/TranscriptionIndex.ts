@@ -251,7 +251,6 @@ export default class TranscriptionIndex {
       done: 0,
       total: 0,
       requests: 0,
-      cached: 0,
       requestedAt: new Date().toISOString(),
       startedAt: null,
       completedAt: null
@@ -276,14 +275,13 @@ export default class TranscriptionIndex {
    * Updates progress. Written at the same bounded rate as transcription
    * progress - see `PROGRESS_WRITE_INTERVAL_MS`.
    */
-  markTranslationProgress(mediaId: string, done: number, requests: number, cached: number) {
+  markTranslationProgress(mediaId: string, done: number, requests: number) {
     const translation = this.#data.records[mediaId]?.translation;
     if (!translation) {
       return null;
     }
     translation.done = done;
     translation.requests = requests;
-    translation.cached = cached;
     translation.percent = translation.total > 0 ?
       Math.max(0, Math.min(99, Math.round((done / translation.total) * 100)))
       : 0;
@@ -293,7 +291,7 @@ export default class TranscriptionIndex {
 
   markTranslationDone(
     mediaId: string,
-    params: { subtitlePath: string; requests: number; cached: number }
+    params: { subtitlePath: string; requests: number }
   ) {
     return this.#patchTranslation(mediaId, {
       state: 'done',
@@ -301,7 +299,6 @@ export default class TranscriptionIndex {
       error: null,
       subtitlePath: params.subtitlePath,
       requests: params.requests,
-      cached: params.cached,
       completedAt: new Date().toISOString()
     });
   }

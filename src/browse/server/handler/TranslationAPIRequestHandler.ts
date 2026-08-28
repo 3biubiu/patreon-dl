@@ -4,7 +4,6 @@ import Basehandler from './BaseHandler.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type TranslationQueue from '../translation/TranslationQueue.js';
 import type TranslationSettingsStore from '../translation/TranslationSettingsStore.js';
-import type TranslationCache from '../translation/TranslationCache.js';
 import GeminiTranslator, { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_PROXY_URL } from '../translation/GeminiTranslator.js';
 import { DEFAULT_PROMPT } from '../translation/TranslationPrompt.js';
 import { type TranslationSettings } from '../../types/Translation.js';
@@ -23,20 +22,17 @@ export default class TranslationAPIRequestHandler extends Basehandler {
   #index: TranscriptionIndex;
   #queue: TranslationQueue;
   #settings: TranslationSettingsStore;
-  #cache: TranslationCache;
 
   constructor(
     index: TranscriptionIndex,
     queue: TranslationQueue,
     settings: TranslationSettingsStore,
-    cache: TranslationCache,
     logger?: Logger | null
   ) {
     super(logger);
     this.#index = index;
     this.#queue = queue;
     this.#settings = settings;
-    this.#cache = cache;
   }
 
   /** Why translation cannot run, or `null` when it can. */
@@ -73,6 +69,7 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       batchLines: this.#settings.getBatchLines(),
       disableThinking: this.#settings.getDisableThinking(),
       segmentation: this.#settings.getSegmentation(),
+      sourceSegmentation: this.#settings.getSourceSegmentation(),
       maxLineCjk: this.#settings.getMaxLineCjk(),
       maxLineLatin: this.#settings.getMaxLineLatin(),
       totalRequests: this.#settings.getTotalRequests(),
@@ -135,6 +132,9 @@ export default class TranslationAPIRequestHandler extends Basehandler {
     }
     if (body.segmentation !== undefined) {
       patch.segmentation = !!body.segmentation;
+    }
+    if (body.sourceSegmentation !== undefined) {
+      patch.sourceSegmentation = !!body.sourceSegmentation;
     }
     if (body.maxLineCjk !== undefined) {
       const value = Number(body.maxLineCjk);
@@ -219,18 +219,6 @@ export default class TranslationAPIRequestHandler extends Basehandler {
     const stopped = this.#queue.cancelAll();
     this.log('info', `Stopped ${stopped} translation(s) on request`);
     res.json({ stopped, records: this.#index.list() });
-  }
-
-  /**
-   * Empties the cache of already-translated batches.
-   *
-   * Only worth doing to force fresh translations, since the cache is what
-   * stops a retry paying twice for lines that already came back.
-   */
-  handleClearCacheRequest(_req: Request, res: Response) {
-    const removed = this.#cache.clear();
-    this.log('info', `Cleared ${removed} cached translation batch(es)`);
-    res.json({ removed });
   }
 
   /** Puts the running count of calls spent back to zero. */

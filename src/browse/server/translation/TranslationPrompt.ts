@@ -11,7 +11,6 @@
  * that says something odd degrades the wording rather than the structure.
  */
 
-import crypto from 'crypto';
 
 /** What the editable half starts as, and what "Reset" puts back. */
 export const DEFAULT_PROMPT = [
@@ -51,12 +50,4 @@ const SYSTEM_TEMPLATE = [
 export function buildSystemPrompt(prompt: string | null | undefined) {
   const preferences = (prompt || '').trim() || DEFAULT_PROMPT;
   return SYSTEM_TEMPLATE.replace('${prompt}', preferences);
-}
-
-/**
- * A short digest of the prompt in use, so the cache can tell translations made
- * under one set of preferences from another's.
- */
-export function promptFingerprint(prompt: string | null | undefined) {
-  return crypto.createHash('sha1').update(buildSystemPrompt(prompt)).digest('hex').slice(0, 12);
 }

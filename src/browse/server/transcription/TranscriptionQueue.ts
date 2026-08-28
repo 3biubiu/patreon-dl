@@ -7,7 +7,9 @@ import AudioExtractor, { snapToSpliceGrid } from './AudioExtractor.js';
 import VoiceActivityDetector, { type SpeechInterval, type TimeRange, type VADOptions } from './VoiceActivityDetector.js';
 import { TranscriptionError, type Transcriber } from './Transcriber.js';
 import type TranscriptionIndex from './TranscriptionIndex.js';
-import { buildSRT, filterHallucinations, type Segment } from './SubtitleBuilder.js';
+import { buildSRT, type Segment } from './SubtitleBuilder.js';
+import { type Word } from './CaptionAssembler.js';
+import type SentenceSplitter from './SentenceSplitter.js';
 
 /**
  * Most audio sent in one request. The endpoint's upstreams give up after 60
@@ -32,15 +34,6 @@ const MIN_CLIP_SECONDS = 30;
 const SPLIT_TOLERANCE = 0.25;
 /** Detection is fast relative to upload, so it owns only the first slice. */
 const DETECT_SHARE = 0.1;
-/**
- * Shortest a caption may be held on screen.
- *
- * Only ever reached for by a caption whose audio ran up to the edge of the
- * speech it was found in, and never past that edge, so a caption still cannot
- * outlast the talking it belongs to. Overlap with whatever comes next is
- * trimmed when the file is written.
- */
-const MIN_CAPTION_SECONDS = 0.8;
 
 interface QueueEntry {
   mediaId: string;
@@ -86,6 +79,7 @@ export default class TranscriptionQueue {
   #current: QueueEntry | null;
   #draining: boolean;
   #onFinished: ((mediaId: string, succeeded: boolean) => void) | null;
+  #splitter: { splitter: SentenceSplitter; enabled: () => boolean } | null;
 
   constructor(
     dataDir: string,
@@ -107,6 +101,20 @@ export default class TranscriptionQueue {
     this.#current = null;
     this.#draining = false;
     this.#onFinished = null;
+    this.#splitter = null;
+  }
+
+  /**
+   * Who re-cuts the captions before the subtitle is written, and whether they
+   * are wanted right now.
+   *
+   * Set rather than injected, for the same reason `setOnFinished` is: the
+   * splitter spends the translation key, so it is assembled with the rest of
+   * the translation pieces, and this class knowing about them would be a
+   * cycle.
+   */
+  setSentenceSplitter(splitter: SentenceSplitter, enabled: () => boolean) {
+    this.#splitter = { splitter, enabled };
   }
 
   /**
@@ -287,6 +295,7 @@ export default class TranscriptionQueue {
       crypto.createHash('sha1').update(mediaId).digest('hex').slice(0, 12)
     );
     const collected: Segment[] = [];
+    const collectedWords: Word[] = [];
     let language: string | null = null;
     let cost = 0;
     let doneSeconds = 0;
@@ -301,6 +310,7 @@ export default class TranscriptionQueue {
         // knows which pieces it was spliced from, so it maps its own
         // timestamps back before handing them over.
         collected.push(...result.segments);
+        collectedWords.push(...result.words);
         // Pin the language after the first clip that identifies one, so a
         // later clip of mostly silence cannot come back as another language.
         if (!language && result.language) {
@@ -318,28 +328,52 @@ export default class TranscriptionQueue {
       fs.rmSync(workDir, { recursive: true, force: true });
     }
 
-    this.#index.markStage(mediaId, 'writing');
-    const { kept, rejected } = filterHallucinations(collected);
-    if (rejected.length > 0) {
-      const tally = rejected.reduce<Record<string, number>>((counts, r) => {
-        counts[r.reason] = (counts[r.reason] || 0) + 1;
-        return counts;
-      }, {});
-      this.log('debug', `Dropped ${rejected.length} of ${collected.length} segments:`, tally);
-    }
-    if (kept.length === 0) {
-      throw Error('Every segment looked like a Whisper artefact, so no subtitle was written');
+    // Whatever came back is what gets written. Nothing here second-guesses
+    // the transcriber: the detector already decides what it is given, and a
+    // filter on top of that was throwing away real lines - short answers
+    // repeated through a conversation, a line delivered slowly - to catch
+    // artefacts that cutting the silence had mostly stopped producing.
+    if (collected.length === 0) {
+      throw Error('The transcriber returned no segments, so no subtitle was written');
     }
 
-    const srt = buildSRT(kept);
+    // Where the captions are cut is a separate question from what they say,
+    // and the only one worth another model's opinion. It never changes the
+    // text - see `SentenceSplitter` - and a failure leaves the captions the
+    // assembler drew rather than failing a transcription already paid for.
+    let captions = collected;
+    if (this.#splitter?.enabled() && this.#splitter.splitter.isConfigured()) {
+      this.#index.markStage(mediaId, 'segmenting');
+      captions = await this.#splitter.splitter.split(collected, collectedWords, signal);
+    }
+
+    this.#index.markStage(mediaId, 'writing');
+    const srt = buildSRT(captions);
     const lang = language || 'en';
     const outFile = path.resolve(
       path.dirname(videoPath),
       `${path.basename(videoPath, path.extname(videoPath))}.${lang}.srt`
     );
     fs.writeFileSync(outFile, srt, 'utf8');
+
+    // The words, on the video's own timeline, beside the subtitle they were
+    // cut into. Written because they are the only record precise enough to cut
+    // the captions differently later - re-deriving them means paying for the
+    // transcription again - and because a caption file cannot carry them.
+    const wordsFile = `${outFile.slice(0, -4)}.words.json`;
+    fs.writeFileSync(wordsFile, JSON.stringify(
+      collectedWords.map((word) => ({
+        t: word.text,
+        // Milliseconds, as integers: a float per word triples the file for
+        // precision no subtitle can show.
+        s: Math.round(word.start * 1000),
+        e: Math.round(word.end * 1000)
+      }))
+    ), 'utf8');
+
     this.log('info',
-      `Wrote "${path.basename(outFile)}" - ${kept.length} captions` +
+      `Wrote "${path.basename(outFile)}" - ${captions.length} captions ` +
+      `from ${collectedWords.length} timed words` +
       (cost ? `, $${cost.toFixed(4)}` : '')
     );
 
@@ -360,7 +394,12 @@ export default class TranscriptionQueue {
     language: string | null,
     workDir: string,
     signal: AbortSignal
-  ): Promise<{ segments: Segment[]; language: string | null; cost: number | null }> {
+  ): Promise<{
+    segments: Segment[];
+    words: Word[];
+    language: string | null;
+    cost: number | null;
+  }> {
     const duration = this.#clipDuration(clip);
     const span = this.#clipSpan(clip);
     // Asked per clip rather than once per job, so a provider changed in the
@@ -376,8 +415,10 @@ export default class TranscriptionQueue {
       return {
         // What comes back is on the spliced file's timeline, where the
         // silence between the pieces does not exist. It goes home through
-        // the same piece list the file was cut with.
+        // the same piece list the file was cut with - words by the same route
+        // as captions, so the two stay on one timeline.
         segments: result.segments.map((segment) => this.#toSourceTime(clip, segment)),
+        words: result.words.map((word) => this.#toSourceTime(clip, word)),
         language: result.language,
         cost: result.cost
       };
@@ -411,6 +452,7 @@ export default class TranscriptionQueue {
         // Each half mapped its own timestamps on the way out, so joining them
         // is just putting the two lists end to end.
         segments: [ ...head.segments, ...tail.segments ],
+        words: [ ...head.words, ...tail.words ],
         language: head.language || tail.language,
         cost: (head.cost || 0) + (tail.cost || 0) || null
       };
@@ -547,7 +589,7 @@ export default class TranscriptionQueue {
    * Long captions were the ones it happened to, since a long one is what
    * reaches across a seam in the first place.
    */
-  #toSourceTime(clip: Clip, segment: Segment): Segment {
+  #toSourceTime<T extends { start: number; end: number }>(clip: Clip, segment: T): T {
     const ranges = this.#pieceRanges(clip);
     let home = ranges[ranges.length - 1];
     let mostOverlap = -Infinity;
@@ -567,10 +609,7 @@ export default class TranscriptionQueue {
       Math.min(Math.max(at - home.from, 0), home.to - home.from);
 
     const start = toPieceTime(segment.start);
-    const end = Math.min(
-      home.piece.end,
-      Math.max(toPieceTime(segment.end), start + MIN_CAPTION_SECONDS)
-    );
+    const end = toPieceTime(segment.end);
     return { ...segment, start, end: Math.max(start, end) };
   }
 

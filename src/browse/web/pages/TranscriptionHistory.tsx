@@ -43,6 +43,7 @@ const STATE_COLOR: Record<TranscriptionState, string> = {
 const STAGE_LABEL: Record<TranscriptionStage, string> = {
   detecting: 'Finding speech',
   transcribing: 'Transcribing',
+  segmenting: 'Splitting sentences',
   writing: 'Writing subtitles'
 };
 
@@ -291,7 +292,6 @@ function TranscriptionHistory() {
             translation.state === 'done' ?
               <span className="transcription-history__stage">
                 {translation.requests} call{translation.requests === 1 ? '' : 's'}
-                {translation.cached > 0 ? ` + ${translation.cached} cached` : ''}
               </span>
               : null
           }

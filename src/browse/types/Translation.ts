@@ -40,8 +40,6 @@ export interface TranslationProgress {
    * number that matters and it is shown rather than a dollar figure.
    */
   requests: number;
-  /** Calls the cache saved, so the count above can be read in context. */
-  cached: number;
   requestedAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -97,6 +95,12 @@ export interface TranslationSettings {
    * transcription's own subtitle is never touched.
    */
   segmentation: boolean;
+  /**
+   * Whether the source transcript's captions are re-cut by the model before
+   * the subtitle is written. Unlike `segmentation` this costs calls, and it
+   * changes the file the transcription itself produces.
+   */
+  sourceSegmentation: boolean;
   /** Longest Chinese line, in characters. */
   maxLineCjk: number;
   /** Longest line for a language written with spaces, in words. */

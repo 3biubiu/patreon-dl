@@ -25,9 +25,17 @@ export interface VADOptions {
   threshold?: number;
   /** Silence shorter than this does not end a speech run, in seconds. */
   minSilenceDuration?: number;
-  /** Speech shorter than this is discarded, in seconds. */
+  /** Speech shorter than this is discarded, in seconds. Zero discards nothing. */
   minSpeechDuration?: number;
-  /** Longest run Silero will report before forcing a break, in seconds. */
+  /**
+   * Longest run Silero will report before forcing a break, in seconds.
+   *
+   * faster-whisper leaves this unbounded. sherpa-onnx holds the run in memory
+   * and so needs a finite ceiling, but it is set high enough that ordinary
+   * speech never reaches it - the silence rule ends a run long before this
+   * does - and a forced break costs nothing either way: the two halves are
+   * padded and merged straight back together below.
+   */
   maxSpeechDuration?: number;
   /**
    * Each interval is widened by this much at both ends, in seconds.
@@ -55,20 +63,27 @@ export interface VADOptions {
 }
 
 const DEFAULTS: Required<VADOptions> = {
-  // The first four mirror the settings of the Python service this was
-  // modelled on, which has run against this content for a long time.
+  // faster-whisper's own VAD defaults, which is the bar to meet rather than
+  // beat. A miss here is not a caption the model gets wrong, it is audio the
+  // model never hears: the detector decides what is uploaded, so everything
+  // it rejects is gone for good. Tuned to let things through, not to be tidy.
+  //
+  // In particular `minSpeechDuration` is zero and not a quarter of a second.
+  // The pair of a short silence rule and a minimum speech length was what
+  // swallowed words: a breath split a sentence in two, and the halves were
+  // then short enough to be thrown away.
   threshold: 0.5,
-  minSilenceDuration: 0.5,
-  minSpeechDuration: 0.25,
-  maxSpeechDuration: 30,
-  speechPad: 0.3,
+  minSilenceDuration: 2,
+  minSpeechDuration: 0,
+  maxSpeechDuration: 300,
+  speechPad: 0.4,
   mergeGap: 5
 };
 
 /** Silero's frame size at 16 kHz. Not a free parameter. */
 const WINDOW_SIZE = 512;
 /** Ceiling for sherpa-onnx's internal buffer; must exceed maxSpeechDuration. */
-const BUFFER_SECONDS = 90;
+const BUFFER_SECONDS = 360;
 
 /**
  * Finds the parts of a video that contain speech, so that the silence in

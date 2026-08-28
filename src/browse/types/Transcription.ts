@@ -15,7 +15,7 @@ export type TranscriptionState =
   | 'cancelled';
 
 /** Which part of a running job is under way. */
-export type TranscriptionStage = 'detecting' | 'transcribing' | 'writing';
+export type TranscriptionStage = 'detecting' | 'transcribing' | 'segmenting' | 'writing';
 
 /**
  * One video's transcription, from the moment it is asked for to whatever

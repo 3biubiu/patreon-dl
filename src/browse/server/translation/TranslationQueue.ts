@@ -5,12 +5,10 @@ import type Logger from '../../../utils/logging/Logger.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type GeminiTranslator from './GeminiTranslator.js';
 import { TranslationError, type TranslatableLine } from './GeminiTranslator.js';
-import type TranslationCache from './TranslationCache.js';
 import type TranslationSettingsStore from './TranslationSettingsStore.js';
 import { buildTranslatedSRT, parseSRT, type Cue } from './SubtitleParser.js';
 import { buildSRT, type Segment } from '../transcription/SubtitleBuilder.js';
 import { segmentTranscript } from './SubtitleSegmenter.js';
-import { promptFingerprint } from './TranslationPrompt.js';
 import { TARGET_LANGUAGE } from '../../types/Translation.js';
 
 /** Source lines from the previous batch given to the next one for continuity. */
@@ -48,7 +46,6 @@ export default class TranslationQueue {
   #dataDir: string;
   #translator: GeminiTranslator;
   #index: TranscriptionIndex;
-  #cache: TranslationCache;
   #settings: TranslationSettingsStore;
   #logger?: Logger | null;
 
@@ -60,14 +57,12 @@ export default class TranslationQueue {
     dataDir: string,
     translator: GeminiTranslator,
     index: TranscriptionIndex,
-    cache: TranslationCache,
     settings: TranslationSettingsStore,
     logger?: Logger | null
   ) {
     this.#dataDir = dataDir;
     this.#translator = translator;
     this.#index = index;
-    this.#cache = cache;
     this.#settings = settings;
     this.#logger = logger;
     this.#pending = [];
@@ -257,7 +252,6 @@ export default class TranslationQueue {
 
     const translations = new Map<number, string>();
     let requests = 0;
-    let cached = 0;
     let done = 0;
 
     for (const batch of batches) {
@@ -270,7 +264,6 @@ export default class TranslationQueue {
       try {
         const result = await this.#translateBatch(batch, context, signal);
         requests += result.requests;
-        cached += result.cached;
         for (const [ index, text ] of result.translations) {
           translations.set(index, text);
         }
@@ -283,7 +276,7 @@ export default class TranslationQueue {
         throw error;
       }
       done += batch.length;
-      this.#index.markTranslationProgress(mediaId, done, requests, cached);
+      this.#index.markTranslationProgress(mediaId, done, requests);
     }
 
     this.#settings.addRequests(requests);
@@ -304,13 +297,12 @@ export default class TranslationQueue {
     fs.writeFileSync(outFile, srt, 'utf8');
     this.log('info',
       `Wrote "${path.basename(outFile)}" - ${cues.length} captions, ` +
-      `${requests} request(s)${cached ? `, ${cached} from cache` : ''}`
+      `${requests} request(s)`
     );
 
     this.#index.markTranslationDone(mediaId, {
       subtitlePath: path.relative(this.#dataDir, outFile),
-      requests,
-      cached
+      requests
     });
   }
 
@@ -354,38 +346,27 @@ export default class TranslationQueue {
   }
 
   /**
-   * Translates one batch, through the cache, repairing or splitting when the
-   * answer comes back short.
+   * Translates one batch, repairing or splitting when the answer comes back
+   * short.
    *
    * Everything here is counted in calls, because that is what Gemini bills by:
-   * a cache hit is none, a clean batch is one, a batch missing its tail is two,
-   * and a batch too large for the model to answer is split rather than sent
-   * again whole.
+   * a clean batch is one, a batch missing its tail is two, and a batch too
+   * large for the model to answer is split rather than sent again whole.
+   *
+   * Every batch is sent. There was a cache here, keyed by the batch text and
+   * the settings that shape the answer, so a retry did not pay twice - but a
+   * re-run is nearly always asked for because something about the last answer
+   * was wrong, and it came back with yesterday's wording for every change the
+   * key could not see. Paying for it again is the point of asking.
    */
   async #translateBatch(
     batch: Cue[],
     context: string[],
     signal: AbortSignal
-  ): Promise<{ translations: Map<number, string>; requests: number; cached: number }> {
-    const key = this.#cache.key({
-      model: this.#translator.model,
-      targetLanguage: TARGET_LANGUAGE,
-      promptFingerprint: promptFingerprint(this.#settings.getPrompt()),
-      texts: batch.map((cue) => cue.text)
-    });
-    const hit = this.#cache.get(key, batch.length);
-    if (hit) {
-      return {
-        translations: new Map(batch.map((cue, i) => [ cue.index, hit[i] ])),
-        requests: 0,
-        cached: 1
-      };
-    }
-
+  ): Promise<{ translations: Map<number, string>; requests: number }> {
     const lines: TranslatableLine[] = batch.map((cue) => ({ i: cue.index, t: cue.text }));
     let translations: Map<number, string>;
     let requests: number;
-    const cached = 0;
     try {
       const result = await this.#translator.translateBatch(lines, context, signal);
       translations = result.translations;
@@ -413,8 +394,7 @@ export default class TranslationQueue {
       return {
         translations: new Map([ ...first.translations, ...second.translations ]),
         // The failed attempts were paid for too, so they are added back in.
-        requests: error.requests + first.requests + second.requests,
-        cached: first.cached + second.cached
+        requests: error.requests + first.requests + second.requests
       };
     }
 
@@ -444,13 +424,7 @@ export default class TranslationQueue {
       }
     }
 
-    // Only a complete batch is cached: caching one with holes would make a
-    // later retry re-read the same holes instead of filling them.
-    if (batch.every((cue) => translations.has(cue.index))) {
-      this.#cache.set(key, batch.map((cue) => translations.get(cue.index) as string));
-    }
-
-    return { translations, requests, cached };
+    return { translations, requests };
   }
 
   /**

@@ -44,6 +44,12 @@ interface SettingsFile {
    * - see `SubtitleSegmenter` - and only ever touches the translated file.
    */
   segmentation: boolean;
+  /**
+   * Whether the source transcript is re-cut by the model as it is
+   * transcribed. Costs calls, unlike `segmentation`, and is what the
+   * transcription's own subtitle is cut by when it is on.
+   */
+  sourceSegmentation: boolean;
   maxLineCjk: number | null;
   maxLineLatin: number | null;
   /** Calls spent since this counter was last reset. */
@@ -60,6 +66,7 @@ const EMPTY: SettingsFile = {
   batchLines: null,
   disableThinking: false,
   segmentation: true,
+  sourceSegmentation: true,
   maxLineCjk: null,
   maxLineLatin: null,
   totalRequests: 0
@@ -108,6 +115,7 @@ export default class TranslationSettingsStore {
           disableThinking: !!parsed.disableThinking,
           // Absent in files written before this existed, and on by default.
           segmentation: parsed.segmentation ?? true,
+          sourceSegmentation: parsed.sourceSegmentation ?? true,
           maxLineCjk: parsed.maxLineCjk || null,
           maxLineLatin: parsed.maxLineLatin || null,
           totalRequests: parsed.totalRequests || 0
@@ -185,6 +193,10 @@ export default class TranslationSettingsStore {
     return this.#data.segmentation;
   }
 
+  getSourceSegmentation(): boolean {
+    return this.#data.sourceSegmentation;
+  }
+
   getMaxLineCjk(): number {
     return this.#data.maxLineCjk || DEFAULT_SEGMENTER_OPTIONS.maxCjk;
   }
@@ -229,6 +241,7 @@ export default class TranslationSettingsStore {
     batchLines?: number | null;
     disableThinking?: boolean;
     segmentation?: boolean;
+    sourceSegmentation?: boolean;
     maxLineCjk?: number | null;
     maxLineLatin?: number | null;
   }) {
@@ -263,6 +276,9 @@ export default class TranslationSettingsStore {
     }
     if (params.segmentation !== undefined) {
       this.#data.segmentation = params.segmentation;
+    }
+    if (params.sourceSegmentation !== undefined) {
+      this.#data.sourceSegmentation = params.sourceSegmentation;
     }
     if (params.maxLineCjk !== undefined) {
       this.#data.maxLineCjk = params.maxLineCjk === null ?

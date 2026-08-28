@@ -8,6 +8,7 @@
  */
 
 import { type AudioFormat } from './AudioExtractor.js';
+import { type Word } from './CaptionAssembler.js';
 import { type Segment } from './SubtitleBuilder.js';
 
 export class TranscriptionError extends Error {
@@ -25,6 +26,18 @@ export class TranscriptionError extends Error {
 
 export interface TranscribeResult {
   segments: Segment[];
+  /**
+   * Every word the provider timed, in order and on the same timeline as
+   * `segments`.
+   *
+   * Required, not optional. Both providers are asked for word timestamps and
+   * a response without them fails the clip rather than falling back to
+   * whatever captions the provider would have drawn itself: the point of
+   * asking is that a caption can then be cut anywhere, and a path that
+   * quietly returns captions-only would put that back to an estimate without
+   * anyone noticing which clip it happened to.
+   */
+  words: Word[];
   language: string | null;
   /** Seconds of audio billed, where the provider says. */
   seconds: number | null;

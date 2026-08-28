@@ -5,7 +5,7 @@ import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
 import { createProxyAgentFor } from '../../../utils/Proxy.js';
 import { MP3_FORMAT } from './AudioExtractor.js';
-import { type Segment } from './SubtitleBuilder.js';
+import { toSegments, type Word } from './CaptionAssembler.js';
 import { TranscriptionError, type TranscribeResult, type Transcriber } from './Transcriber.js';
 
 export const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
@@ -52,20 +52,6 @@ const MAX_ATTEMPTS = 3;
 const FILE_ACTIVE_TIMEOUT_MS = 60_000;
 const FILE_POLL_INTERVAL_MS = 1000;
 
-/**
- * Where one caption ends and the next begins, given a list of words.
- *
- * Gemini times words, not captions, so the captions have to be made here. The
- * thresholds are deliberately close to what Whisper produces on its own, since
- * everything downstream - the hallucination filter, the translator's
- * re-cutting, the seam mapping - was built against segments of that size.
- */
-const SPLIT_GAP_SECONDS = 0.6;
-const MAX_SEGMENT_SECONDS = 8;
-const MAX_SEGMENT_CHARS = 84;
-
-const SENTENCE_END = /[.!?。！？…]["'’”』」）)\]]*\s*$/u;
-
 export interface GeminiSettings {
   apiKey: string | null;
   model: string;
@@ -74,12 +60,6 @@ export interface GeminiSettings {
   proxyUrl: string | null;
   /** Terms to steer the model towards. Empty is fine - it simply adds no bias. */
   vocabulary: string[];
-}
-
-interface Word {
-  text: string;
-  start: number;
-  end: number;
 }
 
 interface UploadedFile {
@@ -143,80 +123,6 @@ export function collectWords(json: any): { text: string; words: Word[] } {
   const text = texts.join('').trim() ||
     (typeof json?.output_text === 'string' ? json.output_text : '');
   return { text, words };
-}
-
-/**
- * Where each word sits in the transcript, or null when they cannot all be
- * found in order.
- *
- * Worth doing because it lets a caption's text be a slice of the transcript
- * rather than its words glued back together: the punctuation, spacing and
- * casing stay exactly as the model wrote them, and a language written without
- * spaces does not have any inserted.
- */
-function alignWords(text: string, words: Word[]): number[] | null {
-  const starts: number[] = [];
-  let cursor = 0;
-  for (const word of words) {
-    const at = text.indexOf(word.text, cursor);
-    if (at < 0) {
-      return null;
-    }
-    starts.push(at);
-    cursor = at + word.text.length;
-  }
-  return starts;
-}
-
-/** Groups timed words into captions. */
-export function toSegments(text: string, words: Word[]): Segment[] {
-  if (words.length === 0) {
-    return [];
-  }
-  const starts = alignWords(text, words);
-
-  /** The transcript from word `i` up to the start of word `j + 1`. */
-  const sliceText = (i: number, j: number) => {
-    if (!starts) {
-      // Nothing to slice against, so the words are joined instead. A space
-      // between them is wrong for Chinese, but a response that could not be
-      // aligned is already an odd one - a readable caption beats none.
-      return words.slice(i, j + 1).map((w) => w.text).join(' ').trim();
-    }
-    const from = starts[i];
-    const to = j + 1 < starts.length ? starts[j + 1] : text.length;
-    return text.slice(from, to).trim();
-  };
-
-  const segments: Segment[] = [];
-  let start = 0;
-  for (let i = 0; i < words.length; i++) {
-    const isLast = i === words.length - 1;
-    const body = sliceText(start, i);
-    const gapAfter = isLast ? Infinity : words[i + 1].start - words[i].end;
-    const duration = words[i].end - words[start].start;
-    const shouldBreak =
-      isLast ||
-      SENTENCE_END.test(body) ||
-      gapAfter >= SPLIT_GAP_SECONDS ||
-      duration >= MAX_SEGMENT_SECONDS ||
-      body.length >= MAX_SEGMENT_CHARS;
-    if (!shouldBreak) {
-      continue;
-    }
-    if (body) {
-      segments.push({
-        start: words[start].start,
-        end: words[i].end,
-        text: body,
-        // Gemini reports no per-word confidence, and the hallucination filter
-        // reads a missing one as "no opinion" rather than as a bad score.
-        avgLogprob: null
-      });
-    }
-    start = i + 1;
-  }
-  return segments;
 }
 
 /**
@@ -403,6 +309,7 @@ export default class GeminiTranscriber implements Transcriber {
       }
       return {
         segments: toSegments(text, words),
+        words,
         // Gemini does not report which language it settled on, so what was
         // asked for is all there is to pass on.
         language: language || null,

@@ -285,10 +285,6 @@ class _Router {
       this.#handlers.translation.handleSaveSettingsRequest(req, res)
     );
 
-    this.#router.delete('/api/translation/cache', requireAdmin, (req, res) =>
-      this.#handlers.translation.handleClearCacheRequest(req, res)
-    );
-
     this.#router.post('/api/translation/requests/reset', requireAdmin, (req, res) =>
       this.#handlers.translation.handleResetRequestCountRequest(req, res)
     );
@@ -442,7 +438,7 @@ export function getRouter(
       logger
     ),
     translation: new TranslationAPIRequestHandler(
-      transcription.index, translation.queue, translation.settings, translation.cache,
+      transcription.index, translation.queue, translation.settings,
       logger
     )
   }, authStore, quotaStore, db).router;

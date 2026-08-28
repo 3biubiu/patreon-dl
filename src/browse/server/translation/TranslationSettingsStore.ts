@@ -3,6 +3,7 @@ import path from 'path';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import { type Logger } from '../../../utils/logging/index.js';
 import { DEFAULT_PROXY_URL } from './GeminiTranslator.js';
+import { DEFAULT_SEGMENTER_OPTIONS, MAX_CJK_RANGE, MAX_LATIN_RANGE } from './SubtitleSegmenter.js';
 
 /**
  * Source characters aimed at per call, and the ceiling on lines per call.
@@ -38,6 +39,13 @@ interface SettingsFile {
   batchCharacters: number | null;
   batchLines: number | null;
   disableThinking: boolean;
+  /**
+   * Whether the Chinese file's lines are re-cut for readability. Costs nothing
+   * - see `SubtitleSegmenter` - and only ever touches the translated file.
+   */
+  segmentation: boolean;
+  maxLineCjk: number | null;
+  maxLineLatin: number | null;
   /** Calls spent since this counter was last reset. */
   totalRequests: number;
 }
@@ -51,6 +59,9 @@ const EMPTY: SettingsFile = {
   batchCharacters: null,
   batchLines: null,
   disableThinking: false,
+  segmentation: true,
+  maxLineCjk: null,
+  maxLineLatin: null,
   totalRequests: 0
 };
 
@@ -95,6 +106,10 @@ export default class TranslationSettingsStore {
           batchCharacters: parsed.batchCharacters || null,
           batchLines: parsed.batchLines || null,
           disableThinking: !!parsed.disableThinking,
+          // Absent in files written before this existed, and on by default.
+          segmentation: parsed.segmentation ?? true,
+          maxLineCjk: parsed.maxLineCjk || null,
+          maxLineLatin: parsed.maxLineLatin || null,
           totalRequests: parsed.totalRequests || 0
         }, logger);
       }
@@ -166,6 +181,18 @@ export default class TranslationSettingsStore {
     return this.#data.disableThinking;
   }
 
+  getSegmentation(): boolean {
+    return this.#data.segmentation;
+  }
+
+  getMaxLineCjk(): number {
+    return this.#data.maxLineCjk || DEFAULT_SEGMENTER_OPTIONS.maxCjk;
+  }
+
+  getMaxLineLatin(): number {
+    return this.#data.maxLineLatin || DEFAULT_SEGMENTER_OPTIONS.maxLatin;
+  }
+
   getTotalRequests(): number {
     return this.#data.totalRequests;
   }
@@ -201,6 +228,9 @@ export default class TranslationSettingsStore {
     batchCharacters?: number | null;
     batchLines?: number | null;
     disableThinking?: boolean;
+    segmentation?: boolean;
+    maxLineCjk?: number | null;
+    maxLineLatin?: number | null;
   }) {
     if (params.apiKey !== undefined) {
       this.#data.apiKey = params.apiKey || null;
@@ -230,6 +260,19 @@ export default class TranslationSettingsStore {
     }
     if (params.disableThinking !== undefined) {
       this.#data.disableThinking = params.disableThinking;
+    }
+    if (params.segmentation !== undefined) {
+      this.#data.segmentation = params.segmentation;
+    }
+    if (params.maxLineCjk !== undefined) {
+      this.#data.maxLineCjk = params.maxLineCjk === null ?
+        null
+        : clamp(params.maxLineCjk, MAX_CJK_RANGE);
+    }
+    if (params.maxLineLatin !== undefined) {
+      this.#data.maxLineLatin = params.maxLineLatin === null ?
+        null
+        : clamp(params.maxLineLatin, MAX_LATIN_RANGE);
     }
     this.#save();
   }

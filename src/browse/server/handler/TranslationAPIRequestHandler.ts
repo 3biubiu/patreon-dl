@@ -72,6 +72,9 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       batchCharacters: this.#settings.getBatchCharacters(),
       batchLines: this.#settings.getBatchLines(),
       disableThinking: this.#settings.getDisableThinking(),
+      segmentation: this.#settings.getSegmentation(),
+      maxLineCjk: this.#settings.getMaxLineCjk(),
+      maxLineLatin: this.#settings.getMaxLineLatin(),
       totalRequests: this.#settings.getTotalRequests(),
       key: null,
       keyError: null
@@ -129,6 +132,17 @@ export default class TranslationAPIRequestHandler extends Basehandler {
     }
     if (body.disableThinking !== undefined) {
       patch.disableThinking = !!body.disableThinking;
+    }
+    if (body.segmentation !== undefined) {
+      patch.segmentation = !!body.segmentation;
+    }
+    if (body.maxLineCjk !== undefined) {
+      const value = Number(body.maxLineCjk);
+      patch.maxLineCjk = Number.isFinite(value) ? value : null;
+    }
+    if (body.maxLineLatin !== undefined) {
+      const value = Number(body.maxLineLatin);
+      patch.maxLineLatin = Number.isFinite(value) ? value : null;
     }
 
     if (body.apiKey !== undefined) {

@@ -11,8 +11,31 @@ export interface Cue {
   index: number;
   /** The timing line exactly as it was, so nothing is lost re-rendering it. */
   timing: string;
+  /** Seconds, read from `timing`. Needed only when the lines are re-cut. */
+  start: number;
+  end: number;
   /** The caption, with its own line breaks kept. */
   text: string;
+}
+
+/** `HH:MM:SS,mmm` or the WebVTT spelling with a dot. Hours may be absent. */
+const TIMESTAMP = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g;
+
+/**
+ * The two times in a timing line, in seconds.
+ *
+ * A line that cannot be read gives zeroes rather than throwing: the 1:1 path
+ * does not need these at all, and a file with one odd timing is still worth
+ * translating.
+ */
+function parseTiming(timing: string): { start: number; end: number } {
+  const found = [ ...timing.matchAll(TIMESTAMP) ].map((m) =>
+    Number(m[1]) * 3600 +
+    Number(m[2]) * 60 +
+    Number(m[3]) +
+    Number(m[4].padEnd(3, '0')) / 1000
+  );
+  return { start: found[0] ?? 0, end: found[1] ?? found[0] ?? 0 };
 }
 
 /**
@@ -45,7 +68,8 @@ export function parseSRT(content: string): Cue[] {
     if (!text) {
       continue;
     }
-    cues.push({ index: cues.length + 1, timing: match[1].trim(), text });
+    const timing = match[1].trim();
+    cues.push({ index: cues.length + 1, timing, ...parseTiming(timing), text });
   }
   return cues;
 }

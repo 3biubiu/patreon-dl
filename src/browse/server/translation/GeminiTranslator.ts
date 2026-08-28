@@ -68,13 +68,6 @@ export interface TranslatorSettings {
 }
 
 /**
- * The undici dispatcher for `proxyUrl`, or `undefined` to go direct.
- *
- * A bad proxy URL is not worth failing the request over before the request has
- * been tried: it is reported and the call goes direct, which produces the
- * clearer of the two errors.
- */
-/**
  * What actually went wrong with a request.
  *
  * undici reports every transport failure as "fetch failed" and puts the reason
@@ -91,6 +84,13 @@ function describeFetchError(error: unknown): string {
   return detail && detail !== error.message ? `${error.message} (${detail})` : error.message;
 }
 
+/**
+ * The undici dispatcher for `proxyUrl`, or `undefined` to go direct.
+ *
+ * A bad proxy URL is not worth failing the request over before the request has
+ * been tried: it is reported and the call goes direct, which produces the
+ * clearer of the two errors.
+ */
 function dispatcherFor(proxyUrl: string | null | undefined, logger?: Logger | null) {
   if (!proxyUrl) {
     return undefined;

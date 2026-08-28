@@ -537,6 +537,9 @@ class API {
     batchCharacters?: number;
     batchLines?: number;
     disableThinking?: boolean;
+    segmentation?: boolean;
+    maxLineCjk?: number;
+    maxLineLatin?: number;
   }): Promise<TranslationSettings> {
     const data = await readJSON(await apiFetch('/api/translation/settings', {
       method: 'PUT',

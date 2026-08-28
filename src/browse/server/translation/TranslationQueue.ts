@@ -8,6 +8,8 @@ import { TranslationError, type TranslatableLine } from './GeminiTranslator.js';
 import type TranslationCache from './TranslationCache.js';
 import type TranslationSettingsStore from './TranslationSettingsStore.js';
 import { buildTranslatedSRT, parseSRT, type Cue } from './SubtitleParser.js';
+import { buildSRT, type Segment } from '../transcription/SubtitleBuilder.js';
+import { segmentTranscript } from './SubtitleSegmenter.js';
 import { promptFingerprint } from './TranslationPrompt.js';
 import { TARGET_LANGUAGE } from '../../types/Translation.js';
 
@@ -296,7 +298,10 @@ export default class TranslationQueue {
       this.log('warn', `${missing} of ${cues.length} captions were left untranslated`);
     }
 
-    fs.writeFileSync(outFile, buildTranslatedSRT(cues, translations), 'utf8');
+    const srt = this.#settings.getSegmentation() ?
+      this.#recut(cues, translations)
+      : buildTranslatedSRT(cues, translations);
+    fs.writeFileSync(outFile, srt, 'utf8');
     this.log('info',
       `Wrote "${path.basename(outFile)}" - ${cues.length} captions, ` +
       `${requests} request(s)${cached ? `, ${cached} from cache` : ''}`
@@ -307,6 +312,45 @@ export default class TranslationQueue {
       requests,
       cached
     });
+  }
+
+  /**
+   * Renders the translation with its lines re-cut for Chinese.
+   *
+   * The translation itself stays one line per original caption - that is what
+   * keeps the timings attached to the words they belong to - and the re-cutting
+   * happens here, afterwards, on text that is already in hand. It costs
+   * nothing: the punctuation Gemini returns and the silence between captions
+   * are both already known.
+   *
+   * Only the Chinese file is treated this way. The transcription's own subtitle
+   * is left exactly as it was written.
+   */
+  #recut(cues: Cue[], translations: Map<number, string>) {
+    // Written by this application, so the timings parse - but a file edited by
+    // hand might not, and re-cutting on times that all read as zero would put
+    // every caption at the start of the video.
+    const timed = cues.length > 0 && cues[cues.length - 1].end > cues[0].start;
+    if (!timed) {
+      this.log('warn', 'Could not read the timings, so the lines are left as they were');
+      return buildTranslatedSRT(cues, translations);
+    }
+    const source: Segment[] = cues.map((cue) => ({
+      start: cue.start,
+      end: cue.end,
+      // A line that came back untranslated keeps its original, as it does on
+      // the plain path - better read in the source language than not at all.
+      text: (translations.get(cue.index) || cue.text).trim()
+    }));
+    const { segments, hardRuns } = segmentTranscript(source, {
+      maxCjk: this.#settings.getMaxLineCjk(),
+      maxLatin: this.#settings.getMaxLineLatin()
+    });
+    this.log('debug',
+      `Re-cut ${cues.length} captions into ${segments.length}` +
+      (hardRuns.length > 0 ? `; ${hardRuns.length} stretch(es) had no punctuation to cut on` : '')
+    );
+    return buildSRT(segments);
   }
 
   /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Popconfirm, Space, Switch, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Popconfirm, Space, Switch, Tag } from "antd";
 import { useAPI } from "../../contexts/APIProvider";
 import { LoadingBlock } from "../Loading";
 import { type TranslationSettings as Settings } from "../../../types/Translation";
@@ -12,6 +12,9 @@ interface FormValues {
   batchCharacters: number;
   batchLines: number;
   disableThinking: boolean;
+  segmentation: boolean;
+  maxLineCjk: number;
+  maxLineLatin: number;
 }
 
 /**
@@ -61,7 +64,10 @@ function TranslationSettingsPanel() {
       proxyUrl: result.proxyUrl,
       batchCharacters: result.batchCharacters,
       batchLines: result.batchLines,
-      disableThinking: result.disableThinking
+      disableThinking: result.disableThinking,
+      segmentation: result.segmentation,
+      maxLineCjk: result.maxLineCjk,
+      maxLineLatin: result.maxLineLatin
     });
   }, [ form ]);
 
@@ -103,7 +109,10 @@ function TranslationSettingsPanel() {
       proxyUrl: values.proxyUrl ?? '',
       batchCharacters: values.batchCharacters,
       batchLines: values.batchLines,
-      disableThinking: values.disableThinking
+      disableThinking: values.disableThinking,
+      segmentation: values.segmentation,
+      maxLineCjk: values.maxLineCjk,
+      maxLineLatin: values.maxLineLatin
     };
     // Left blank means "leave the stored key alone", not "clear it" - clearing
     // is its own button, so an edit to the model cannot wipe the key by
@@ -264,6 +273,40 @@ function TranslationSettingsPanel() {
             extra="Sends a zero thinking budget with each call. Faster and cheaper on models that support it, but a model that does not know the setting rejects the request outright - leave it off unless you know this model takes it."
           >
             <Switch />
+          </Form.Item>
+
+          <Divider size="small" />
+
+          <Form.Item
+            name="segmentation"
+            label="Re-cut the Chinese lines"
+            valuePropName="checked"
+            extra={
+              'A translation comes back one line per original caption, and an English caption ' +
+              'of a dozen words is a good deal more than a dozen Chinese characters. This puts ' +
+              'the translated text back into a stream and breaks it where a Chinese caption ' +
+              'should break - at full stops, commas and the pauses the speaker made, with the ' +
+              'lengths below used only to choose between them. It runs on text already in ' +
+              'hand and costs no calls. The subtitle the transcription wrote is never touched.'
+            }
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="maxLineCjk"
+            label="Longest Chinese line (characters)"
+            extra="Characters. A soft limit: a full stop still ends a line early, and a line still runs past a comma to reach a better break."
+          >
+            <InputNumber min={8} max={40} style={{ width: '12rem' }} />
+          </Form.Item>
+
+          <Form.Item
+            name="maxLineLatin"
+            label="Longest line in a spaced language (words)"
+            extra="Words. Used for a line that came back untranslated and kept its original, which is the one way English reaches this file."
+          >
+            <InputNumber min={5} max={30} style={{ width: '12rem' }} />
           </Form.Item>
 
           <Space>

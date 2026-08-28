@@ -92,6 +92,15 @@ export interface TranslationSettings {
   /** Ceiling on lines per call, whatever the characters come to. */
   batchLines: number;
   disableThinking: boolean;
+  /**
+   * Whether the Chinese file's lines are re-cut for readability. The
+   * transcription's own subtitle is never touched.
+   */
+  segmentation: boolean;
+  /** Longest Chinese line, in characters. */
+  maxLineCjk: number;
+  /** Longest line for a language written with spaces, in words. */
+  maxLineLatin: number;
   /** Calls spent since this counter was last reset. */
   totalRequests: number;
   key: TranslationKeyDescription | null;

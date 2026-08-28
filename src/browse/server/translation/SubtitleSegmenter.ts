@@ -1,0 +1,402 @@
+/**
+ * Re-cuts translated captions into readable subtitle lines.
+ *
+ * A translation comes back one line per original caption, because that is the
+ * only way the timings stay attached to the words they belong to. But an
+ * English caption of a dozen words becomes a good deal more than a dozen
+ * Chinese characters, and the line that was a comfortable width in the source
+ * is not one in the translation. This puts the translated text back into a
+ * stream and cuts it where a Chinese caption ought to break.
+ *
+ * The rule is punctuation and pauses first, length second. A boundary the
+ * speaker actually made - a full stop, a breath - is taken even when the line
+ * it ends is short, and the length settings only decide between boundaries of
+ * equal standing or step in where there is no punctuation at all. That is the
+ * opposite priority to cutting every N characters, which is exactly what
+ * produces captions that break mid-phrase.
+ *
+ * Nothing here calls anything. Both signals it works from - the punctuation in
+ * the translated text, and the silence between one caption and the next - are
+ * already in hand, so a whole file is re-cut for the price of reading it.
+ */
+
+import { type Segment } from '../transcription/SubtitleBuilder.js';
+
+/**
+ * One word, or one CJK character - the smallest thing a line can end on.
+ *
+ * `text` is the original slice including whatever punctuation and spacing
+ * followed it, so joining a run of these gives back the transcript verbatim.
+ */
+export interface Unit {
+  text: string;
+  /** The word itself, without the punctuation or spacing `text` carries. */
+  core: string;
+  start: number;
+  end: number;
+  /**
+   * Silence in front of this unit, in seconds. Real only where one caption
+   * ends and the next begins - inside a caption there is no evidence of a
+   * pause, so it is zero rather than guessed at.
+   */
+  gapBefore: number;
+  /**
+   * First unit of its source caption. Its `text` therefore has nothing in
+   * front of it, and a join that pulls two captions onto one line has to put
+   * the separator back.
+   */
+  startsSegment: boolean;
+}
+
+export interface SegmenterOptions {
+  /** Longest line, in characters, for Chinese, Japanese and Korean. */
+  maxCjk: number;
+  /** Longest line, in words, for everything written with spaces. */
+  maxLatin: number;
+}
+
+export const DEFAULT_SEGMENTER_OPTIONS: SegmenterOptions = {
+  maxCjk: 20,
+  maxLatin: 14
+};
+
+/** What a settings form is held to, so a typo cannot make lines unreadable. */
+export const MAX_CJK_RANGE = { min: 8, max: 40 };
+export const MAX_LATIN_RANGE = { min: 5, max: 30 };
+
+/**
+ * How much a boundary is worth. A full stop outranks everything the length
+ * rules can say; a comma does not, which is why a line runs past a comma to
+ * reach a better break but never past a full stop.
+ */
+const SENTENCE_SCORE = 100;
+const CLAUSE_SCORE = 60;
+const COMMA_SCORE = 35;
+/** A pause at its longest is worth about as much as a clause break. */
+const MAX_PAUSE_SCORE = 80;
+
+/** Silence below this is segment noise rather than a pause anyone made. */
+const MIN_PAUSE_SECONDS = 0.08;
+/** Silence at or above this is worth the full pause score. */
+const FULL_PAUSE_SECONDS = 1.2;
+/**
+ * Silence this long ends a line whatever else is going on. Someone stopped
+ * talking; carrying the caption across it would hold a finished sentence on
+ * screen through the gap and then run it into the next one.
+ */
+const FORCED_PAUSE_SECONDS = 1.6;
+
+/** Worst penalty for a line at the length ceiling, in boundary-score terms. */
+const OVER_PENALTY = 90;
+/** Worst penalty for a very short line. Mild - short lines are often right. */
+const UNDER_PENALTY = 20;
+
+/** A comfortable line, as a fraction of the longest allowed. */
+const TARGET_RATIO = 0.75;
+/** Below this fraction of the target, only a full stop may end a line. */
+const MIN_RATIO = 0.4;
+/** No line ends below this many units, whatever ends it. */
+const FLOOR_UNITS = 2;
+
+/**
+ * One word, or one CJK character. Trailing punctuation and spaces are not
+ * matched here - they are picked up as part of the preceding unit's `text`, so
+ * that a boundary can be judged by what was written at it.
+ */
+const UNIT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]|[\p{Letter}\p{Number}]+(?:[''’][\p{Letter}]+)*/gu;
+
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
+/** Brackets and quotes close after the mark that matters, so they come off first. */
+const TRAILING_WRAPPERS = /[)\]}>"'’”〉》」』】）\s]+$/u;
+
+const SENTENCE_END = /[.!?。！？…]$/u;
+const CLAUSE_END = /[;:；：—–]$/u;
+const COMMA_END = /[,，、]$/u;
+
+/**
+ * Characters per phoneme, used to share a segment's duration out among its
+ * words. A rough estimate is enough: it only decides where inside one Whisper
+ * segment a cut lands, and the segment's own start and end stay exact.
+ */
+const CHARS_PER_PHONEME = 4;
+
+/** Whether the transcript is written without spaces between words. */
+export function isMainlyCjk(text: string) {
+  const letters = text.match(/[\p{Letter}]/gu);
+  if (!letters || letters.length === 0) {
+    return false;
+  }
+  const cjk = letters.filter((c) => CJK.test(c)).length;
+  return cjk / letters.length > 0.5;
+}
+
+/**
+ * Breaks segments into units, sharing each segment's duration among its words
+ * in proportion to their estimated phonemes.
+ *
+ * Segments are assumed to be in order; the gap in front of each one is carried
+ * onto its first unit, which is the only place a real pause is known.
+ */
+export function toUnits(segments: Segment[]): Unit[] {
+  const units: Unit[] = [];
+  let previousEnd: number | null = null;
+
+  for (const segment of segments) {
+    const text = segment.text;
+    const matches = [ ...text.matchAll(UNIT) ];
+    if (matches.length === 0) {
+      continue;
+    }
+    const duration = Math.max(segment.end - segment.start, 0);
+    const phonemes = matches.map((m) => Math.ceil(m[0].length / CHARS_PER_PHONEME));
+    const totalPhonemes = phonemes.reduce((total, p) => total + p, 0) || 1;
+    const perPhoneme = duration / totalPhonemes;
+
+    let cursor = segment.start;
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const from = match.index ?? 0;
+      // Up to the next word, so the punctuation and spacing between them
+      // belong to the unit they follow.
+      const to = i + 1 < matches.length ? (matches[i + 1].index ?? text.length) : text.length;
+      const end = i === matches.length - 1 ?
+        segment.end
+        : Math.min(cursor + perPhoneme * phonemes[i], segment.end);
+      units.push({
+        text: text.slice(from, to),
+        core: match[0],
+        start: cursor,
+        end,
+        gapBefore: i === 0 && previousEnd !== null ?
+          Math.max(0, segment.start - previousEnd)
+          : 0,
+        startsSegment: i === 0
+      });
+      cursor = end;
+    }
+    previousEnd = segment.end;
+  }
+  return units;
+}
+
+/** What the punctuation at the end of `text` says about breaking there. */
+export function punctuationScore(text: string) {
+  const trimmed = text.replace(TRAILING_WRAPPERS, '');
+  if (SENTENCE_END.test(trimmed)) {
+    return SENTENCE_SCORE;
+  }
+  if (CLAUSE_END.test(trimmed)) {
+    return CLAUSE_SCORE;
+  }
+  if (COMMA_END.test(trimmed)) {
+    return COMMA_SCORE;
+  }
+  return 0;
+}
+
+/** What a silence of `seconds` says about breaking there. */
+export function pauseScore(seconds: number) {
+  if (seconds <= MIN_PAUSE_SECONDS) {
+    return 0;
+  }
+  const share = Math.min(seconds, FULL_PAUSE_SECONDS) / FULL_PAUSE_SECONDS;
+  return share * MAX_PAUSE_SCORE;
+}
+
+/**
+ * A stretch that had to be cut on length alone: long enough to need a break,
+ * with no punctuation and no pause anywhere inside it.
+ *
+ * Reported for the log rather than acted on. It is the one case a language
+ * model would judge better, and on translated Chinese - which comes back
+ * punctuated - it is rare enough not to be worth a billed call per file.
+ */
+export interface HardRun {
+  /** Index of the first unit, into the array `segment` was given. */
+  start: number;
+  /** One past the last. */
+  end: number;
+}
+
+export interface SegmentResult {
+  segments: Segment[];
+  hardRuns: HardRun[];
+}
+
+/** Cuts `units` into lines. */
+export function segmentUnits(
+  units: Unit[],
+  options: SegmenterOptions
+): SegmentResult {
+  if (units.length === 0) {
+    return { segments: [], hardRuns: [] };
+  }
+
+  const cjk = isMainlyCjk(units.map((u) => u.core).join(''));
+  const max = Math.max(2, cjk ? options.maxCjk : options.maxLatin);
+  const target = Math.max(1, Math.round(max * TARGET_RATIO));
+  const min = Math.max(FLOOR_UNITS, Math.round(target * MIN_RATIO));
+
+  /** The case for ending a line after unit `i`. */
+  const strengthAfter = (i: number) => {
+    if (i >= units.length - 1) {
+      return SENTENCE_SCORE;
+    }
+    return punctuationScore(units[i].text) + pauseScore(units[i + 1].gapBefore);
+  };
+
+  /** How far a line of `length` units is from a comfortable one. */
+  const penalty = (length: number) => {
+    if (length > target) {
+      return ((length - target) / Math.max(max - target, 1)) * OVER_PENALTY;
+    }
+    return ((target - length) / target) * UNDER_PENALTY;
+  };
+
+  const lines: Unit[][] = [];
+  const hardRuns: HardRun[] = [];
+  let start = 0;
+
+  while (start < units.length) {
+    const last = units.length - 1;
+    const limit = Math.min(start + max - 1, last);
+    let bestIndex = -1;
+    let bestScore = -Infinity;
+    let sawBoundary = false;
+
+    for (let i = start; i <= limit; i++) {
+      // Someone stopped talking. Nothing downstream is worth carrying a line
+      // across it, so the search ends here whatever it had found.
+      if (i < last && units[i + 1].gapBefore >= FORCED_PAUSE_SECONDS && i - start + 1 >= FLOOR_UNITS) {
+        bestIndex = i;
+        sawBoundary = true;
+        break;
+      }
+      const length = i - start + 1;
+      const strength = strengthAfter(i);
+      // Below the comfortable minimum only a finished sentence may end a line.
+      // Above it, everything competes on its merits.
+      if (length < min && i < last && strength < SENTENCE_SCORE) {
+        continue;
+      }
+      if (length < FLOOR_UNITS && i < last) {
+        continue;
+      }
+      if (strength > 0) {
+        sawBoundary = true;
+      }
+      const score = strength - penalty(length);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = i;
+      }
+    }
+
+    if (bestIndex < 0) {
+      // The tail is shorter than the minimum, so it is simply the last line.
+      bestIndex = limit;
+    }
+    if (!sawBoundary && bestIndex < last) {
+      // Cut on length alone, which is the one case a language model could do
+      // better. Reported so a caller may offer to - and joined to the run
+      // before it when they touch, since one long unpunctuated stretch is one
+      // question, not one per line it was chopped into.
+      const previous = hardRuns[hardRuns.length - 1];
+      if (previous && previous.end === start) {
+        previous.end = bestIndex + 1;
+      }
+      else {
+        hardRuns.push({ start, end: bestIndex + 1 });
+      }
+    }
+    lines.push(units.slice(start, bestIndex + 1));
+    start = bestIndex + 1;
+  }
+
+  return { segments: mergeStrays(lines, max, min), hardRuns };
+}
+
+/**
+ * Folds a stray line back into its neighbour.
+ *
+ * The search above will end a line early for a full stop, which is usually
+ * right and occasionally leaves a two-word caption flashing past. One is
+ * merged back when there was no pause around it and the result still fits -
+ * so "Right." said mid-sentence rejoins the sentence, while "Right." after a
+ * beat of silence stays on its own.
+ */
+function mergeStrays(lines: Unit[][], max: number, min: number): Segment[] {
+  const merged: Unit[][] = [];
+
+  for (const line of lines) {
+    const previous = merged[merged.length - 1];
+    // Only lines the search would not have chosen for itself. Anything at or
+    // above the minimum was picked on its merits, and folding two of those
+    // together undoes the break that was the point of the exercise.
+    const joinable =
+      previous &&
+      (previous.length < min || line.length < min) &&
+      previous.length + line.length <= max &&
+      pauseScore(line[0].gapBefore) === 0;
+    if (joinable) {
+      previous.push(...line);
+      continue;
+    }
+    merged.push(line);
+  }
+
+  return merged.map((line) => ({
+    start: line[0].start,
+    end: line[line.length - 1].end,
+    // The units carry the transcript's own spacing, so joining them and
+    // tidying the edges is all that is needed - no words are re-spaced and
+    // none are lost.
+    text: joinUnits(line)
+  }));
+}
+
+/**
+ * A line's text, from the units' own slices.
+ *
+ * Runs of whitespace collapse to one space, and in a CJK transcript the space
+ * between two CJK characters goes entirely - but only there. A Chinese
+ * transcript still quotes product names and English terms, and stripping every
+ * space would run those together.
+ */
+function joinUnits(line: Unit[]) {
+  const parts: string[] = [];
+  for (const unit of line) {
+    // A caption's text starts at its first word, so two captions pulled onto
+    // one line would otherwise run together as "Right.So." The space goes back
+    // everywhere except between two CJK characters, which are written without
+    // one - and only at the joins made here, so whatever spacing the text
+    // itself chose around its English terms is left exactly as it came.
+    if (unit.startsSegment && parts.length > 0) {
+      const left = lastWordChar(parts[parts.length - 1]);
+      const right = firstWordChar(unit.text);
+      if (!left || !right || !CJK.test(left) || !CJK.test(right)) {
+        parts.push(' ');
+      }
+    }
+    parts.push(unit.text);
+  }
+  return parts.join('').replace(/\s+/g, ' ').trim();
+}
+
+/** The last letter or digit in `text` - the character a join butts up against. */
+function lastWordChar(text: string) {
+  return text.match(/[\p{Letter}\p{Number}](?=[^\p{Letter}\p{Number}]*$)/u)?.[0] ?? null;
+}
+
+function firstWordChar(text: string) {
+  return text.match(/[\p{Letter}\p{Number}]/u)?.[0] ?? null;
+}
+
+/** Re-cuts a whole file. The entry point the translation queue uses. */
+export function segmentTranscript(
+  segments: Segment[],
+  options: SegmenterOptions = DEFAULT_SEGMENTER_OPTIONS
+): SegmentResult {
+  return segmentUnits(toUnits(segments), options);
+}

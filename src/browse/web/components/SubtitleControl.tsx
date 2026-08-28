@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAPI } from "../contexts/APIProvider";
 import { getMediaIdFromVideo } from "../utils/useActiveVideo";
-import PlayerMenuButton from "./PlayerMenuButton";
+import PlayerMenuButton, { type PlayerControlVariant } from "./PlayerMenuButton";
 import { type SubtitleFile } from "../../types/Transcription";
 import { TARGET_LANGUAGE } from "../../types/Translation";
 
@@ -28,7 +28,14 @@ const MANAGED = 'data-subtitle-control';
 
 interface SubtitleControlProps {
   video: HTMLVideoElement;
-  variant: 'toolbar' | 'floating';
+  variant: PlayerControlVariant;
+  /**
+   * Leaves the chosen track in `hidden` mode: its cues still fire, but the
+   * browser does not paint them. For the in-page player, which draws them
+   * itself so that zooming the picture cannot crop them away.
+   */
+  hideNativeCues?: boolean;
+  getPopupContainer?: () => HTMLElement;
 }
 
 /**
@@ -45,7 +52,7 @@ interface SubtitleControlProps {
  * to render into it would mean waiting forever.
  */
 function SubtitleControl(props: SubtitleControlProps) {
-  const { video, variant } = props;
+  const { video, variant, hideNativeCues = false, getPopupContainer } = props;
   const { api } = useAPI();
   const mediaId = getMediaIdFromVideo(video);
   const [ subtitles, setSubtitles ] = useState<SubtitleFile[]>([]);
@@ -81,9 +88,9 @@ function SubtitleControl(props: SubtitleControlProps) {
     // Only valid once the element is in the document, which is why this is
     // not set before appending.
     if (element.track) {
-      element.track.mode = 'showing';
+      element.track.mode = hideNativeCues ? 'hidden' : 'showing';
     }
-  }, [ api, mediaId, subtitles, video ]);
+  }, [ api, hideNativeCues, mediaId, subtitles, video ]);
 
   useEffect(() => {
     if (!mediaId) {
@@ -131,6 +138,7 @@ function SubtitleControl(props: SubtitleControlProps) {
       ]}
       onSelect={setSelected}
       variant={variant}
+      getPopupContainer={getPopupContainer}
     />
   );
 }

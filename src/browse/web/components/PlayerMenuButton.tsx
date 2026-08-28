@@ -1,6 +1,9 @@
 import { Dropdown, type MenuProps } from "antd";
 import Icon from "./Icon";
 
+/** Where a control is being drawn, which is all that separates their looks. */
+export type PlayerControlVariant = 'toolbar' | 'floating' | 'player';
+
 export interface PlayerMenuItem {
   key: string;
   label: string;
@@ -19,9 +22,17 @@ interface PlayerMenuButtonProps {
   badge?: string;
   /**
    * `toolbar` matches lightgallery's own icon buttons; `floating` is the pill
-   * used when the toolbar could not be found.
+   * used when the toolbar could not be found; `player` is the in-page player's
+   * own control bar.
    */
-  variant: 'toolbar' | 'floating';
+  variant: PlayerControlVariant;
+  /**
+   * Where the popup is mounted. The in-page player hands it its own root, so
+   * the menu is still there when that root is the fullscreen element - antd
+   * would otherwise portal it to the end of the document, outside the only
+   * element being shown.
+   */
+  getPopupContainer?: () => HTMLElement;
 }
 
 /**
@@ -34,7 +45,7 @@ interface PlayerMenuButtonProps {
  * free and had to be replaced carefully.
  */
 function PlayerMenuButton(props: PlayerMenuButtonProps) {
-  const { icon, label, value, items, onSelect, badge, variant } = props;
+  const { icon, label, value, items, onSelect, badge, variant, getPopupContainer } = props;
 
   const menu: MenuProps = {
     items: items.map((item) => ({ key: item.key, label: item.label })),
@@ -47,7 +58,8 @@ function PlayerMenuButton(props: PlayerMenuButtonProps) {
     <Dropdown
       menu={menu}
       trigger={[ 'click' ]}
-      placement={variant === 'toolbar' ? 'bottomRight' : 'bottomLeft'}
+      placement={variant === 'player' ? 'top' : variant === 'toolbar' ? 'bottomRight' : 'bottomLeft'}
+      getPopupContainer={getPopupContainer}
       // Clear of the lightbox (1050) and its toolbar (1082).
       styles={{ root: { zIndex: 1100 } }}
     >

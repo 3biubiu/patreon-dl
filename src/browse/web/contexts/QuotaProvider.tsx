@@ -8,14 +8,17 @@ interface QuotaProviderProps {
   children: React.ReactNode;
 }
 
-interface QuotaContextValue {
-  /** `null` until the first answer arrives. */
-  quota: QuotaStatus | null;
-  /** Re-asks the server. Called after anything that might have spent some. */
-  refresh: () => Promise<void>;
-}
-
-const QuotaContext = createContext({} as QuotaContextValue);
+/**
+ * The count and the way to re-ask for it are kept apart on purpose.
+ *
+ * A context value changes for everyone who reads it, and starting a video
+ * re-asks for the count a second and a half later. Callers that only ever
+ * refresh - the post page - were being re-rendered by that, which used to take
+ * the lightbox and the video playing in it down with them. They read
+ * `useQuotaRefresh` instead, which never changes.
+ */
+const QuotaContext = createContext<QuotaStatus | null>(null);
+const QuotaRefreshContext = createContext<() => Promise<void>>(() => Promise.resolve());
 
 /** Long enough that a burst of range requests does not become a burst of these. */
 const REFRESH_DEBOUNCE_MS = 1500;
@@ -109,12 +112,21 @@ function QuotaProvider(props: QuotaProviderProps) {
   }, [refresh, user]);
 
   return (
-    <QuotaContext.Provider value={{ quota, refresh }}>
-      {children}
-    </QuotaContext.Provider>
+    <QuotaRefreshContext.Provider value={refresh}>
+      <QuotaContext.Provider value={quota}>
+        {children}
+      </QuotaContext.Provider>
+    </QuotaRefreshContext.Provider>
   );
 }
 
-const useQuota = () => useContext(QuotaContext);
+/** The count, for the parts of the app that show it. Re-renders when it moves. */
+const useQuota = () => ({
+  quota: useContext(QuotaContext),
+  refresh: useContext(QuotaRefreshContext)
+});
 
-export { QuotaProvider, useQuota };
+/** Just the way to re-ask, for callers that never display the count. */
+const useQuotaRefresh = () => useContext(QuotaRefreshContext);
+
+export { QuotaProvider, useQuota, useQuotaRefresh };

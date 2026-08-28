@@ -2,18 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { type MediaListItem } from "../../types/Media";
 import "../assets/styles/MediaGallery.scss";
-import LightGallery from 'lightgallery/react';
-import "lightgallery/css/lightgallery.css";
-import "lightgallery/css/lg-zoom.css";
-import "lightgallery/css/lg-thumbnail.css";
-import "lightgallery/css/lg-video.css";
-import lgThumbnail from 'lightgallery/plugins/thumbnail';
-import lgZoom from 'lightgallery/plugins/zoom';
-import lgVideo from 'lightgallery/plugins/video';
+import Lightbox from "./Lightbox";
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
 import PdfViewerModal, { type PdfViewerTarget } from "./PdfViewerModal";
 import { formatFileSize, getContentUrlForMedia, getFileExtension, getFileIcon } from "../utils/Misc";
 import Icon from "./Icon";
+import VideoPlayer, { type VideoPlayerSource } from "./VideoPlayer";
 
 interface MediaGalleryProps {
   items: MediaListItem<any>[];
@@ -49,6 +43,8 @@ interface GalleryTile {
   file?: FileProps;
   /** Opens in the in-page reader instead of the lightbox. */
   pdf?: PdfViewerTarget;
+  /** Plays in the page, in a row of its own, instead of in the lightbox. */
+  video?: VideoPlayerSource;
 }
 
 function buildTile(mi: MediaListItem<any>): GalleryTile {
@@ -151,7 +147,13 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
       thumbnailURL,
       badge: isPDF ? 'PDF' : undefined
     },
-    pdf: isPDF ? { url: mediaURL, filename: mi.filename || mi.id } : undefined
+    pdf: isPDF ? { url: mediaURL, filename: mi.filename || mi.id } : undefined,
+    video: isVideo ? {
+      id: mi.id,
+      src: mediaURL,
+      poster: thumbnailURL,
+      title: sourceTitle || undefined
+    } : undefined
   };
 }
 
@@ -179,6 +181,9 @@ function MediaGallery(props: MediaGalleryProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
   const [pdfTarget, setPdfTarget] = useState<PdfViewerTarget | null>(null);
+  // Videos play in the gallery itself, in a full-width row under the one they
+  // were clicked in. Only the images still open in the lightbox.
+  const [playing, setPlaying] = useState<VideoPlayerSource | null>(null);
 
    useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -194,6 +199,9 @@ function MediaGallery(props: MediaGalleryProps) {
   }, []);
 
   const tiles = useMemo(() => items.map(buildTile), [items]);
+  // Row packing changes with the container width, but the slides do not - so
+  // the lightbox is only re-read when the tiles themselves change.
+  const itemsKey = useMemo(() => tiles.map((tile) => tile.id).join('|'), [tiles]);
 
   // Pack tiles into rows of `containerWidth`. Tiles on the last row keep their
   // natural width instead of stretching to fill it.
@@ -224,6 +232,7 @@ function MediaGallery(props: MediaGalleryProps) {
     }
     return rows.reduce<React.ReactNode[]>((result, rowTiles, rowIndex) => {
       const isLastRow = rowIndex === rows.length - 1;
+      const playsInThisRow = !!playing && rowTiles.some((tile) => tile.id === playing.id);
       for (const tile of rowTiles) {
         result.push(
           <div
@@ -239,7 +248,11 @@ function MediaGallery(props: MediaGalleryProps) {
                 <LightGalleryItem
                   {...tile.lg}
                   classNamePrefix="media-gallery"
-                  onClick={tile.pdf ? () => setPdfTarget(tile.pdf!) : undefined}
+                  onClick={
+                    tile.pdf ? () => setPdfTarget(tile.pdf!)
+                    : tile.video ? () => setPlaying(tile.video!)
+                    : undefined
+                  }
                 />
                 : tile.file ? <FileTile file={tile.file} /> : null
             }
@@ -258,19 +271,30 @@ function MediaGallery(props: MediaGalleryProps) {
           </div>
         );
       }
+      // A row of its own, right under the tiles it belongs to, so the picture
+      // is not squeezed into a thumbnail-sized cell.
+      if (playsInThisRow && playing) {
+        result.push(
+          <div
+            key="media-gallery-player"
+            className="media-gallery__player"
+            style={{ flexBasis: '100%', flexGrow: 1 }}
+          >
+            <VideoPlayer
+              key={playing.id}
+              source={playing}
+              autoPlay
+              onClose={() => setPlaying(null)}
+            />
+          </div>
+        );
+      }
       return result;
     }, []);
-  }, [rows]);
+  }, [rows, playing]);
 
   return (
-    <LightGallery
-      speed={500}
-      plugins={[lgThumbnail, lgZoom, lgVideo]}
-      // lightgallery defaults this to true, which puts a download icon in
-      // the lightbox toolbar - nothing to do with the player's own controls.
-      download={false}
-      selector=".lightgallery-item"
-    >
+    <Lightbox itemsKey={itemsKey}>
       <div
         ref={containerRef}
         className="w-100 media-gallery mb-4"
@@ -283,7 +307,7 @@ function MediaGallery(props: MediaGalleryProps) {
         {renderedTiles}
       </div>
       <PdfViewerModal target={pdfTarget} onClose={() => setPdfTarget(null)} />
-    </LightGallery>
+    </Lightbox>
   )
 }
 

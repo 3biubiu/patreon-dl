@@ -1,15 +1,10 @@
 import "../assets/styles/MediaGrid.scss";
 import { type Downloadable } from "../../../entities/Downloadable";
 import { Badge, Stack } from "react-bootstrap";
+import { useState } from "react";
+import VideoPlayer, { type VideoPlayerSource } from "./VideoPlayer";
 
-import LightGallery from 'lightgallery/react';
-import "lightgallery/css/lightgallery.css";
-import "lightgallery/css/lg-zoom.css";
-import "lightgallery/css/lg-thumbnail.css";
-import "lightgallery/css/lg-video.css";
-import lgThumbnail from 'lightgallery/plugins/thumbnail';
-import lgZoom from 'lightgallery/plugins/zoom';
-import lgVideo from 'lightgallery/plugins/video';
+import Lightbox from "./Lightbox";
 import LightGalleryItem, { type LightGalleryItemProps } from "./LightGalleryItem";
 import path from "path";
 import Icon from "./Icon";
@@ -52,6 +47,10 @@ function MediaGridItem(props: MediaGridItemProps) {
 function MediaGrid(props: MediaGridProps) {
   const { items: _mi, title, noGallery = false, fallbackThumbnailURL } = props;
   const { user } = useAuth();
+  // Videos are played here in the page; only the images still go to the
+  // lightbox. The tiles are hidden rather than unmounted while one plays, so
+  // that the lightbox keeps the elements it was built around.
+  const [ playing, setPlaying ] = useState<VideoPlayerSource | null>(null);
   // Making subtitles costs money and writes into the library, so the control
   // is only drawn for the people allowed to do it. The server enforces this
   // too - this just keeps the button out of everyone else's way.
@@ -105,6 +104,9 @@ function MediaGrid(props: MediaGridProps) {
     const dataPoster = isVideo? thumbnailURL : undefined;
     const dataSubHTML = title ? `<h4>${title}</h4>` : undefined;
     if (dataImage || dataVideo) {
+      const source: VideoPlayerSource | null = isVideo ?
+        { id: mi.id, src: mediaURL, poster: thumbnailURL, title }
+        : null;
       result.push({
         id: mi.id,
         href,
@@ -113,7 +115,8 @@ function MediaGrid(props: MediaGridProps) {
         dataPoster,
         dataSubHTML,
         thumbnailURL,
-        overlay: isVideo && canTranscribe ? <TranscribeButton mediaId={mi.id} /> : undefined
+        overlay: isVideo && canTranscribe ? <TranscribeButton mediaId={mi.id} /> : undefined,
+        onClick: source ? () => setPlaying(source) : undefined
       });
     }
     return result;
@@ -141,8 +144,8 @@ function MediaGrid(props: MediaGridProps) {
       </Stack>
     ));
 
-  const contents = (
-    <div className={`media-grid media-grid--${cells}`}>
+  const grid = (
+    <div className={`media-grid media-grid--${cells}${playing ? ' media-grid--hidden' : ''}`}>
       {items}
       {
         lgItemProps.length > 4 ?
@@ -162,22 +165,30 @@ function MediaGrid(props: MediaGridProps) {
     </div>
   );
 
+  const contents = (
+    <>
+      {grid}
+      {
+        playing ? (
+          <VideoPlayer
+            key={playing.id}
+            source={playing}
+            autoPlay
+            onClose={() => setPlaying(null)}
+          />
+        ) : null
+      }
+    </>
+  );
+
   if (noGallery) {
     return contents;
   }
 
   return (
-    <LightGallery
-      speed={500}
-      plugins={[lgThumbnail, lgZoom, lgVideo]}
-      videojs
-      // lightgallery defaults this to true, which puts a download icon in
-      // the lightbox toolbar - nothing to do with the player's own controls.
-      download={false}
-      selector=".lightgallery-item"
-    >
+    <Lightbox itemsKey={lgItemProps.map((m) => m.id).join('|')} videojs>
       {contents}
-    </LightGallery>
+    </Lightbox>
   )
 }
 

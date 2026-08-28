@@ -119,3 +119,11 @@
     z-index: 2;
   }
 }
+/**
+ * Hidden, not unmounted, while a video plays in its place: the lightbox holds
+ * references to these tiles, and re-created elements would not be the ones it
+ * was built around.
+ */
+.media-grid.media-grid--hidden {
+  display: none;
+}

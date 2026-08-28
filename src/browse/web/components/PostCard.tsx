@@ -6,14 +6,7 @@ import path from "path";
 import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import MediaImage from "./MediaImage";
-import LightGallery from "lightgallery/react";
-import "lightgallery/css/lightgallery.css";
-import "lightgallery/css/lg-zoom.css";
-import "lightgallery/css/lg-thumbnail.css";
-import "lightgallery/css/lg-video.css";
-import lgThumbnail from 'lightgallery/plugins/thumbnail';
-import lgZoom from 'lightgallery/plugins/zoom';
-import lgVideo from 'lightgallery/plugins/video';
+import Lightbox from "./Lightbox";
 import FadeContent from "./FadeContent";
 import { getCampaignBaseUrl, getContentUrl, getFileIcon } from "../utils/Misc";
 import Icon from "./Icon";
@@ -340,17 +333,14 @@ function PostCard(props: PostCardProps) {
   }
   
   return (
-    <LightGallery
-      speed={500}
-      plugins={[lgThumbnail, lgZoom, lgVideo]}
+    // The post body can carry lightbox tiles of its own, so the key covers the
+    // content as well as the attachments.
+    <Lightbox
+      itemsKey={`${post.id}|${mediaItems.map((mi) => mi.id).join('|')}`}
       videojs
-      // lightgallery defaults this to true, which puts a download icon in
-      // the lightbox toolbar - nothing to do with the player's own controls.
-      download={false}
-      selector=".lightgallery-item"
     >
       {contents}
-    </LightGallery>
+    </Lightbox>
   )
 }
 

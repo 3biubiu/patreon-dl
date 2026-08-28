@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import PlayerMenuButton from "./PlayerMenuButton";
+import PlayerMenuButton, { type PlayerControlVariant } from "./PlayerMenuButton";
 
 /** Capped at 2x, past which speech stops being followable. */
 const RATES = [ 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2 ];
@@ -18,7 +18,8 @@ function readStoredRate() {
 
 interface PlaybackRateControlProps {
   video: HTMLVideoElement;
-  variant: 'toolbar' | 'floating';
+  variant: PlayerControlVariant;
+  getPopupContainer?: () => HTMLElement;
 }
 
 /**
@@ -30,7 +31,7 @@ interface PlaybackRateControlProps {
  * also where "Save video as" lives.
  */
 function PlaybackRateControl(props: PlaybackRateControlProps) {
-  const { video, variant } = props;
+  const { video, variant, getPopupContainer } = props;
   const [ rate, setRate ] = useState(readStoredRate);
   // Read inside an effect that must not re-run when the rate changes, so it
   // cannot be allowed to close over a stale value.
@@ -69,6 +70,7 @@ function PlaybackRateControl(props: PlaybackRateControlProps) {
       // one thing worth knowing at a glance.
       badge={rate === 1 ? undefined : `${rate}x`}
       variant={variant}
+      getPopupContainer={getPopupContainer}
     />
   );
 }

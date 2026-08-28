@@ -196,3 +196,9 @@
     }
   }
 }
+
+/** The row a video expands into, directly under the tiles it was clicked in. */
+.media-gallery__player {
+  width: 100%;
+  margin: calc(var(--media-gallery-gap) / 2) 0;
+}

@@ -1,0 +1,314 @@
+/**
+ * The in-page video player.
+ *
+ * The frame is sized in JavaScript - it has to be, since the picture may be
+ * zoomed past its own edges and the pan limits are worked out from the same
+ * numbers - so there is deliberately no aspect-ratio or max-height here to
+ * disagree with it.
+ */
+
+.video-player {
+  // The antd popups the control bar opens are given this element as their
+  // container, so that they survive fullscreen. That means no `overflow:
+  // hidden` here, and a stacking context they can sit in.
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  outline: none;
+  border-radius: 0.375rem;
+  overflow: visible;
+  background-color: var(--bs-tertiary-bg, #f8f9fa);
+
+  &:focus-visible {
+    box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.5);
+  }
+}
+
+.video-player__frame {
+  position: relative;
+  max-width: 100%;
+  overflow: hidden;
+  background-color: #000;
+  // Vertical swipes still scroll the page; a picture that can be dragged takes
+  // the gesture instead (set below).
+  touch-action: pan-y;
+
+  &--pannable {
+    cursor: grab;
+    touch-action: none;
+
+    &:active {
+      cursor: grabbing;
+    }
+  }
+}
+
+.video-player__video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background-color: #000;
+  // Zoom grows the picture about the middle of the frame, so that what is on
+  // screen stays on screen as the viewer scales up.
+  transform-origin: center center;
+}
+
+/** The play glyph over a paused video, and the wait glyph over a stalled one. */
+.video-player__state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+
+  .material-icons,
+  .material-icons-outlined {
+    font-size: 4rem;
+    color: rgba(255, 255, 255, 0.85);
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/**
+ * Captions, drawn by `SubtitleOverlay` rather than by the browser so that they
+ * are not cropped along with the picture when it is zoomed.
+ */
+.video-player__captions {
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
+  max-width: 90%;
+  pointer-events: none;
+  text-align: center;
+}
+
+.video-player__caption-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.video-player__caption-text {
+  display: inline-block;
+  padding: 0.1em 0.4em;
+  border-radius: 0.2em;
+  background-color: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: clamp(0.9rem, 2.4vw, 1.35rem);
+  line-height: 1.4;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* Control bar. */
+
+.video-player__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  background-color: var(--bs-tertiary-bg, #f8f9fa);
+  color: var(--bs-body-color, #212529);
+}
+
+.video-player__time {
+  display: flex;
+  gap: 0.25em;
+  flex-shrink: 0;
+  padding: 0 0.25rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.video-player__time-sep {
+  opacity: 0.5;
+}
+
+.video-player__seek {
+  position: relative;
+  flex: 1 1 auto;
+  // A thin bar is hard to hit, so the element is tall and the bar inside it is
+  // drawn thin.
+  height: 1.5rem;
+  min-width: 4rem;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.video-player__seek-track {
+  position: relative;
+  width: 100%;
+  height: 0.25rem;
+  border-radius: 999px;
+  background-color: var(--bs-border-color, rgba(0, 0, 0, 0.2));
+  overflow: hidden;
+}
+
+.video-player__seek-loaded,
+.video-player__seek-played {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.video-player__seek-loaded {
+  background-color: var(--bs-secondary-color, rgba(0, 0, 0, 0.35));
+  opacity: 0.5;
+}
+
+.video-player__seek-played {
+  background-color: var(--bs-primary, #0d6efd);
+}
+
+.video-player__seek-handle {
+  position: absolute;
+  top: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-left: -0.35rem;
+  border-radius: 50%;
+  background-color: var(--bs-primary, #0d6efd);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.video-player__volume {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+
+  // The slider is a nicety; below it the row is tight enough already.
+  @media (max-width: 767.98px) {
+    .video-player__volume-slider {
+      display: none;
+    }
+  }
+}
+
+.video-player__volume-slider {
+  width: 4.5rem;
+  accent-color: var(--bs-primary, #0d6efd);
+  cursor: pointer;
+}
+
+/** Buttons in the bar, sized between the toolbar and floating variants. */
+.player-menu--player {
+  padding: 0.25rem 0.35rem;
+  border-radius: 0.25rem;
+  color: inherit;
+
+  .material-icons,
+  .material-icons-outlined {
+    font-size: 20px;
+  }
+
+  &:hover,
+  &:focus-visible {
+    background-color: var(--bs-secondary-bg, rgba(0, 0, 0, 0.08));
+  }
+}
+
+/* The size menu. */
+
+.player-size {
+  width: 15rem;
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  background-color: var(--bs-body-bg, #fff);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+
+  .ant-slider {
+    margin: 0.25rem 0.25rem 1.25rem;
+  }
+}
+
+.player-size__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.player-size__label {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.player-size__value {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.player-size__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.player-size__hint {
+  font-size: 0.7rem;
+  line-height: 1.3;
+  opacity: 0.6;
+}
+
+/* Fullscreen. */
+
+.video-player--fullscreen {
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  background-color: #000;
+
+  .video-player__bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 0.5rem 1rem;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
+    color: #fff;
+    transition: opacity 0.2s linear, transform 0.2s linear;
+  }
+
+  .video-player__seek-track {
+    background-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .video-player__seek-loaded {
+    background-color: rgba(255, 255, 255, 0.5);
+  }
+
+  .player-menu--player:hover,
+  .player-menu--player:focus-visible {
+    background-color: rgba(255, 255, 255, 0.15);
+  }
+}
+
+.video-player--bar-hidden {
+  .video-player__bar {
+    opacity: 0;
+    transform: translateY(100%);
+    pointer-events: none;
+  }
+
+  .video-player__frame {
+    cursor: none;
+  }
+}

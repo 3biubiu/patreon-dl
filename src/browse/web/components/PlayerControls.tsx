@@ -26,10 +26,14 @@ function PlayerControls() {
   const video = useActiveVideo();
   const toolbar = useLightboxToolbar(video);
   // Not a control, but this is the one place that already knows which video is
-  // playing, and it is mounted for the whole session.
+  // playing, and it is mounted for the whole session. Every player is watched,
+  // the in-page one included - only the controls below are not drawn for it.
   useWatchHistory(video);
 
-  if (!video) {
+  // The in-page player draws its own speed and caption menus into its own
+  // control bar. What is left for this component is the lightbox, which still
+  // plays audio and whatever media a post body carries inline.
+  if (!video || video.closest('.video-player')) {
     return null;
   }
 

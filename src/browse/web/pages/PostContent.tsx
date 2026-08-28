@@ -17,7 +17,7 @@ import { type BrowseSettings } from "../../types/Settings";
 import { useDocument } from "../contexts/DocumentProvider";
 import { getContentUrl } from "../utils/Misc";
 import { LoadingBlock } from "../components/Loading";
-import { useQuota } from "../contexts/QuotaProvider";
+import { useQuotaRefresh } from "../contexts/QuotaProvider";
 
 interface PostNav {
   previous: PostWithComments | null;
@@ -74,7 +74,7 @@ function PostContent() {
   const { setTitle } = useDocument();
   const { settings } = useBrowseSettings();
   const { scrollTo } = useScroll();
-  const { refresh: refreshQuota } = useQuota();
+  const refreshQuota = useQuotaRefresh();
   const [post, setContent] = useReducer(contentReducer, null);;
   const [postNav, setPostNav] = useState<PostNav>({ previous: null, next: null });
   const [quotaMessage, setQuotaMessage] = useState<string | null>(null);

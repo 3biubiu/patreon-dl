@@ -1,4 +1,5 @@
 import { Dropdown, type MenuProps } from "antd";
+import { type ReactNode } from "react";
 import Icon from "./Icon";
 
 /** Where a control is being drawn, which is all that separates their looks. */
@@ -26,6 +27,8 @@ interface PlayerMenuButtonProps {
    * own control bar.
    */
   variant: PlayerControlVariant;
+  /** Settings for what the menu picks, shown under the items it lists. */
+  extra?: ReactNode;
   /**
    * Where the popup is mounted. The in-page player hands it its own root, so
    * the menu is still there when that root is the fullscreen element - antd
@@ -45,7 +48,7 @@ interface PlayerMenuButtonProps {
  * free and had to be replaced carefully.
  */
 function PlayerMenuButton(props: PlayerMenuButtonProps) {
-  const { icon, label, value, items, onSelect, badge, variant, getPopupContainer } = props;
+  const { icon, label, value, items, onSelect, badge, variant, extra, getPopupContainer } = props;
 
   const menu: MenuProps = {
     items: items.map((item) => ({ key: item.key, label: item.label })),
@@ -57,6 +60,14 @@ function PlayerMenuButton(props: PlayerMenuButtonProps) {
   return (
     <Dropdown
       menu={menu}
+      // The menu keeps its own looks; the wrapper is what makes it and the
+      // settings under it read as one card.
+      popupRender={extra ? (node) => (
+        <div className="player-menu__popup">
+          {node}
+          {extra}
+        </div>
+      ) : undefined}
       trigger={[ 'click' ]}
       placement={variant === 'player' ? 'top' : variant === 'toolbar' ? 'bottomRight' : 'bottomLeft'}
       getPopupContainer={getPopupContainer}

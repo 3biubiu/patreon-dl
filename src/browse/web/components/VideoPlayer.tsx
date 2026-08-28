@@ -1,5 +1,6 @@
 import "../assets/styles/VideoPlayer.scss";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Slider } from "antd";
 import Icon from "./Icon";
 import PlaybackRateControl from "./PlaybackRateControl";
 import PlayerSizeControl, {
@@ -13,7 +14,12 @@ import PlayerSizeControl, {
   storePreset,
   type SizePresetKey
 } from "./PlayerSizeControl";
-import SubtitleControl from "./SubtitleControl";
+import SubtitleControl, {
+  readStoredCaptionBottom,
+  readStoredCaptionScale,
+  storeCaptionBottom,
+  storeCaptionScale
+} from "./SubtitleControl";
 import SubtitleOverlay from "./SubtitleOverlay";
 
 export interface VideoPlayerSource {
@@ -33,8 +39,6 @@ interface VideoPlayerProps {
 
 const DEFAULT_ASPECT_RATIO = 16 / 9;
 const MIN_FRAME_HEIGHT = 140;
-/** What the control bar leaves for the picture when filling the screen. */
-const BAR_HEIGHT = 52;
 const SEEK_STEP_SECONDS = 5;
 const VOLUME_STEP = 0.05;
 const VOLUME_STORAGE_KEY = 'patreon-dl.playerVolume';
@@ -42,6 +46,24 @@ const VOLUME_STORAGE_KEY = 'patreon-dl.playerVolume';
 const DRAG_THRESHOLD_PX = 4;
 /** How long the bar stays up after the pointer stops, in fullscreen. */
 const BAR_IDLE_MS = 2500;
+
+// Safari only ever shipped the prefixed Fullscreen API, and on iPhone not even
+// that: there the only fullscreen is the native video player, which would take
+// the control bar and the subtitle overlay with it. So the API is used where it
+// exists, and where it does not the player covers the viewport by CSS instead.
+type FullscreenDocument = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function getFullscreenElement() {
+  const doc = document as FullscreenDocument;
+  return doc.fullscreenElement || doc.webkitFullscreenElement || null;
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -102,6 +124,7 @@ function VideoPlayer(props: VideoPlayerProps) {
 
   const rootRef = useRef<HTMLDivElement>(null);
   const seekRef = useRef<HTMLDivElement>(null);
+  const volumeRef = useRef<HTMLDivElement>(null);
   const [ video, setVideo ] = useState<HTMLVideoElement | null>(null);
 
   const [ playing, setPlaying ] = useState(false);
@@ -112,9 +135,14 @@ function VideoPlayer(props: VideoPlayerProps) {
   const [ volume, setVolume ] = useState(() => readStoredVolume().volume);
   const [ muted, setMuted ] = useState(() => readStoredVolume().muted);
   const [ aspectRatio, setAspectRatio ] = useState(DEFAULT_ASPECT_RATIO);
-  const [ fullscreen, setFullscreen ] = useState(false);
+  const [ nativeFullscreen, setNativeFullscreen ] = useState(false);
+  const [ pseudoFullscreen, setPseudoFullscreen ] = useState(false);
+  const fullscreen = nativeFullscreen || pseudoFullscreen;
   const [ availableWidth, setAvailableWidth ] = useState(0);
   const [ viewportHeight, setViewportHeight ] = useState(() => window.innerHeight);
+  const [ volumeOpen, setVolumeOpen ] = useState(false);
+  const [ captionScale, setCaptionScale ] = useState(readStoredCaptionScale);
+  const [ captionBottom, setCaptionBottom ] = useState(readStoredCaptionBottom);
   const [ preset, setPreset ] = useState<SizePresetKey>(readStoredPreset);
   const [ sizePercent, setSizePercent ] = useState(readStoredPercent);
   const [ pan, setPan ] = useState({ x: 0, y: 0 });
@@ -127,19 +155,26 @@ function VideoPlayer(props: VideoPlayerProps) {
   const shrink = Math.min(sizePercent / 100, 1);
 
   const maxFrameHeight = fullscreen ?
-    Math.max(viewportHeight - BAR_HEIGHT, MIN_FRAME_HEIGHT)
+    Math.max(viewportHeight, MIN_FRAME_HEIGHT)
     : viewportHeight * SIZE_PRESETS[preset].heightRatio;
   const widthBoundHeight = availableWidth > 0 ? availableWidth / aspectRatio : 0;
   // Asking for fullscreen is asking for the whole screen, so a percentage below
   // 100 stays in the page where it was set. Above 100 it still applies: cropping
   // the bars off a letterboxed video is if anything more wanted here.
-  const frameHeight = widthBoundHeight > 0 ?
+  const fitHeight = widthBoundHeight > 0 ?
     Math.max(
       Math.min(widthBoundHeight, maxFrameHeight) * (fullscreen ? 1 : shrink),
       // The floor never asks for more width than there is.
       Math.min(MIN_FRAME_HEIGHT, widthBoundHeight)
     )
     : 0;
+  // Whole pixels for the height, with the width taken from it, so the frame
+  // holds the picture's exact ratio. Rounding the two apart leaves the frame a
+  // fraction of a pixel off, and `object-fit: contain` pays for that with a
+  // hairline of frame - black - along two of the edges. Rounding down, so the
+  // frame cannot come out wider than the space measured for it and be clamped
+  // by `max-width` back into the same mismatch.
+  const frameHeight = Math.floor(fitHeight);
   const frameWidth = frameHeight * aspectRatio;
 
   const maxPanX = (frameWidth * (scale - 1)) / 2;
@@ -279,31 +314,72 @@ function VideoPlayer(props: VideoPlayerProps) {
     }
   }, [ video ]);
 
+  // A touch screen has no pointer to move away, so the column would otherwise
+  // stay out over the bar until something else was touched inside the player.
+  useEffect(() => {
+    if (!volumeOpen) {
+      return;
+    }
+    const handlePointerDown = (e: PointerEvent) => {
+      if (!volumeRef.current?.contains(e.target as Node)) {
+        setVolumeOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [ volumeOpen ]);
+
   /* Fullscreen. */
 
   const toggleFullscreen = useCallback(() => {
-    const root = rootRef.current;
+    const root = rootRef.current as FullscreenElement | null;
     if (!root) {
       return;
     }
-    if (document.fullscreenElement === root) {
-      void document.exitFullscreen().catch(() => undefined);
+    const doc = document as FullscreenDocument;
+    const request = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (!request) {
+      setPseudoFullscreen((current) => !current);
+      return;
+    }
+    if (getFullscreenElement() === root) {
+      const exit = doc.exitFullscreen || doc.webkitExitFullscreen;
+      void Promise.resolve(exit?.call(doc)).catch(() => undefined);
     }
     else {
-      void root.requestFullscreen().catch(() => undefined);
+      // A browser that refuses the request leaves the player in the page, which
+      // is no worse than the button having done nothing.
+      void Promise.resolve(request.call(root)).catch(() => undefined);
     }
   }, []);
 
   useEffect(() => {
-    const handleChange = () => setFullscreen(document.fullscreenElement === rootRef.current);
+    const handleChange = () => setNativeFullscreen(getFullscreenElement() === rootRef.current);
     document.addEventListener('fullscreenchange', handleChange);
-    return () => document.removeEventListener('fullscreenchange', handleChange);
+    document.addEventListener('webkitfullscreenchange', handleChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleChange);
+      document.removeEventListener('webkitfullscreenchange', handleChange);
+    };
   }, []);
 
-  // Out of the way while watching, back the moment the pointer moves. Only in
-  // fullscreen: in the page there is nothing for the bar to be in the way of.
+  // Nothing behind a player that covers the viewport should scroll away under
+  // it; real fullscreen gets this from the browser.
   useEffect(() => {
-    if (!fullscreen || !playing) {
+    if (!pseudoFullscreen) {
+      return;
+    }
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [ pseudoFullscreen ]);
+
+  // Out of the way while watching, back the moment the pointer moves. The bar
+  // is drawn over the picture, so it is in the way in the page as well.
+  useEffect(() => {
+    if (!playing) {
       setBarVisible(true);
       return;
     }
@@ -316,11 +392,15 @@ function VideoPlayer(props: VideoPlayerProps) {
     show();
     const root = rootRef.current;
     root?.addEventListener('pointermove', show);
+    // A tap moves no pointer, and is the only way back to the bar on a touch
+    // screen.
+    root?.addEventListener('pointerdown', show);
     return () => {
       window.clearTimeout(timer);
       root?.removeEventListener('pointermove', show);
+      root?.removeEventListener('pointerdown', show);
     };
-  }, [ fullscreen, playing ]);
+  }, [ playing ]);
 
   /* Dragging the picture. */
 
@@ -432,6 +512,12 @@ function VideoPlayer(props: VideoPlayerProps) {
       case 'f':
         toggleFullscreen();
         break;
+      case 'Escape':
+        if (!pseudoFullscreen) {
+          return;
+        }
+        setPseudoFullscreen(false);
+        break;
       case '0':
         setSizePercent(DEFAULT_SIZE_PERCENT);
         storePercent(DEFAULT_SIZE_PERCENT);
@@ -442,7 +528,7 @@ function VideoPlayer(props: VideoPlayerProps) {
     }
     e.preventDefault();
     e.stopPropagation();
-  }, [ applyVolume, muted, seekBy, toggleFullscreen, togglePlay, volume ]);
+  }, [ applyVolume, muted, pseudoFullscreen, seekBy, toggleFullscreen, togglePlay, volume ]);
 
   /* Size. */
 
@@ -458,6 +544,16 @@ function VideoPlayer(props: VideoPlayerProps) {
     if (value <= DEFAULT_SIZE_PERCENT) {
       setPan({ x: 0, y: 0 });
     }
+  }, []);
+
+  const handleCaptionScaleChange = useCallback((value: number) => {
+    setCaptionScale(value);
+    storeCaptionScale(value);
+  }, []);
+
+  const handleCaptionBottomChange = useCallback((value: number) => {
+    setCaptionBottom(value);
+    storeCaptionBottom(value);
   }, []);
 
   const handleSizeReset = useCallback(() => {
@@ -479,16 +575,21 @@ function VideoPlayer(props: VideoPlayerProps) {
       className={[
         'video-player',
         fullscreen ? 'video-player--fullscreen' : '',
+        pseudoFullscreen ? 'video-player--fullscreen-pseudo' : '',
         barVisible ? '' : 'video-player--bar-hidden'
       ].filter(Boolean).join(' ')}
+      style={{
+        '--caption-scale': String(captionScale / 100),
+        '--caption-bottom': `${captionBottom}%`
+      } as CSSProperties}
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
       <div
         className={`video-player__frame${scale > 1 ? ' video-player__frame--pannable' : ''}`}
         style={frameHeight > 0 ? {
-          width: `${Math.round(frameWidth)}px`,
-          height: `${Math.round(frameHeight)}px`
+          width: `${frameWidth}px`,
+          height: `${frameHeight}px`
         } : undefined}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -556,30 +657,61 @@ function VideoPlayer(props: VideoPlayerProps) {
           <div className="video-player__seek-handle" style={{ left: `${played * 100}%` }} />
         </div>
 
-        <div className="video-player__volume">
+        <div
+          ref={volumeRef}
+          className={`video-player__volume${volumeOpen ? ' video-player__volume--open' : ''}`}
+          onPointerEnter={() => setVolumeOpen(true)}
+          onPointerLeave={() => setVolumeOpen(false)}
+        >
           <button
             type="button"
             className="player-menu player-menu--player"
-            onClick={() => applyVolume(volume, !muted)}
+            onClick={() => {
+              applyVolume(volume, !muted);
+              // Where there is no hover to open it - a touch screen - the click
+              // is what puts the column on screen.
+              setVolumeOpen(true);
+            }}
             title={muted ? 'Unmute' : 'Mute'}
             aria-label={muted ? 'Unmute' : 'Mute'}
           >
             <Icon name={muted || volume === 0 ? 'volume_off' : volume < 0.5 ? 'volume_down' : 'volume_up'} />
           </button>
-          <input
-            type="range"
-            className="video-player__volume-slider"
-            min={0}
-            max={1}
-            step={0.05}
-            value={muted ? 0 : volume}
-            aria-label="Volume"
-            onChange={(e) => applyVolume(Number(e.target.value), false)}
-          />
+          <div
+            className="video-player__volume-popup"
+            // The player answers the arrow keys itself; the slider having them
+            // too would move the volume twice.
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <Slider
+              vertical
+              min={0}
+              max={100}
+              step={5}
+              value={muted ? 0 : Math.round(volume * 100)}
+              onChange={(value) => applyVolume(value / 100, false)}
+              tooltip={{ open: false }}
+            />
+          </div>
         </div>
 
         {video ? <PlaybackRateControl video={video} variant="player" getPopupContainer={getPopupContainer} /> : null}
-        {video ? <SubtitleControl video={video} variant="player" hideNativeCues getPopupContainer={getPopupContainer} /> : null}
+        {
+          video ?
+            <SubtitleControl
+              video={video}
+              variant="player"
+              hideNativeCues
+              getPopupContainer={getPopupContainer}
+              settings={{
+                scale: captionScale,
+                bottom: captionBottom,
+                onScaleChange: handleCaptionScaleChange,
+                onBottomChange: handleCaptionBottomChange
+              }}
+            />
+            : null
+        }
 
         <PlayerSizeControl
           preset={preset}

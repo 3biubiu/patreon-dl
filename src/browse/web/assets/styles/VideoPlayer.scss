@@ -8,6 +8,13 @@
  */
 
 .video-player {
+  // Caption size and placement. The base size is what a phone screen and a
+  // fullscreen picture want; `--caption-scale` and `--caption-bottom` are the
+  // viewer's own settings, set on this element by the player.
+  --caption-size: clamp(0.9rem, 2.4vw, 1.35rem);
+  --caption-scale: 1;
+  --caption-bottom: 6%;
+
   // The antd popups the control bar opens are given this element as their
   // container, so that they survive fullscreen. That means no `overflow:
   // hidden` here, and a stacking context they can sit in.
@@ -23,6 +30,15 @@
 
   &:focus-visible {
     box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.5);
+  }
+}
+
+// In the page on a desktop the picture is a fraction of the screen, so cues
+// sized for a phone or for fullscreen come out about twice as large as they
+// should. Fullscreen keeps the base size, at either end of the screen sizes.
+@media (min-width: 768px) {
+  .video-player:not(.video-player--fullscreen) {
+    --caption-size: clamp(0.45rem, 1.2vw, 0.7rem);
   }
 }
 
@@ -80,7 +96,7 @@
 .video-player__captions {
   position: absolute;
   left: 50%;
-  bottom: 6%;
+  bottom: var(--caption-bottom, 6%);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -103,7 +119,7 @@
   border-radius: 0.2em;
   background-color: rgba(0, 0, 0, 0.65);
   color: #fff;
-  font-size: clamp(0.9rem, 2.4vw, 1.35rem);
+  font-size: calc(var(--caption-size, 1rem) * var(--caption-scale, 1));
   line-height: 1.4;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
@@ -111,13 +127,24 @@
 /* Control bar. */
 
 .video-player__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  width: 100%;
   padding: 0.25rem 0.5rem;
-  background-color: var(--bs-tertiary-bg, #f8f9fa);
-  color: var(--bs-body-color, #212529);
+  border-radius: 0 0 0.375rem 0.375rem;
+  // Pale and see-through over the picture, so the bar reads as part of the
+  // player rather than as a strip of page beneath it.
+  background-color: rgba(233, 236, 239, 0.62);
+  backdrop-filter: blur(8px);
+  // Light whatever the page theme is, so the text on it is dark whatever the
+  // page theme is.
+  color: #212529;
+  transition: opacity 0.2s linear, transform 0.2s linear;
 }
 
 .video-player__time {
@@ -152,7 +179,7 @@
   width: 100%;
   height: 0.25rem;
   border-radius: 999px;
-  background-color: var(--bs-border-color, rgba(0, 0, 0, 0.2));
+  background-color: rgba(0, 0, 0, 0.2);
   overflow: hidden;
 }
 
@@ -166,7 +193,7 @@
 }
 
 .video-player__seek-loaded {
-  background-color: var(--bs-secondary-color, rgba(0, 0, 0, 0.35));
+  background-color: rgba(0, 0, 0, 0.35);
   opacity: 0.5;
 }
 
@@ -187,22 +214,36 @@
 }
 
 .video-player__volume {
+  position: relative;
   display: flex;
   align-items: center;
   flex-shrink: 0;
+}
 
-  // The slider is a nicety; below it the row is tight enough already.
-  @media (max-width: 767.98px) {
-    .video-player__volume-slider {
-      display: none;
-    }
+/**
+ * The column, which the bar has no room to keep out. It comes out over the
+ * button on hover, and on a click for the screens that have no hover.
+ */
+.video-player__volume-popup {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 0.35rem);
+  display: none;
+  padding: 0.6rem 0.15rem;
+  border-radius: 0.5rem;
+  background-color: var(--bs-body-bg, #fff);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  transform: translateX(-50%);
+
+  .ant-slider {
+    height: 5rem;
+    margin: 0;
   }
 }
 
-.video-player__volume-slider {
-  width: 4.5rem;
-  accent-color: var(--bs-primary, #0d6efd);
-  cursor: pointer;
+.video-player__volume:hover .video-player__volume-popup,
+.video-player__volume--open .video-player__volume-popup {
+  display: block;
 }
 
 /** Buttons in the bar, sized between the toolbar and floating variants. */
@@ -218,8 +259,48 @@
 
   &:hover,
   &:focus-visible {
-    background-color: var(--bs-secondary-bg, rgba(0, 0, 0, 0.08));
+    background-color: rgba(0, 0, 0, 0.08);
   }
+}
+
+/* A menu with settings under it - the caption size and placement in the CC one. */
+
+.player-menu__popup {
+  border-radius: 0.5rem;
+  background-color: var(--bs-body-bg, #fff);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+
+  .ant-dropdown-menu {
+    box-shadow: none;
+  }
+}
+
+.caption-settings {
+  width: 14rem;
+  padding: 0.5rem 0.75rem 0.25rem;
+  border-top: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.15));
+
+  .ant-slider {
+    margin: 0.25rem 0.25rem 0.75rem;
+  }
+}
+
+.caption-settings__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.caption-settings__label {
+  font-size: 0.8rem;
+  opacity: 0.75;
+}
+
+.caption-settings__value {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The size menu. */
@@ -277,28 +358,24 @@
   background-color: #000;
 
   .video-player__bar {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
     padding: 0.5rem 1rem;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
-    color: #fff;
-    transition: opacity 0.2s linear, transform 0.2s linear;
+    border-radius: 0;
   }
+}
 
-  .video-player__seek-track {
-    background-color: rgba(255, 255, 255, 0.3);
-  }
-
-  .video-player__seek-loaded {
-    background-color: rgba(255, 255, 255, 0.5);
-  }
-
-  .player-menu--player:hover,
-  .player-menu--player:focus-visible {
-    background-color: rgba(255, 255, 255, 0.15);
-  }
+/**
+ * Where there is no element fullscreen to ask for - iPhone Safari, and any
+ * browser that refuses - the player covers the viewport itself. `dvh` keeps it
+ * honest as Safari's toolbars slide in and out.
+ */
+.video-player--fullscreen-pseudo {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  overscroll-behavior: contain;
 }
 
 .video-player--bar-hidden {

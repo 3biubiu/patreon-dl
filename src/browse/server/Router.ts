@@ -139,6 +139,11 @@ class _Router {
       this.#handlers.auth.handleDeleteUserRequest(req, res, req.params.id)
     );
 
+    // The way back in for an account the sign-in anomaly rule banned.
+    this.#router.post('/api/auth/users/:id/unban', requireAdmin, (req, res) =>
+      this.#handlers.auth.handleUnbanUserRequest(req, res, req.params.id)
+    );
+
     // The applications waiting on an administrator, and the two ways one is
     // answered. Approving is what creates the account; until then there is
     // nothing to sign in as.

@@ -34,6 +34,14 @@ export interface AuthUser {
    * administrator always carries.
    */
   quota: UserQuota;
+  /**
+   * Locked out entirely - no session survives it and no sign-in gets past it.
+   * Put on by the sign-in anomaly rule, taken off only by an administrator.
+   * Never `true` for an administrator.
+   */
+  banned: boolean;
+  /** Why, shown to the administrator. `null` when not banned. */
+  banReason: string | null;
 }
 
 export interface AuthSession {

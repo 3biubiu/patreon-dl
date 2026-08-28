@@ -8,9 +8,11 @@ import { localPlace, lookupIPLocations, type IPLocation } from './IPLocation.js'
 /**
  * How many sign-ins are kept. Enough to still be useful a few days after
  * something odd happened, and small enough that the file can go on being
- * rewritten whole like the others beside it.
+ * rewritten whole like the others beside it. The anomaly rule reads its
+ * three-day window out of this same list, which is the other reason it is
+ * not smaller.
  */
-export const MAX_LOGIN_LOG_ENTRIES = 200;
+export const MAX_LOGIN_LOG_ENTRIES = 500;
 
 /**
  * A sign-in as stored - what happened and from where, with no place attached.
@@ -142,13 +144,51 @@ export default class LoginLogStore {
     });
   }
 
+  /**
+   * The regions (country and province) this account successfully signed in
+   * from since the given time, oldest first, one entry per sign-in.
+   *
+   * Sign-ins whose address cannot be placed - local addresses, lookup
+   * failures - are simply left out rather than breaking the sequence: the
+   * caller is counting region *changes*, and an unplaceable stop between two
+   * placeable ones says nothing either way.
+   */
+  async successfulRegionTrail(userId: string, since: number): Promise<string[]> {
+    const entries = this.#data.entries
+      .filter((entry) =>
+        entry.success && entry.userId === userId && Date.parse(entry.at) >= since
+      )
+      // Stored newest first; the trail reads oldest first.
+      .reverse();
+    await this.#resolveLocations(entries.map((entry) => entry.ip));
+    const trail: string[] = [];
+    for (const entry of entries) {
+      if (localPlace(entry.ip)) {
+        continue;
+      }
+      const region = this.#data.locations[entry.ip]?.region;
+      if (region) {
+        trail.push(region);
+      }
+    }
+    return trail;
+  }
+
   log(level: LogLevel, ...msg: any[]) {
     commonLog(this.#logger, level, this.name, ...msg);
   }
 
   async #resolveLocations(ips: string[]) {
     const unknown = [ ...new Set(
-      ips.filter((ip) => ip && !localPlace(ip) && !this.#data.locations[ip])
+      ips.filter((ip) => {
+        if (!ip || localPlace(ip)) {
+          return false;
+        }
+        const known = this.#data.locations[ip];
+        // Entries cached before regions were stored are asked about again,
+        // once, so they can carry one - the anomaly rule needs it.
+        return !known || known.region === undefined;
+      })
     ) ];
     if (unknown.length === 0) {
       return;

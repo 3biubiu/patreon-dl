@@ -31,6 +31,13 @@ const MAX_BATCH = 100;
 export interface IPLocation {
   /** Already joined for display - "中国 广东省 深圳". */
   place: string | null;
+  /**
+   * Country and province only - "中国 广东省" - for telling one sign-in
+   * region from another. A move between cities of one province is not a
+   * region change. Absent on entries cached before this existed, which the
+   * log store treats as "ask again".
+   */
+  region?: string | null;
   isp: string | null;
 }
 
@@ -138,8 +145,14 @@ export async function lookupIPLocations(ips: string[]): Promise<Map<string, IPLo
       // municipalities, and "上海 上海" reads like a mistake.
       .filter((part, index, parts) => parts.indexOf(part) === index)
       .join(' ');
+    const region = [ row.country, row.regionName ]
+      .map((part) => (part || '').trim())
+      .filter((part) => !!part)
+      .filter((part, index, parts) => parts.indexOf(part) === index)
+      .join(' ');
     found.set(row.query, {
       place: place || null,
+      region: region || null,
       isp: (row.isp || '').trim() || null
     });
   }

@@ -369,6 +369,14 @@ class API {
     await readJSON(await apiFetch(`/api/auth/users/${id}`, { method: 'DELETE' }));
   }
 
+  /** Lifts the ban the sign-in anomaly rule put on an account. */
+  async unbanUser(id: string): Promise<AuthUser> {
+    const data = await readJSON(await apiFetch(`/api/auth/users/${id}/unban`, {
+      method: 'POST'
+    }));
+    return data.user as AuthUser;
+  }
+
   async listRegistrations(): Promise<Registration[]> {
     const data = await readJSON(await apiFetch('/api/auth/registrations'));
     return data.registrations as Registration[];

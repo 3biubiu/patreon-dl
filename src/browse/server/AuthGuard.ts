@@ -43,9 +43,15 @@ function readCookie(req: Request, name: string) {
   return null;
 }
 
-export function issueSession(res: Response, store: AuthStore, user: AuthUser) {
+/**
+ * `sessionToken` is the account's current one from `AuthStore` - freshly
+ * rotated at sign-in, carried over unchanged on a refresh. The cookie holds it
+ * alongside the user id, and a cookie whose token the store has since replaced
+ * is no longer a session.
+ */
+export function issueSession(res: Response, store: AuthStore, user: AuthUser, sessionToken: string) {
   const expiry = Date.now() + TTL_MS;
-  const payload = `${user.id}.${expiry}`;
+  const payload = `${user.id}.${expiry}.${sessionToken}`;
   res.cookie(COOKIE_NAME, `${payload}.${sign(store.secret, payload)}`, {
     httpOnly: true,
     sameSite: 'strict',
@@ -60,8 +66,9 @@ export function clearSession(res: Response) {
 
 /**
  * The user this request is signed in as, or `null`. A cookie that fails its
- * signature, has expired, or names a user who has since been deleted counts as
- * signed out.
+ * signature, has expired, names a user who has since been deleted, or carries
+ * a session token the account has since rotated past - someone signed in on
+ * another device - counts as signed out.
  */
 export function getSessionUser(req: Request, store: AuthStore): AuthUser | null {
   const token = readCookie(req, COOKIE_NAME);
@@ -69,17 +76,29 @@ export function getSessionUser(req: Request, store: AuthStore): AuthUser | null 
     return null;
   }
   const parts = token.split('.');
-  if (parts.length !== 3) {
+  if (parts.length !== 4) {
     return null;
   }
-  const [ userId, expiryPart, mac ] = parts;
+  const [ userId, expiryPart, sessionToken, mac ] = parts;
   const expiry = Number(expiryPart);
   if (!Number.isFinite(expiry) || Date.now() > expiry) {
     return null;
   }
   const given = Buffer.from(mac);
-  const expected = Buffer.from(sign(store.secret, `${userId}.${expiryPart}`));
+  const expected = Buffer.from(sign(store.secret, `${userId}.${expiryPart}.${sessionToken}`));
   if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) {
+    return null;
+  }
+  // The signature proves the cookie is one we issued; this proves it is the
+  // one issued last. An older one belongs to a device someone has since
+  // signed in over.
+  if (store.getSessionToken(userId) !== sessionToken) {
+    return null;
+  }
+  // A banned account has no sessions, however valid the cookie - the next
+  // request after the ban lands is refused, and the sign-in form is where
+  // they find out why.
+  if (store.isBanned(userId)) {
     return null;
   }
   return store.getUser(userId);
@@ -87,12 +106,19 @@ export function getSessionUser(req: Request, store: AuthStore): AuthUser | null 
 
 /**
  * Extends a session that is more than half spent, so someone who keeps using
- * the app is never signed out mid-session.
+ * the app is never signed out mid-session. The session token is carried over
+ * unchanged - a refresh extends this device's session, it does not start a
+ * new one, so nothing is rotated and no other cookie's standing changes.
  */
 export function refreshSessionIfStale(req: Request, res: Response, store: AuthStore, user: AuthUser) {
-  const token = readCookie(req, COOKIE_NAME);
-  const expiry = Number(token?.split('.')[1]);
+  const parts = readCookie(req, COOKIE_NAME)?.split('.');
+  // Only reached with a cookie getSessionUser accepted, so the parts are there.
+  if (!parts || !parts[2]) {
+    return;
+  }
+  const sessionToken = parts[2];
+  const expiry = Number(parts[1]);
   if (!Number.isFinite(expiry) || expiry - Date.now() < REFRESH_AFTER_MS) {
-    issueSession(res, store, user);
+    issueSession(res, store, user, sessionToken);
   }
 }

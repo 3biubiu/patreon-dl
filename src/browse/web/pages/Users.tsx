@@ -1,7 +1,7 @@
 import "../assets/styles/Users.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tabs, Tag, Tooltip } from "antd";
-import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, ReloadOutlined, UserAddOutlined } from "@ant-design/icons";
+import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, ReloadOutlined, UnlockOutlined, UserAddOutlined } from "@ant-design/icons";
 import { type FormInstance } from "antd";
 import { type AuthUser, type LoginLogEntry, type Registration, type UserRole } from "../../types/Auth";
 import { DEFAULT_USER_QUOTA, type UserQuota } from "../../types/Quota";
@@ -323,6 +323,16 @@ function Users() {
     }
   }, [api, refresh]);
 
+  const handleUnban = useCallback(async (target: AuthUser) => {
+    try {
+      await api.unbanUser(target.id);
+      await refresh();
+    }
+    catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not lift the ban');
+    }
+  }, [api, refresh]);
+
   if (!users) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;
   }
@@ -365,6 +375,16 @@ function Users() {
                       <Space size={8}>
                         <span>{username}</span>
                         {user.id === currentUser?.id ? <Tag>you</Tag> : null}
+                        {
+                          // The reason - which sign-ins tripped the rule - is
+                          // a hover away rather than a column, since almost
+                          // every row has nothing to say.
+                          user.banned ? (
+                            <Tooltip title={user.banReason || undefined}>
+                              <Tag color="red">Banned</Tag>
+                            </Tooltip>
+                          ) : null
+                        }
                       </Space>
                     )
                   },
@@ -433,6 +453,25 @@ function Users() {
                     align: 'right',
                     render: (_, user) => (
                       <Space size={4}>
+                        {
+                          user.banned ? (
+                            <Popconfirm
+                              title={`Lift the ban on ${user.username}?`}
+                              description={user.banReason || undefined}
+                              okText="Unban"
+                              onConfirm={() => void handleUnban(user)}
+                            >
+                              <Tooltip title="Lift ban">
+                                <Button
+                                  type="text"
+                                  size="small"
+                                  icon={<UnlockOutlined />}
+                                  aria-label={`Lift the ban on ${user.username}`}
+                                />
+                              </Tooltip>
+                            </Popconfirm>
+                          ) : null
+                        }
                         <Tooltip title="Recent sign-ins">
                           <Button
                             type="text"

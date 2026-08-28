@@ -8,7 +8,7 @@ import type LoginLogStore from '../LoginLogStore.js';
 import { MAX_LOGIN_LOG_ENTRIES } from '../LoginLogStore.js';
 import { normalizeIP } from '../IPLocation.js';
 import { clearSession, issueSession, type AuthenticatedRequest } from '../AuthGuard.js';
-import { type UserRole } from '../../types/Auth.js';
+import { type AuthUser, type UserRole } from '../../types/Auth.js';
 import { quotaStatus } from '../QuotaGuard.js';
 import { type QuotaKind, type UserQuota } from '../../types/Quota.js';
 
@@ -19,6 +19,20 @@ const DEFAULT_LOGIN_LOG_LIMIT = 10;
 
 /** Long enough to tell one browser from another, short enough to store. */
 const MAX_USER_AGENT_LENGTH = 200;
+
+/** The window the sign-in anomaly rule looks back over. */
+const ANOMALY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Region changes within the window that trip the rule - 广东→四川→北京→广东
+ * is three. One person travelling makes one or two; an account being shared
+ * across provinces makes this many, because under single-device sessions each
+ * change of hands is a fresh sign-in from a fresh place.
+ */
+const ANOMALY_REGION_CHANGES = 3;
+
+/** What a banned account is told at the sign-in form - and nowhere else. */
+const BANNED_MESSAGE = '账户异常:检测到频繁异地登录,该账号已被封禁。请联系管理员解封。';
 
 /**
  * The address the request came from.
@@ -144,9 +158,80 @@ export default class AuthAPIRequestHandler extends Basehandler {
       res.status(401).json({ error: 'Incorrect username or password' });
       return;
     }
-    issueSession(res, this.#store, user);
+    // Checked after the password so that a stranger guessing at the account
+    // cannot learn it is banned - only someone who already holds the password
+    // is told why they cannot get in.
+    if (user.banned) {
+      this.log('warn', `Banned account "${user.username}" attempted to sign in`);
+      this.#recordLogin(req, user.username, user.id, false);
+      res.status(403).json({ error: BANNED_MESSAGE });
+      return;
+    }
+    // Rotating the token here is what signs the account's other devices out:
+    // their cookies keep the token this replaces.
+    issueSession(res, this.#store, user, this.#store.rotateSessionToken(user.id));
     this.#recordLogin(req, user.username, user.id, true);
     res.json({ user });
+    // After the response, deliberately: the check asks a location service
+    // about the addresses in the log, and the sign-in path must never wait
+    // on - or fail because of - a third party.
+    void this.#detectRegionAnomaly(user);
+  }
+
+  /**
+   * The rule: three or more region changes among the account's sign-ins of
+   * the last three days is not one person, and the account is banned on the
+   * spot - its live session dies with it, since the auth guard refuses banned
+   * accounts on every request.
+   *
+   * Administrators are exempt, not trusted: a rule that can lock out the one
+   * account able to lift the lock would have to be recovered from by editing
+   * the auth file by hand.
+   */
+  async #detectRegionAnomaly(user: AuthUser) {
+    if (user.role === 'admin' || user.banned) {
+      return;
+    }
+    try {
+      const trail = await this.#loginLogStore.successfulRegionTrail(
+        user.id,
+        Date.now() - ANOMALY_WINDOW_MS
+      );
+      // Collapsed to the places in the order they changed - what is counted
+      // is moves between regions, not sign-ins.
+      const stops: string[] = [];
+      for (const region of trail) {
+        if (stops[stops.length - 1] !== region) {
+          stops.push(region);
+        }
+      }
+      const changes = stops.length - 1;
+      if (changes < ANOMALY_REGION_CHANGES) {
+        return;
+      }
+      const reason = `3天内登录地区变动${changes}次:${stops.join(' → ')}`;
+      this.#store.banUser(user.id, reason);
+      this.log('warn', `Banned "${user.username}" - ${reason}`);
+    }
+    catch (error) {
+      // The rule failing must never take the sign-in with it, and it already
+      // has not - the response went out before this ran.
+      this.log('error', 'Sign-in anomaly check failed:', error);
+    }
+  }
+
+  /** Lifts a ban. An administrator's route; the one way back in. */
+  handleUnbanUserRequest(_req: Request, res: Response, id: string) {
+    try {
+      const user = this.#store.unbanUser(id);
+      this.log('info', `Ban lifted for "${user.username}"`);
+      res.json({ user });
+    }
+    catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Could not lift the ban'
+      });
+    }
   }
 
   /**

@@ -18,6 +18,12 @@ import {
 interface StoredUser extends AuthUser {
   salt: string;
   passwordHash: string;
+  /**
+   * The token the account's one live session carries. Replaced wholesale at
+   * every sign-in, which is what signs every other device out. Absent until
+   * the first sign-in after sessions became single-device.
+   */
+  sessionToken?: string;
 }
 
 /**
@@ -178,6 +184,10 @@ export default class AuthStore {
         // is what they carry on doing until someone sets one - only accounts
         // made from here on start on `DEFAULT_USER_QUOTA`.
         user.quota = normalizeQuota(user.quota, user.role, UNLIMITED_QUOTA);
+        // Accounts written before bans existed are not banned; a reason with
+        // no ban behind it is stale and dropped.
+        user.banned = user.banned === true && user.role !== 'admin';
+        user.banReason = user.banned ? (user.banReason ?? null) : null;
       }
       // Absent in files written before applications existed, which is simply
       // an empty queue.
@@ -202,6 +212,8 @@ export default class AuthStore {
           createdAt: new Date().toISOString(),
           visibleCampaigns: null,
           quota: { ...UNLIMITED_QUOTA },
+          banned: false,
+          banReason: null,
           salt,
           passwordHash: hashPassword(password, salt)
         }
@@ -226,6 +238,71 @@ export default class AuthStore {
   getUser(id: string): AuthUser | null {
     const user = this.#data.users.find((u) => u.id === id);
     return user ? this.#toAuthUser(user) : null;
+  }
+
+  /**
+   * The token the account's one live session must present. `null` when nobody
+   * has signed in since sessions became single-device, which no cookie can
+   * match - such an account is simply signed out everywhere.
+   */
+  getSessionToken(id: string): string | null {
+    const user = this.#data.users.find((u) => u.id === id);
+    return user?.sessionToken ?? null;
+  }
+
+  isBanned(id: string): boolean {
+    return this.#data.users.find((u) => u.id === id)?.banned === true;
+  }
+
+  /**
+   * Locks the account out entirely: the auth guard refuses its sessions and
+   * the sign-in refuses its password from here on. Put on by the sign-in
+   * anomaly rule; only {@link unbanUser} takes it off.
+   *
+   * Never an administrator. An administrator locked out by a rule could not
+   * unlock anybody, themselves included, and the file would have to be edited
+   * by hand - the same reasoning that protects the last administrator from
+   * deletion.
+   */
+  banUser(id: string, reason: string): AuthUser {
+    const user = this.#data.users.find((u) => u.id === id);
+    if (!user) {
+      throw Error('User not found');
+    }
+    if (user.role === 'admin') {
+      throw Error('Administrators cannot be banned');
+    }
+    user.banned = true;
+    user.banReason = reason;
+    this.#save();
+    return this.#toAuthUser(user);
+  }
+
+  unbanUser(id: string): AuthUser {
+    const user = this.#data.users.find((u) => u.id === id);
+    if (!user) {
+      throw Error('User not found');
+    }
+    user.banned = false;
+    user.banReason = null;
+    this.#save();
+    return this.#toAuthUser(user);
+  }
+
+  /**
+   * Replaces the account's session token. Cookies keep the token they were
+   * issued with, so the moment this runs, every cookie but the one about to be
+   * issued stops being a session - this is the whole of how one sign-in puts
+   * every other device out.
+   */
+  rotateSessionToken(id: string): string {
+    const user = this.#data.users.find((u) => u.id === id);
+    if (!user) {
+      throw Error('User not found');
+    }
+    user.sessionToken = crypto.randomBytes(16).toString('base64url');
+    this.#save();
+    return user.sessionToken;
   }
 
   /**
@@ -272,6 +349,8 @@ export default class AuthStore {
       // A new account is limited unless it is told otherwise - the opposite of
       // what the accounts already on file kept.
       quota: normalizeQuota(params.quota, params.role, DEFAULT_USER_QUOTA),
+      banned: false,
+      banReason: null,
       salt,
       passwordHash: hashPassword(params.password, salt)
     };
@@ -297,6 +376,13 @@ export default class AuthStore {
         throw Error('The last administrator cannot be demoted');
       }
       user.role = params.role;
+      // An administrator cannot be banned, so promoting someone lifts a ban
+      // the same way it lifts the restrictions below - rather than leaving it
+      // to be silently reapplied if they are demoted again.
+      if (user.role === 'admin') {
+        user.banned = false;
+        user.banReason = null;
+      }
     }
     // Whether the restriction was sent or not, it is re-normalized against the
     // role that now applies: promoting someone to administrator has to drop a
@@ -406,6 +492,8 @@ export default class AuthStore {
       createdAt: new Date().toISOString(),
       visibleCampaigns: null,
       quota: { ...DEFAULT_USER_QUOTA },
+      banned: false,
+      banReason: null,
       salt: registration.salt,
       passwordHash: registration.passwordHash
     };
@@ -464,13 +552,15 @@ export default class AuthStore {
   }
 
   #toAuthUser(user: StoredUser): AuthUser {
-    const { id, username, role, createdAt, visibleCampaigns, quota } = user;
+    const { id, username, role, createdAt, visibleCampaigns, quota, banned, banReason } = user;
     // A copy, so a caller cannot reach into the store and edit a permission
     // in place - the array would otherwise be the live one.
     return {
       id, username, role, createdAt,
       visibleCampaigns: visibleCampaigns ? [ ...visibleCampaigns ] : null,
-      quota: { ...quota }
+      quota: { ...quota },
+      banned,
+      banReason
     };
   }
 

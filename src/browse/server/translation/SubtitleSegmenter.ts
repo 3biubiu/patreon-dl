@@ -46,6 +46,15 @@ export interface Unit {
    * the separator back.
    */
   startsSegment: boolean;
+  /**
+   * Whether a line may end here.
+   *
+   * False only in the middle of a CJK word. A unit is one Han character, so
+   * without this every gap between two characters is a legal cut and a line
+   * can end halfway through a word - which is how a translated caption came
+   * to break "模型" across two lines.
+   */
+  breakable: boolean;
 }
 
 export interface SegmenterOptions {
@@ -121,6 +130,49 @@ const COMMA_END = /[,，、]$/u;
  */
 const CHARS_PER_PHONEME = 4;
 
+/**
+ * Which language's word rules to segment by.
+ *
+ * Only ever asked about text that is mainly CJK, so the question is which of
+ * the three - and kana or hangul present settle it. Chinese is the default
+ * because it is the one with no script of its own to be recognised by.
+ */
+function wordLocale(text: string) {
+  if (/[p{Script=Hangul}]/u.test(text)) {
+    return 'ko';
+  }
+  if (/[p{Script=Hiragana}p{Script=Katakana}]/u.test(text)) {
+    return 'ja';
+  }
+  return 'zh';
+}
+
+/**
+ * The offsets in `text` at which a word ends, as ICU's dictionary sees it.
+ *
+ * This is the whole of what stops a line breaking inside a word: a unit may
+ * end a line only where a word does. An environment without `Intl.Segmenter`,
+ * or one whose ICU cannot segment the language, returns null and every unit
+ * stays breakable - the behaviour this had before, which is wrong in the same
+ * way rather than newly broken.
+ */
+function wordEnds(text: string, locale: string): Set<number> | null {
+  if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') {
+    return null;
+  }
+  try {
+    const segmenter = new Intl.Segmenter(locale, { granularity: 'word' });
+    const ends = new Set<number>();
+    for (const { segment, index } of segmenter.segment(text)) {
+      ends.add(index + segment.length);
+    }
+    return ends;
+  }
+  catch (_error) {
+    return null;
+  }
+}
+
 /** Whether the transcript is written without spaces between words. */
 export function isMainlyCjk(text: string) {
   const letters = text.match(/[\p{Letter}]/gu);
@@ -141,6 +193,7 @@ export function isMainlyCjk(text: string) {
 export function toUnits(segments: Segment[]): Unit[] {
   const units: Unit[] = [];
   let previousEnd: number | null = null;
+  const locale = wordLocale(segments.map((segment) => segment.text).join(''));
 
   for (const segment of segments) {
     const text = segment.text;
@@ -148,6 +201,10 @@ export function toUnits(segments: Segment[]): Unit[] {
     if (matches.length === 0) {
       continue;
     }
+    // Per segment, because a unit's offsets are into its own segment's text.
+    // The last unit of a segment always ends where the text does, so a caption
+    // boundary is always breakable however the dictionary reads the words.
+    const ends = wordEnds(text, locale);
     const duration = Math.max(segment.end - segment.start, 0);
     const phonemes = matches.map((m) => Math.ceil(m[0].length / CHARS_PER_PHONEME));
     const totalPhonemes = phonemes.reduce((total, p) => total + p, 0) || 1;
@@ -171,7 +228,11 @@ export function toUnits(segments: Segment[]): Unit[] {
         gapBefore: i === 0 && previousEnd !== null ?
           Math.max(0, segment.start - previousEnd)
           : 0,
-        startsSegment: i === 0
+        startsSegment: i === 0,
+        // Only CJK is held to the dictionary. The unit pattern already matches
+        // a spaced language a whole word at a time, so applying it there could
+        // only take away breaks that are legitimate.
+        breakable: !ends || !CJK.test(match[0]) || ends.has(from + match[0].length)
       });
       cursor = end;
     }
@@ -273,6 +334,11 @@ export function segmentUnits(
         sawBoundary = true;
         break;
       }
+      // Mid-word. Whatever the punctuation and length rules make of this
+      // position, a line cannot end here.
+      if (i < last && !units[i].breakable) {
+        continue;
+      }
       const length = i - start + 1;
       const strength = strengthAfter(i);
       // Below the comfortable minimum only a finished sentence may end a line.
@@ -295,7 +361,17 @@ export function segmentUnits(
 
     if (bestIndex < 0) {
       // The tail is shorter than the minimum, so it is simply the last line.
+      // Backed off to the last position a word ends at, so the fallback cannot
+      // do what the search above was just stopped from doing. A window with no
+      // word end in it at all - one word longer than the whole line allowance -
+      // is let through rather than left with nowhere to cut.
       bestIndex = limit;
+      for (let i = limit; i > start; i--) {
+        if (units[i].breakable) {
+          bestIndex = i;
+          break;
+        }
+      }
     }
     if (!sawBoundary && bestIndex < last) {
       // Cut on length alone, which is the one case a language model could do

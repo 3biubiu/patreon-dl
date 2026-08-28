@@ -32,6 +32,15 @@ const MIN_CLIP_SECONDS = 30;
 const SPLIT_TOLERANCE = 0.25;
 /** Detection is fast relative to upload, so it owns only the first slice. */
 const DETECT_SHARE = 0.1;
+/**
+ * Shortest a caption may be held on screen.
+ *
+ * Only ever reached for by a caption whose audio ran up to the edge of the
+ * speech it was found in, and never past that edge, so a caption still cannot
+ * outlast the talking it belongs to. Overlap with whatever comes next is
+ * trimmed when the file is written.
+ */
+const MIN_CAPTION_SECONDS = 0.8;
 
 interface QueueEntry {
   mediaId: string;
@@ -519,38 +528,62 @@ export default class TranscriptionQueue {
   /**
    * Puts one segment back on the video's timeline.
    *
-   * The offset to add depends on which piece the timestamp lands in, so the
-   * pieces are walked until the time is accounted for. Anything past the end
-   * belongs to the last piece: a caption running over the edge is Whisper
-   * guessing at a duration, not a reason to place it elsewhere.
+   * A caption cannot be stretched across a seam: a seam is a silence long
+   * enough that the detector called it the end of the speech, and holding a
+   * caption over one would leave a finished sentence on screen through the
+   * gap and then run it into the next. So a caption whose audio crosses a
+   * seam goes whole into whichever piece holds most of it.
+   *
+   * Which piece that is has to be measured rather than assumed. Holding it to
+   * the piece it merely started in - what this did before - put a sentence
+   * that began 70ms before a seam into those 70ms, where it flashed past
+   * while the words it transcribes were still being spoken on the other side.
+   * Long captions were the ones it happened to, since a long one is what
+   * reaches across a seam in the first place.
    */
   #toSourceTime(clip: Clip, segment: Segment): Segment {
-    const from = this.#locate(clip, segment.start);
-    const to = this.#locate(clip, segment.end);
-    return {
-      ...segment,
-      start: from.time,
-      // Held inside the piece it started in. A caption that appears to cross
-      // a seam would otherwise be stretched over the silence that was cut out
-      // between the two, and a seam is a silence long enough that the
-      // detector called it the end of the speech - not something one caption
-      // spans.
-      end: Math.max(from.time, Math.min(to.time, from.piece.end))
-    };
+    const ranges = this.#pieceRanges(clip);
+    let home = ranges[ranges.length - 1];
+    let mostOverlap = -Infinity;
+    for (const range of ranges) {
+      const overlap =
+        Math.min(segment.end, range.to) - Math.max(segment.start, range.from);
+      if (overlap > mostOverlap) {
+        mostOverlap = overlap;
+        home = range;
+      }
+    }
+
+    // Clip time into the home piece's own time. Anything outside the piece -
+    // the part of the caption that belongs to a neighbour, or a Whisper end
+    // timestamp guessed past the end of the audio - lands on its edge.
+    const toPieceTime = (at: number) => home.piece.start +
+      Math.min(Math.max(at - home.from, 0), home.to - home.from);
+
+    const start = toPieceTime(segment.start);
+    const end = Math.min(
+      home.piece.end,
+      Math.max(toPieceTime(segment.end), start + MIN_CAPTION_SECONDS)
+    );
+    return { ...segment, start, end: Math.max(start, end) };
   }
 
-  /** Which piece of `clip` its own timestamp `at` falls in, and where. */
-  #locate(clip: Clip, at: number) {
+  /**
+   * Each piece of `clip` with the stretch of the clip's own time it occupies.
+   *
+   * The clip is the pieces spliced together, so a piece's place in it is the
+   * durations of everything before it - which is what a timestamp coming back
+   * from the endpoint is measured against.
+   */
+  #pieceRanges(clip: Clip) {
+    const ranges: { piece: SpeechInterval; from: number; to: number }[] = [];
     let offset = 0;
     for (const piece of clip.pieces) {
       const duration = piece.end - piece.start;
-      if (at < offset + duration) {
-        return { piece, time: piece.start + Math.max(0, at - offset) };
-      }
+      ranges.push({ piece, from: offset, to: offset + duration });
       offset += duration;
     }
-    const piece = clip.pieces[clip.pieces.length - 1];
-    return { piece, time: piece.end };
+    return ranges;
   }
 
   /**

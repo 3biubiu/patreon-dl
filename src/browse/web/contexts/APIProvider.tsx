@@ -663,6 +663,18 @@ class API {
     return `/api/media/${mediaId}/subtitles/${encodeURIComponent(filename)}`;
   }
 
+  /**
+   * The same file as text, for reading rather than for playing. The transcript
+   * view parses it itself, which a `<track>` gives no way of doing.
+   */
+  async getSubtitleText(mediaId: string, filename: string): Promise<string> {
+    const response = await apiFetch(this.getSubtitleURL(mediaId, filename));
+    if (!response.ok) {
+      throw Error('Could not read that subtitle file');
+    }
+    return await response.text();
+  }
+
   #setPaginationParams(
     url: URL,
     params: {

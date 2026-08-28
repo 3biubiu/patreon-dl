@@ -7,6 +7,7 @@ import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
 import Icon from "../components/Icon";
 import TranscriptionSettingsDrawer from "../components/TranscriptionSettingsDrawer";
+import SubtitleViewer from "../components/SubtitleViewer";
 import { useMediaQuery, DESKTOP_QUERY } from "../utils/useMediaQuery";
 import useTranslationAvailability from "../utils/useTranslationAvailability";
 import { readTranslatePreference, writeTranslatePreference } from "../utils/translatePreference";
@@ -21,7 +22,7 @@ import { isTranslationActive, type TranslationState } from "../../types/Translat
 /** How often the list refreshes while anything is still moving. */
 const POLL_INTERVAL_MS = 2000;
 
-type ListTab = 'transcription' | 'translation';
+type ListTab = 'transcription' | 'translation' | 'subtitles';
 
 const STATE_LABEL: Record<TranscriptionState, string> = {
   pending: 'Queued',
@@ -150,7 +151,8 @@ function VideoCell(props: { record: TranscriptionRecord }) {
  * polls only while something is still moving. The two queues get a tab each -
  * they run independently, and a translation outlives the transcription it
  * came from - but there is still one list of records underneath, so a video
- * only ever shows up once per tab.
+ * only ever shows up once per tab. A third tab drops the queues altogether and
+ * lists what came out of them, for reading rather than for watching.
  */
 function TranscriptionHistory() {
   const { api } = useAPI();
@@ -162,6 +164,7 @@ function TranscriptionHistory() {
   const [ anyActive, setAnyActive ] = useState(false);
   const [ translate, setTranslate ] = useState(readTranslatePreference);
   const [ tab, setTab ] = useState<ListTab>('transcription');
+  const [ viewing, setViewing ] = useState<TranscriptionRecord | null>(null);
   const [ settingsOpen, setSettingsOpen ] = useState(false);
   const availability = useTranslationAvailability();
   const canTranslate = !!availability?.available;
@@ -532,6 +535,55 @@ function TranscriptionHistory() {
     translationActionsColumn
   ];
 
+  /**
+   * What there is to read for a video: the transcription's own captions, and
+   * the Chinese translation once one has been made. Both are shown even while
+   * something else about the record is still running, since a finished file
+   * does not become unreadable because a retry was asked for.
+   */
+  const subtitleLanguagesColumn = {
+    title: 'Subtitles',
+    key: 'subtitle-languages',
+    width: isDesktop ? 200 : 110,
+    render: (_: unknown, record: TranscriptionRecord) => (
+      <Space size={4} wrap>
+        {
+          record.subtitlePath ?
+            <Tag color="blue">{(record.language || 'en').toUpperCase()}</Tag>
+            : null
+        }
+        {
+          record.translation?.subtitlePath ?
+            <Tag color="green">中文</Tag>
+            : null
+        }
+      </Space>
+    )
+  };
+
+  const subtitleActionsColumn = {
+    title: '',
+    key: 'subtitle-actions',
+    width: isDesktop ? 100 : 56,
+    render: (_: unknown, record: TranscriptionRecord) => (
+      isDesktop ?
+        <Button size="small" onClick={() => setViewing(record)}>Read</Button>
+        : <Button size="small" icon={<Icon name="subject" />} aria-label="Read" onClick={() => setViewing(record)} />
+    )
+  };
+
+  // Only the videos that have a file to read. A record that failed, or is
+  // still detecting speech, has nothing behind it yet.
+  const subtitleRecords = records.filter((record) =>
+    !!record.subtitlePath || !!record.translation?.subtitlePath
+  );
+
+  const subtitleColumns = [
+    videoColumn,
+    subtitleLanguagesColumn,
+    subtitleActionsColumn
+  ];
+
   const active = records.filter(isActive).length;
   const translatingCount = records.filter((record) => isTranslationActive(record.translation)).length;
   // Nothing that is still moving, on either queue, counts as finished - the
@@ -602,6 +654,25 @@ function TranscriptionHistory() {
     </Space>
   );
 
+  const subtitlesPane = subtitleRecords.length === 0 ? (
+    <Empty description="No subtitles have been written yet. Transcribe a video first." />
+  ) : (
+    <Table
+      rowKey="mediaId"
+      size="small"
+      columns={subtitleColumns}
+      dataSource={subtitleRecords}
+      pagination={{ pageSize: 20, hideOnSinglePage: true }}
+      tableLayout="fixed"
+      // The whole row opens the transcript, so the button is a signpost rather
+      // than the only way in.
+      onRow={(record) => ({
+        onClick: () => setViewing(record),
+        style: { cursor: 'pointer' }
+      })}
+    />
+  );
+
   const transcriptionPane = records.length === 0 ? (
     <Empty description="Nothing has been transcribed yet. Use the CC button on a video." />
   ) : (
@@ -647,7 +718,10 @@ function TranscriptionHistory() {
         activeKey={tab}
         onChange={(key) => setTab(key as ListTab)}
         tabBarExtraContent={{
-          right: tab === 'transcription' ? transcriptionActions : translationActions
+          right:
+            tab === 'transcription' ? transcriptionActions :
+              tab === 'translation' ? translationActions :
+                settingsButton
         }}
         items={[
           {
@@ -659,6 +733,11 @@ function TranscriptionHistory() {
             key: 'translation',
             label: `Translation${translationRecords.length ? ` (${translationRecords.length})` : ''}`,
             children: translationPane
+          },
+          {
+            key: 'subtitles',
+            label: `Subtitles${subtitleRecords.length ? ` (${subtitleRecords.length})` : ''}`,
+            children: subtitlesPane
           }
         ]}
       />
@@ -666,7 +745,14 @@ function TranscriptionHistory() {
       <TranscriptionSettingsDrawer
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        defaultTab={tab}
+        defaultTab={tab === 'translation' ? 'translation' : 'transcription'}
+      />
+
+      <SubtitleViewer
+        open={!!viewing}
+        mediaId={viewing?.mediaId ?? null}
+        title={viewing?.videoName ?? ''}
+        onClose={() => setViewing(null)}
       />
     </Space>
   );

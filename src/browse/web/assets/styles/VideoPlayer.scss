@@ -96,8 +96,8 @@
 .video-player__captions {
   position: absolute;
   left: 50%;
-  // Clear of the control bar while it is up - which in the page is always.
-  bottom: calc(var(--caption-bottom, 6%) + var(--caption-bar-offset, 2.25rem));
+  // Clear of the control bar, in fullscreen where it is drawn over them.
+  bottom: calc(var(--caption-bottom, 6%) + var(--caption-bar-offset, 0rem));
   transition: bottom 0.2s linear;
   transform: translateX(-50%);
   display: flex;
@@ -129,18 +129,21 @@
 /* Control bar. */
 
 .video-player__bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  // A row of its own under the picture, which is the one place it can be
+  // without taking anything from the video. Fullscreen, where there is nothing
+  // else on the screen to share with, floats it over the picture instead.
+  position: relative;
   z-index: 2;
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  width: 100%;
   padding: 0.25rem 0.5rem;
-  border-radius: 0 0 0.375rem 0.375rem;
-  // Pale and see-through over the picture, so the bar reads as part of the
-  // player rather than as a strip of page beneath it.
+  // Square where it meets the bottom of the player, rounded where it meets the
+  // picture.
+  border-radius: 0.375rem 0.375rem 0 0;
+  // Pale and see-through, so the bar reads as part of the player rather than as
+  // a strip of page beneath it.
   background-color: rgba(233, 236, 239, 0.62);
   backdrop-filter: blur(8px);
   // Light whatever the page theme is, so the text on it is dark whatever the
@@ -365,6 +368,10 @@
   background-color: #000;
 
   .video-player__bar {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
     padding: 0.5rem 1rem;
     border-radius: 0;
   }

@@ -193,9 +193,14 @@ export default class AuthAPIRequestHandler extends Basehandler {
       return;
     }
     try {
+      // A lifted ban forgives everything before it, so the window never
+      // reaches back past one. Otherwise the trail that caused the ban is
+      // still there and lifting it buys the account exactly one sign-in.
+      const cleared = this.#store.getBanClearedAt(user.id);
+      const windowStart = Date.now() - ANOMALY_WINDOW_MS;
       const trail = await this.#loginLogStore.successfulRegionTrail(
         user.id,
-        Date.now() - ANOMALY_WINDOW_MS
+        cleared !== null ? Math.max(windowStart, cleared) : windowStart
       );
       // Collapsed to the places in the order they changed - what is counted
       // is moves between regions, not sign-ins.

@@ -24,6 +24,16 @@ interface StoredUser extends AuthUser {
    * the first sign-in after sessions became single-device.
    */
   sessionToken?: string;
+  /**
+   * When a ban was last lifted, as epoch milliseconds.
+   *
+   * The anomaly rule reads the sign-in log, and lifting a ban does not erase
+   * the sign-ins that caused it - they stay for as long as the rule's window.
+   * Without this, the next sign-in re-reads that same trail and bans the
+   * account again, and the ban can never actually be lifted. Sign-ins before
+   * this moment are forgiven; the rule starts counting afresh.
+   */
+  banClearedAt?: number;
 }
 
 /**
@@ -285,8 +295,21 @@ export default class AuthStore {
     }
     user.banned = false;
     user.banReason = null;
+    // What the rule may look at from here on. Without it the sign-ins that
+    // caused the ban are still in the log, and the account is banned again the
+    // moment it signs in.
+    user.banClearedAt = Date.now();
     this.#save();
     return this.#toAuthUser(user);
+  }
+
+  /**
+   * The moment this account's history was forgiven, or `null` if it never was.
+   * The anomaly rule counts no sign-in from before it.
+   */
+  getBanClearedAt(id: string): number | null {
+    const at = this.#data.users.find((u) => u.id === id)?.banClearedAt;
+    return typeof at === 'number' && Number.isFinite(at) ? at : null;
   }
 
   /**
@@ -382,6 +405,7 @@ export default class AuthStore {
       if (user.role === 'admin') {
         user.banned = false;
         user.banReason = null;
+        user.banClearedAt = Date.now();
       }
     }
     // Whether the restriction was sent or not, it is re-normalized against the

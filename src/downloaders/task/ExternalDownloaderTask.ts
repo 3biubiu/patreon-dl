@@ -1,6 +1,7 @@
 import { type ChildProcess } from 'child_process';
 import { type PostEmbed } from '../../entities/Post.js';
-import Formatter from '../../utils/Formatter.js';
+import { type Downloadable } from '../../entities/Downloadable.js';
+import Formatter, { type FormatFieldValues } from '../../utils/Formatter.js';
 import URLHelper from '../../utils/URLHelper.js';
 import {type LogLevel} from '../../utils/logging/Logger.js';
 import type Logger from '../../utils/logging/Logger.js';
@@ -20,6 +21,45 @@ export interface ExternalDownloaderTaskParams extends DownloadTaskParams {
     command: string;
     args: string[];
   };
+  /**
+   * Basename, without extension, that the command was asked to write.
+   *
+   * Only a hint - the command owns the filename and may sanitise it differently
+   * - but where it holds it makes attribution exact instead of "whichever video
+   * in this directory was touched last".
+   */
+  expectFilename?: string | null;
+}
+
+/**
+ * Turns a configured `exec` line into a command plus argv.
+ *
+ * Tokenising happens before interpolation, which is what lets a placeholder
+ * expand to a path containing spaces without any quoting: the token is already
+ * one argv element by the time `{dest.dir}` becomes
+ * "/vol00/WDC WD10SPCX-24HWST1/...", and nothing re-splits it afterwards.
+ */
+function buildExecCommand(
+  exec: string,
+  dict: FormatFieldValues<string>,
+  log: (level: LogLevel, ...message: any[]) => void
+) {
+  const args = split(exec);
+  const command = args.shift();
+  if (!command) {
+    log('warn', 'Could not create task: no command specified');
+    return null;
+  }
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const interpolated = Formatter.format(arg, dict).result.trim();
+    if (!interpolated && arg !== '{cookie}') {
+      log('warn', `Could not create task: got empty string for command arg '${arg}'`);
+      return null;
+    }
+    args[i] = interpolated;
+  }
+  return { command, args };
 }
 
 export default class ExternalDownloaderTask extends DownloadTask {
@@ -27,6 +67,7 @@ export default class ExternalDownloaderTask extends DownloadTask {
   protected name: string;
 
   #destDir: string;
+  #expectFilename: string | null;
   #exec: ExternalDownloaderTaskParams['exec'];
   #proc: ChildProcess | null;
   #abortController: AbortController | null;
@@ -35,6 +76,7 @@ export default class ExternalDownloaderTask extends DownloadTask {
   constructor(params: ExternalDownloaderTaskParams) {
     super(params);
     this.#destDir = params.destDir;
+    this.#expectFilename = params.expectFilename || null;
     this.#exec = params.exec;
     this.#abortController = null;
     this.#abortingCallback = null;
@@ -221,7 +263,29 @@ export default class ExternalDownloaderTask extends DownloadTask {
           return result;
         }, [])
         .sort((f1, f2) => f2.modified - f1.modified);
-      
+
+      // Spawned tasks are started without going through the batch limiter, so
+      // several of them can be writing into this same directory at once. When
+      // that happens "the most recently modified video" is not reliably this
+      // task's own file - it can be a sibling's, or a sibling's part file,
+      // which is still a readable video header. Matching the name we asked for
+      // takes that race out of it.
+      if (this.#expectFilename) {
+        const named = files.filter((f) => path.parse(f.path).name === this.#expectFilename);
+        for (const file of named) {
+          const fileType = await fileTypeFromFile(file.path);
+          if (fileType?.mime.startsWith('video/')) {
+            this.log('debug', `Found video file "${file.path}" by expected name`);
+            await this.setDownloaded(file.path);
+            return;
+          }
+        }
+        this.log('debug',
+          `No video file named "${this.#expectFilename}" in "${this.#destDir}" - ` +
+          'falling back to the most recently modified one'
+        );
+      }
+
       for (const file of files) {
         const filePath = file.path;
         const fileType = await fileTypeFromFile(filePath);
@@ -273,35 +337,93 @@ export default class ExternalDownloaderTask extends DownloadTask {
       'dest.dir': destDir
     };
 
-    const args = split(dl.exec);
-    const cmd = args.shift();
-    if (!cmd) {
-      __log('warn', 'Could not create task: no command specified');
+    const exec = buildExecCommand(dl.exec, dict, __log);
+    if (!exec) {
       return null;
-    }
-    for (let i = 0; i < args.length; i++) {
-      const arg = args[i];
-      const interpolated = Formatter.format(arg, dict).result.trim();
-      if (!interpolated && arg !== '{cookie}') {
-        __log('warn', `Could not create task: got empty string for command arg '${arg}'`);
-        return null;
-      }
-      args[i] = interpolated;
     }
 
     return new ExternalDownloaderTask({
       downloadType: 'main',
       name: originator,
       destDir,
-      exec: {
-        command: cmd,
-        args
-      },
+      exec,
       config,
       callbacks,
       logger,
       src: embed.url,
       srcEntity: embed
+    });
+  }
+
+  /**
+   * The same mechanism as `fromEmbedDownloader`, but for a video Patreon hosts
+   * itself rather than one embedded from elsewhere.
+   *
+   * Those arrive as an HLS playlist, which `M3U8DownloadTask` hands to FFmpeg -
+   * and FFmpeg fetches the segments strictly one after another. A downloader
+   * that fetches them concurrently is far quicker over a high-latency or
+   * proxied link, which is the reason this hook exists at all.
+   *
+   * What is handed over is the playlist URL, already signed, so the command
+   * needs no cookie to fetch it. `{cookie}` is offered regardless, for parity
+   * with the embed downloaders and for commands that resolve the post instead.
+   *
+   * Note that taking this path gives up what `M3U8DownloadTask` does with the
+   * manifest - `maxVideoResolution`, the protected-stream check, and the
+   * "(1920x1080)" / "drm" filename suffixes. The external command owns format
+   * selection now.
+   */
+  static fromVideoDownloader(
+    config: DownloaderConfig<any>,
+    execLine: string,
+    params: {
+      src: string;
+      srcEntity: Downloadable;
+      destDir: string;
+      destFilename: string;
+      callbacks: DownloadTaskCallbacks | null;
+      logger?: Logger | null;
+    }
+  ) {
+    const { src, srcEntity, destDir, destFilename, callbacks, logger } = params;
+    const originator = 'downloader.video';
+    const __log = (level: LogLevel, ...message: any[]) => {
+      logger?.log({
+        level,
+        originator,
+        message
+      });
+    };
+    if (!URLHelper.validateURL(src)) {
+      __log('warn', `Could not create task: invalid URL "${src}"`);
+      return null;
+    }
+    const dict = {
+      'dest.dir': destDir,
+      // Without an extension: the command decides the container, and a
+      // template ending in ".mp4.mp4" is the obvious way to get that wrong.
+      'dest.filename': destFilename,
+      'media.id': srcEntity.id,
+      'media.url': src,
+      'cookie': config.cookie || ''
+    };
+
+    const exec = buildExecCommand(execLine, dict, __log);
+    if (!exec) {
+      return null;
+    }
+
+    return new ExternalDownloaderTask({
+      downloadType: 'main',
+      name: originator,
+      destDir,
+      expectFilename: destFilename,
+      exec,
+      config,
+      callbacks,
+      logger,
+      src,
+      srcEntity
     });
   }
 }

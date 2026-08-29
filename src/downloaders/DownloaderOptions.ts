@@ -86,6 +86,11 @@ export interface DownloaderOptions {
     infoAPI?: FileExistsAction;
   };
   embedDownloaders?: EmbedDownloader[];
+  /**
+   * Command that downloads a video Patreon hosts itself, in place of FFmpeg.
+   * Unset, such videos go to `M3U8DownloadTask` as before.
+   */
+  videoDownloaderExec?: string | null;
   maxVideoResolution?: number | null;
   logger?: Logger | null;
   dryRun?: boolean;
@@ -104,6 +109,7 @@ export type DownloaderInit = DeepRequired<Pick<DownloaderOptions,
   'request' |
   'fileExistsAction' |
   'embedDownloaders' |
+  'videoDownloaderExec' |
   'dryRun'>> & {
     cookie?: string;
     maxVideoResolution?: number | null;
@@ -165,6 +171,7 @@ const DEFAULT_DOWNLOADER_INIT: DownloaderInit = {
     infoAPI: 'overwrite'
   },
   embedDownloaders: [],
+  videoDownloaderExec: null,
   maxVideoResolution: null,
   dryRun: false
 };
@@ -237,6 +244,7 @@ export function getDownloaderInit(options?: DownloaderOptions): DownloaderInit {
       infoAPI: options?.fileExistsAction?.infoAPI || defaults.fileExistsAction.infoAPI
     },
     embedDownloaders: pickDefined(options?.embedDownloaders, defaults.embedDownloaders),
+    videoDownloaderExec: pickDefined(options?.videoDownloaderExec, defaults.videoDownloaderExec),
     maxVideoResolution: pickDefined(options?.maxVideoResolution, defaults.maxVideoResolution),
     dryRun: pickDefined(options?.dryRun, defaults.dryRun)
   };

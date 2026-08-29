@@ -7,6 +7,7 @@ import type FetcherProgressMonitor from '../../utils/FetcherProgressMonitor.js';
 import type FilenameResolver from '../../utils/FllenameResolver.js';
 import DownloadTask, { type DownloadTaskParams, type DownloadProgress, type DownloadTaskSkipReason } from './DownloadTask.js';
 import M3U8DownloadTask from './M3U8DownloadTask.js';
+import ExternalDownloaderTask from './ExternalDownloaderTask.js';
 import { type Downloadable } from '../../entities/Downloadable.js';
 import { type FileExistsAction } from '../DownloaderOptions.js';
 
@@ -49,6 +50,18 @@ export default class FetcherDownloadTask<T extends Downloadable> extends Downloa
     preferredOutputFilePath: string) {
 
     if (this.srcEntity.type === 'video' && this.#isM3U8FilePath(currentDestFilePath) && this.callbacks) {
+      const destFilePath = this.fsHelper.changeFilePathExtension(preferredOutputFilePath, '.mp4');
+
+      // An external command, where one is configured, takes this stream instead
+      // of FFmpeg. FFmpeg's HLS demuxer fetches segments one at a time; yt-dlp
+      // and the like fetch them concurrently, which over a proxied link is the
+      // difference between minutes and tens of minutes.
+      const external = this.#createExternalVideoDownloadTask(destFilePath);
+      if (external) {
+        this.callbacks.onSpawn(this, external);
+        return true;
+      }
+
       // Spawn FFmpeg task to download actual stream
       const spawn = await DownloadTask.create(M3U8DownloadTask, {
         downloadType: 'main',
@@ -58,13 +71,34 @@ export default class FetcherDownloadTask<T extends Downloadable> extends Downloa
         callbacks: this.callbacks,
         fetcher: this.#fetcher,
         logger: this.logger,
-        destFilePath: this.fsHelper.changeFilePathExtension(preferredOutputFilePath, '.mp4'),
+        destFilePath,
         fileExistsAction: this.#fileExistsAction
       });
       this.callbacks.onSpawn(this, spawn);
       return true;
     }
     return false;
+  }
+
+  /**
+   * The configured external video downloader as a task, or `null` when none is
+   * configured or its exec line could not be built - in which case the caller
+   * falls back to FFmpeg rather than failing the download.
+   */
+  #createExternalVideoDownloadTask(destFilePath: string) {
+    const execLine = this.config.videoDownloaderExec;
+    if (!execLine || !this.callbacks) {
+      return null;
+    }
+    const { dir, name } = path.parse(destFilePath);
+    return ExternalDownloaderTask.fromVideoDownloader(this.config, execLine, {
+      src: this.src,
+      srcEntity: this.srcEntity,
+      destDir: dir,
+      destFilename: name,
+      callbacks: this.callbacks,
+      logger: this.logger
+    });
   }
 
   #isM3U8FilePath(filePath: string) {

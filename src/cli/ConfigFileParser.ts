@@ -12,6 +12,7 @@ const CONFIG_FILE_PROPS = {
   maxVideoResolution: 'downloader:max.video.resolution',
   pathToDeno: 'downloader:path.to.deno',
   dryRun: 'downloader:dry.run',
+  videoDownloaderExec: 'downloader.video:exec',
   outDir: 'output:out.dir',
   dirNameFormat: {
     campaign: 'output:campaign.dir.name.format',
@@ -174,7 +175,8 @@ export default class ConfigFileParser {
         color: __getValue(CONFIG_FILE_PROPS.consoleLogger.color)
       },
       fileLoggers: this.#parseFileLoggerOptions(parser),
-      embedDownloaders: this.#parseEmbedDownloaderOptions(parser)
+      embedDownloaders: this.#parseEmbedDownloaderOptions(parser),
+      videoDownloaderExec: __getValue(CONFIG_FILE_PROPS.videoDownloaderExec)
     };
   }
 

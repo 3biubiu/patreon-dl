@@ -7,7 +7,7 @@ import Basehandler from './BaseHandler.js';
 import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
 import type VideoThumbnailer from '../VideoThumbnailer.js';
-import { isMediaElementRequest } from '../MediaAccessGuard.js';
+import { checkMediaAccess, isMediaElementRequest } from '../MediaAccessGuard.js';
 import type QuotaStore from '../QuotaStore.js';
 import { consumeQuota } from '../QuotaGuard.js';
 import mime from 'mime-types';
@@ -83,7 +83,40 @@ export default class MediaRequestHandler extends Basehandler {
     this.#quotaStore = quotaStore;
   }
 
+  /**
+   * What the guards saw, for the log line that accompanies a refusal. Every
+   * refusal here is indistinguishable from a bug in the player until you can
+   * read the headers that caused it, so they are spelled out rather than
+   * summarised.
+   */
+  #describeFetchMetadata(req: Request) {
+    const seen = (name: string): string => {
+      const value = req.headers[name];
+      if (Array.isArray(value)) {
+        return value.join(', ');
+      }
+      return value ?? 'absent';
+    };
+    return (
+      `sec-fetch-site: ${seen('sec-fetch-site')}, ` +
+      `sec-fetch-dest: ${seen('sec-fetch-dest')}, ` +
+      `referer: ${seen('referer')}, ` +
+      `user-agent: ${seen('user-agent')}`
+    );
+  }
+
   async handleMediaRequest(req: Request, res: Response, id: string) {
+    // The gate that keeps a media URL from working anywhere but inside the
+    // page that served it. It lives here rather than in the route so that a
+    // refusal can be logged with the headers behind it.
+    const denied = checkMediaAccess(req);
+    if (denied) {
+      this.log('debug',
+        `Refused media request for "${id}" - ${denied} (${this.#describeFetchMetadata(req)})`
+      );
+      res.status(403).send('Forbidden');
+      return;
+    }
     const { t: isRequestingThumbnail } = req.query;
     const { lapid } = req.query; // Linked attachment parent post Id
     const isDownloadRequest = req.query.dl === '1' && !isRequestingThumbnail;
@@ -133,14 +166,22 @@ export default class MediaRequestHandler extends Basehandler {
       res.status(404).send('Media not found');
       return;
     }
-    const isPlayable =
-      looksLikeVideo(mediaFilePath, downloaded.mimeType) ||
-      !!downloaded.mimeType?.startsWith('audio/');
+    const isVideo = looksLikeVideo(mediaFilePath, downloaded.mimeType);
+    const isPlayable = isVideo || !!downloaded.mimeType?.startsWith('audio/');
+    // "dl=1" is how the attachment and file-card links offer a plain download,
+    // so it excuses a request that did not come from a player - but never for
+    // a video. Nothing in the app hands a video out that way, which is what
+    // made an appended "dl=1" the one bypass worth having: it turned every
+    // media URL into a download endpoint for anyone who thought to add it.
+    const isExcusedDownload = isDownloadRequest && !isVideo;
     // A video or audio file is there to be played. Asking for one outside a
     // player - a tab navigation, a download manager, an extension replaying
     // the URL - is not something the app ever does.
-    if (isPlayable && !isThumbnail && !isDownloadRequest && !isMediaElementRequest(req)) {
-      this.log('debug', `Refused non-player request for media file "${mediaFilePath}"`);
+    if (isPlayable && !isThumbnail && !isExcusedDownload && !isMediaElementRequest(req)) {
+      this.log('debug',
+        `Refused non-player request for media file "${mediaFilePath}" ` +
+        `(${this.#describeFetchMetadata(req)})`
+      );
       res.status(403).send('Forbidden');
       return;
     }
@@ -153,7 +194,7 @@ export default class MediaRequestHandler extends Basehandler {
     // same media id, and an id already counted today is free - which is what
     // makes the limit one on how many videos are watched rather than on how
     // many times the player reconnects.
-    if (!isThumbnail && !isRequestingThumbnail && looksLikeVideo(mediaFilePath, downloaded.mimeType)) {
+    if (!isThumbnail && !isRequestingThumbnail && isVideo) {
       if (!consumeQuota(this.#quotaStore, req, 'videos', id)) {
         this.log('debug', `Refused media file "${mediaFilePath}" - daily video limit reached`);
         res.status(403).send('You have reached your daily limit for videos. It resets at 08:00 (Beijing time).');

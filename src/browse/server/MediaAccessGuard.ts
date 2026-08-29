@@ -10,31 +10,37 @@ import { type Request } from 'express';
  * another tab, handing one to a download manager, and the sniffer extensions
  * that work by re-requesting a URL they scraped out of the page.
  *
- * Both checks read headers the browser sets and forbids scripts from touching.
+ * Both checks read `Sec-Fetch-*`, which is a forbidden header name: page
+ * scripts cannot set it, extensions cannot hand a forged one to a helper
+ * program, and a client that is not a browser does not produce it at all. That
+ * last part is the whole point, so **absence is a refusal**. An earlier
+ * version of this file treated a missing header as "old browser, let it
+ * through", which is precisely the shape every download manager arrives in.
+ *
+ * Two consequences worth knowing before touching this:
+ *
+ *  - Browsers older than Chrome 76 / Firefox 90 / Safari 16.4 send none of
+ *    these and are now refused. They are also the browsers that cannot be told
+ *    apart from a download manager, so there is no version of this that keeps
+ *    them and still works.
+ *
+ *  - Fetch Metadata is only sent to a potentially trustworthy origin - HTTPS,
+ *    or localhost. Reached over plain http:// on a LAN address, no browser
+ *    sends these headers and every media request 403s. Serve this over TLS.
  */
 
 /** Dests a media file may legitimately be fetched for, per `Sec-Fetch-Dest`. */
 const MEDIA_ELEMENT_DESTS = [ 'video', 'audio' ];
 
+/**
+ * `Sec-Fetch-Site` values that mean "the page asked for this". Address-bar
+ * navigation reports "none" and another site reports "cross-site".
+ */
+const SAME_SITE_VALUES = [ 'same-origin', 'same-site' ];
+
 function isSameOrigin(req: Request) {
   const site = req.headers['sec-fetch-site'];
-  if (typeof site === 'string') {
-    // Address-bar navigation reports "none" and another site reports
-    // "cross-site"; only what the page itself asked for reports "same-origin".
-    return site === 'same-origin' || site === 'same-site';
-  }
-  // A browser too old for Sec-Fetch-* still sends a Referer for subresources
-  // of its own pages.
-  const referer = req.headers.referer;
-  if (!referer) {
-    return false;
-  }
-  try {
-    return new URL(referer).host === req.headers.host;
-  }
-  catch {
-    return false;
-  }
+  return typeof site === 'string' && SAME_SITE_VALUES.includes(site);
 }
 
 /**
@@ -53,13 +59,11 @@ export function checkMediaAccess(req: Request): string | null {
  * pulled down whole. `Sec-Fetch-Dest` is `video` / `audio` only for a media
  * element; a tab navigation says `document` and `fetch()` says `empty`.
  *
- * Browsers that send no `Sec-Fetch-Dest` are given the benefit of the doubt -
- * they have already had to pass `checkMediaAccess`, and be signed in.
+ * If a service worker is ever put in front of these URLs to carry a private
+ * token, its requests arrive as `empty` - the token check belongs beside this
+ * one at the call site, as an alternative to it, not in place of it.
  */
 export function isMediaElementRequest(req: Request) {
   const dest = req.headers['sec-fetch-dest'];
-  if (typeof dest !== 'string') {
-    return true;
-  }
-  return MEDIA_ELEMENT_DESTS.includes(dest);
+  return typeof dest === 'string' && MEDIA_ELEMENT_DESTS.includes(dest);
 }

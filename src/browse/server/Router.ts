@@ -9,7 +9,6 @@ import MediaRequestHandler from './handler/MediaRequestHandler.js';
 import SettingsAPIRequestHandler from './handler/SettingsAPIRequestHandler.js';
 import MediaAPIRequestHandler from './handler/MediaAPIRequestHandler.js';
 import VideoThumbnailer from './VideoThumbnailer.js';
-import { checkMediaAccess } from './MediaAccessGuard.js';
 import AuthAPIRequestHandler from './handler/AuthAPIRequestHandler.js';
 import type AuthStore from './AuthStore.js';
 import { getSessionUser, refreshSessionIfStale, type AuthenticatedRequest } from './AuthGuard.js';
@@ -386,14 +385,11 @@ class _Router {
       (res) => { res.status(404).send('Media not found'); }
     );
 
-    this.#router.get('/media/:id', mediaInScope, (req, res) => {
-      const denied = checkMediaAccess(req);
-      if (denied) {
-        res.status(403).send('Forbidden');
-        return;
-      }
-      return this.#handlers.media.handleMediaRequest(req, res, req.params.id);
-    });
+    // The handler applies `checkMediaAccess` itself - it has the logger, and a
+    // refusal is worth a line naming the headers that caused it.
+    this.#router.get('/media/:id', mediaInScope, (req, res) =>
+      this.#handlers.media.handleMediaRequest(req, res, req.params.id)
+    );
 
     this.#router.get(/(.*)/, (_req, res) => {
       res.sendFile(

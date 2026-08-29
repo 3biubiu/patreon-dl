@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import path from 'path';
 import fs from 'fs';
 import DB, { type DBInstance } from '../db/index.js';
@@ -137,6 +138,11 @@ export class WebServer {
       'trust proxy',
       this.#config.trustProxy ?? DEFAULT_TRUST_PROXY_HOPS
     );
+    // The web bundle is a single 2 MB chunk and the stylesheet another 300 kB,
+    // both of which gzip to roughly a third. Media is left alone: it is already
+    // compressed, and `compression` skips it of its own accord because nothing
+    // under video/, audio/ or image/ is marked compressible.
+    this.#app.use(compression());
     this.#app.use(express.json());
     this.#app.use(express.urlencoded({ extended: true }));
     this.#app.use('/assets', express.static(path.resolve(import.meta.dirname, '../web/assets')));

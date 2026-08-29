@@ -10,6 +10,22 @@ import { initDBProductFTS } from './ProductFTS.js';
 
 const DB_SCHEMA_VERSION = '1.2.0';
 
+/**
+ * How long a statement waits for a lock before giving up with SQLITE_BUSY.
+ *
+ * better-sqlite3 defaults this to 5s, which a download run can exceed: the
+ * journal mode here is the default rollback journal, so a writer holds the
+ * database for the whole of its commit, and that commit lands on whatever disk
+ * the content was downloaded to - a slow external one, often enough.
+ *
+ * Nothing retries above this. `request.maxRetries` covers HTTP fetches only,
+ * so a statement that gives up here is a record simply lost: the files are on
+ * disk but nothing in the library points at them. Waiting longer costs nothing
+ * - the thread is parked on a lock, not spinning - so the timeout is set well
+ * past any commit this writes.
+ */
+const DB_BUSY_TIMEOUT_MS = 30000;
+
 export async function openDB(file: string, dryRun = false, logger?: Logger | null): Promise<Database.Database> {
   const dbFileExists = dryRun ? false : existsSync(file);
 
@@ -33,6 +49,7 @@ export async function openDB(file: string, dryRun = false, logger?: Logger | nul
   const db = new Database(
     dryRun ? ':memory:' : file,
     {
+      timeout: DB_BUSY_TIMEOUT_MS,
       verbose: logger ? (msg) => commonLog(logger, 'debug', 'DB', msg) : undefined
     }
   );

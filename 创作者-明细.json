@@ -1,0 +1,376 @@
+{
+  "paid": [
+    {
+      "name": "Atomcyber",
+      "vanity": "Atomcyber",
+      "url": "https://www.patreon.com/Atomcyber",
+      "cid": "10014274",
+      "nsfw": true,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Bb Miniatures",
+      "vanity": "Bbminiatures",
+      "url": "https://www.patreon.com/Bbminiatures",
+      "cid": "4431536",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Bogusz Bohun Stupnicki",
+      "vanity": "bohunarts",
+      "url": "https://www.patreon.com/bohunarts",
+      "cid": "1285207",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "CHK MINIS",
+      "vanity": "CHKMINIS",
+      "url": "https://www.patreon.com/CHKMINIS",
+      "cid": "13311954",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Cult of Paint",
+      "vanity": "cultofpaint",
+      "url": "https://www.patreon.com/cultofpaint",
+      "cid": "4415930",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "David Arroba Painting Academy",
+      "vanity": "DavidArrobaPaintingAcademy",
+      "url": "https://www.patreon.com/DavidArrobaPaintingAcademy",
+      "cid": "11461760",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Death from Above Wargaming",
+      "vanity": "dfawargaming",
+      "url": "https://www.patreon.com/dfawargaming",
+      "cid": "3528400",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Fenrik Studio",
+      "vanity": "fenrikstudio",
+      "url": "https://www.patreon.com/fenrikstudio",
+      "cid": "1971049",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Flameon Miniatures",
+      "vanity": "FlameonMiniatures",
+      "url": "https://www.patreon.com/FlameonMiniatures",
+      "cid": "771135",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "GitGud Painting",
+      "vanity": "GGPainting",
+      "url": "https://www.patreon.com/GGPainting",
+      "cid": "12030749",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Jason Lee Tako",
+      "vanity": "jasontako",
+      "url": "https://www.patreon.com/jasontako",
+      "cid": "5442784",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Josedavinci",
+      "vanity": "josedavinci",
+      "url": "https://www.patreon.com/josedavinci",
+      "cid": "758860",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Juan Sanz Elminiaturista",
+      "vanity": "elminiaturista",
+      "url": "https://www.patreon.com/elminiaturista",
+      "cid": "5737351",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Kittew",
+      "vanity": "kittew",
+      "url": "https://www.patreon.com/kittew",
+      "cid": "1202665",
+      "nsfw": true,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Masclans Miniatures",
+      "vanity": "MasclansMiniatures",
+      "url": "https://www.patreon.com/MasclansMiniatures",
+      "cid": "12244848",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "MLKstudio",
+      "vanity": "MLKstudios",
+      "url": "https://www.patreon.com/MLKstudios",
+      "cid": "9630024",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Nacho González Art",
+      "vanity": "nachogonzalezart",
+      "url": "https://www.patreon.com/nachogonzalezart",
+      "cid": "10199059",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "nrmpaint",
+      "vanity": "nrmpaint",
+      "url": "https://www.patreon.com/nrmpaint",
+      "cid": "3257254",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Oliver Späth",
+      "vanity": "Oliver_Spaeth",
+      "url": "https://www.patreon.com/Oliver_Spaeth",
+      "cid": "1519619",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "PaintingBig",
+      "vanity": "paintingbig",
+      "url": "https://www.patreon.com/paintingbig",
+      "cid": "2280499",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Ph3lan's Miniatures",
+      "vanity": "ph3lansminiatures",
+      "url": "https://www.patreon.com/ph3lansminiatures",
+      "cid": "12825445",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "PJS",
+      "vanity": "pjsdraw",
+      "url": "https://www.patreon.com/pjsdraw",
+      "cid": "3019834",
+      "nsfw": true,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "RedArt Miniature Academy",
+      "vanity": "RedArtMA",
+      "url": "https://www.patreon.com/RedArtMA",
+      "cid": "1810192",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Richard Gray",
+      "vanity": "RichardGray",
+      "url": "https://www.patreon.com/RichardGray",
+      "cid": "968300",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Roman Lappat",
+      "vanity": "RomanLappatMiniatureArt",
+      "url": "https://www.patreon.com/RomanLappatMiniatureArt",
+      "cid": "11017533",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Scibor Teleszynski",
+      "vanity": "sciborminiatures",
+      "url": "https://www.patreon.com/sciborminiatures",
+      "cid": "7392031",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Squidmar Miniatures",
+      "vanity": "squidmarminiatures",
+      "url": "https://www.patreon.com/squidmarminiatures",
+      "cid": "1641532",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "The Meth Of Cooking Art",
+      "vanity": "themethofcookingart",
+      "url": "https://www.patreon.com/themethofcookingart",
+      "cid": "2526514",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "WarpColor",
+      "vanity": "Warpcolor",
+      "url": "https://www.patreon.com/Warpcolor",
+      "cid": "658401",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Watchpaintdry_minis",
+      "vanity": "Watchpaintdry_minis",
+      "url": "https://www.patreon.com/Watchpaintdry_minis",
+      "cid": "10733743",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    },
+    {
+      "name": "Zumikito ",
+      "vanity": "zumikito",
+      "url": "https://www.patreon.com/zumikito",
+      "cid": "7230266",
+      "nsfw": false,
+      "paid": true,
+      "trial": false
+    }
+  ],
+  "trial": [],
+  "free": [
+    {
+      "name": "HKH191 Modding",
+      "vanity": "HKH191",
+      "url": "https://www.patreon.com/HKH191",
+      "cid": "4279442",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "Infernal Brush",
+      "vanity": "infernalbrush",
+      "url": "https://www.patreon.com/infernalbrush",
+      "cid": "7368561",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "Juan Hidalgo Miniatures",
+      "vanity": "juanhidalgominiatures",
+      "url": "https://www.patreon.com/juanhidalgominiatures",
+      "cid": "3271180",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "JulioNIB",
+      "vanity": "JulioNIB",
+      "url": "https://www.patreon.com/JulioNIB",
+      "cid": "191663",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "One Page Rules",
+      "vanity": "onepagerules",
+      "url": "https://www.patreon.com/onepagerules",
+      "cid": "653901",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "Phoenix Miniature Art",
+      "vanity": "PhoenixCommissions",
+      "url": "https://www.patreon.com/PhoenixCommissions",
+      "cid": "3307491",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "Sergio Calvo Miniatures",
+      "vanity": "sergiocalvominiatures",
+      "url": "https://www.patreon.com/sergiocalvominiatures",
+      "cid": "1413655",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "SilverFinish",
+      "vanity": "SilverFinish",
+      "url": "https://members.silverfinish.net",
+      "cid": "4465017",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "WAVECOLORS by Jonathan Paul Pfund",
+      "vanity": "wavecolorstabltopart",
+      "url": "https://www.patreon.com/wavecolorstabltopart",
+      "cid": "5084665",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    },
+    {
+      "name": "Wayward Brush Studio",
+      "vanity": "waywardbrushstudio",
+      "url": "https://www.patreon.com/waywardbrushstudio",
+      "cid": "5684644",
+      "nsfw": false,
+      "paid": false,
+      "trial": false
+    }
+  ]
+}

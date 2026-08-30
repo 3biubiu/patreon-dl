@@ -339,6 +339,12 @@ class _Router {
       }
     });
 
+    // Spans every creator, so there is no ":id" for `inScope` to check. The
+    // handler narrows the query by the account's campaign scope instead.
+    this.#router.get('/api/search', (req, res) =>
+      this.#handlers.contentAPI.handleSearchRequest(req, res)
+    );
+
     this.#router.get('/api/collections/:id', inScope(byCollectionParam), (req, res) => {
       return this.#handlers.contentAPI.handleCollectionRequest(req, res, req.params.id);
     });

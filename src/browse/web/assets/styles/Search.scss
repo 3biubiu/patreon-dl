@@ -1,0 +1,74 @@
+.search {
+  width: 100%;
+  padding: 1.5rem 1rem 3rem;
+
+  // Results are compact rows rather than full post cards, so this follows the
+  // list layouts and takes the width it is given rather than capping to a
+  // reading measure.
+  &.mw-narrower {
+    max-width: 52em;
+  }
+  &.mw-standard {
+    max-width: 64em;
+  }
+  &.mw-wider {
+    max-width: 76em;
+  }
+
+  &__heading {
+    margin: 0 0 1rem;
+  }
+
+  &__controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  &__input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  &__sort {
+    flex: 0 0 auto;
+    width: 10rem;
+  }
+
+  &__showing {
+    margin-bottom: 0.75rem;
+    color: var(--bs-secondary-color);
+    font-size: 0.9rem;
+  }
+
+  &__empty {
+    padding-block: 2.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .search {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .search {
+    // The order picker under the box rather than beside it: sharing one line
+    // with a search field leaves neither of them usable on a phone.
+    &__controls {
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    &__input {
+      flex: 1 1 100%;
+    }
+
+    &__sort {
+      flex: 1 1 100%;
+      width: auto;
+    }
+  }
+}

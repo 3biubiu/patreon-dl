@@ -7,6 +7,7 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  SearchOutlined,
   SettingOutlined,
   StarOutlined,
   TeamOutlined,
@@ -40,6 +41,7 @@ interface SidebarProps {
 }
 
 const SETTINGS_KEY = 'settings';
+const SEARCH_KEY = '/search';
 const FAVORITES_KEY = '/favorites';
 const HISTORY_KEY = '/history';
 const USERS_KEY = '/users';
@@ -108,6 +110,10 @@ function Sidebar(props: SidebarProps) {
   // scrolls, so these three are always one click away however long it gets.
   const items = useMemo<MenuProps['items']>(() => ([
     { key: '/', icon: <HomeOutlined />, label: 'Home' },
+    // Directly under Home: it searches the whole library, so it belongs with
+    // the destination that shows the whole library rather than down among the
+    // lists that belong to the account.
+    { key: SEARCH_KEY, icon: <SearchOutlined />, label: 'Search' },
     // Both belong to the account rather than to a role. Favorites sits above
     // History: it is the list the user built on purpose, not the trace
     // browsing left behind.
@@ -147,6 +153,9 @@ function Sidebar(props: SidebarProps) {
     );
     if (match) {
       return [ match.key ];
+    }
+    if (path === SEARCH_KEY) {
+      return [ SEARCH_KEY ];
     }
     if (path === FAVORITES_KEY) {
       return [ FAVORITES_KEY ];

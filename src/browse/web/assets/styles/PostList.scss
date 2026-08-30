@@ -68,6 +68,23 @@
     font-size: 0.85rem;
   }
 
+  // Only rendered where the list spans creators. Weighted a little heavier
+  // than the timestamp beside it, since on a search result it is the thing
+  // that places the post.
+  &__campaign {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--bs-link-color);
+    font-weight: 500;
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
   &__tags {
     row-gap: 0.35rem;
   }

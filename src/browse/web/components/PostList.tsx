@@ -9,6 +9,12 @@ import Icon from "./Icon";
 interface PostListProps {
   posts: Post[];
   contextQS?: string;
+  /**
+   * Name the creator each post belongs to. Off for a campaign's own listing,
+   * where every row would say the same thing; on where the list spans
+   * creators, as global search results do.
+   */
+  showCampaign?: boolean;
 }
 
 function postUrl(post: Post, contextQS?: string) {
@@ -19,7 +25,7 @@ function postUrl(post: Post, contextQS?: string) {
  * Compact rows: thumbnail on the left, title and metadata on the right.
  */
 function PostList(props: PostListProps) {
-  const { posts, contextQS } = props;
+  const { posts, contextQS, showCampaign = false } = props;
 
   return (
     <div className="post-list mb-4">
@@ -47,6 +53,18 @@ function PostList(props: PostListProps) {
                   }
                 </Stack>
                 <Stack direction="horizontal" className="post-list__meta text-body-secondary" gap={4}>
+                  {
+                    // First in the row: on a list that spans creators, whose
+                    // post this is outranks when it was published.
+                    showCampaign && post.campaign ? (
+                      <Link
+                        to={getCampaignBaseUrl(post.campaign)}
+                        className="post-list__campaign"
+                      >
+                        {post.campaign.name}
+                      </Link>
+                    ) : null
+                  }
                   {
                     post.publishedAt ? (
                       <span>{new Date(post.publishedAt).toLocaleString()}</span>

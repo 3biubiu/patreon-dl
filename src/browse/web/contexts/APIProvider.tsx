@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import { type CampaignList, type CampaignListSortBy, type CampaignWithCounts } from '../../types/Campaign';
-import { type ContentType, type ContentList, type PostWithComments, type CollectionListSortBy, type CollectionList, type PostTagList } from '../../types/Content';
+import { type ContentType, type ContentList, type ContentListSortBy, type PostWithComments, type CollectionListSortBy, type CollectionList, type PostTagList } from '../../types/Content';
 import { type Campaign, type Product } from '../../../entities';
 import { type BrowseSettings, type BrowseSettingOptions as BrowseSettingOptions } from '../../types/Settings';
 import { type Filter, type FilterSearchParams, type FilterData, type MediaFilterSearchParams, type PostFilterSearchParams } from '../../types/Filter';
@@ -88,6 +88,30 @@ class API {
     this.#setPaginationParams(urlObj, params);
     const result = await apiFetch(urlObj.toString());
     return await result.json();
+  }
+
+  /**
+   * Posts from every creator, by search term.
+   *
+   * A separate endpoint from the per-campaign listings rather than the same
+   * one without a campaign: the server has to narrow this by the account's
+   * campaign permissions inside the query, which is not something the
+   * campaign-scoped routes ever have to do.
+   */
+  async searchPosts(params: {
+    search: string;
+    sortBy?: ContentListSortBy | 'best_match';
+    page?: number;
+    itemsPerPage: number;
+  }): Promise<ContentList<'post'>> {
+    const urlObj = new URL('/api/search', window.location.href);
+    urlObj.searchParams.set('search', params.search);
+    if (params.sortBy) {
+      urlObj.searchParams.set('sort_by', params.sortBy);
+    }
+    this.#setPaginationParams(urlObj, params);
+    const result = await apiFetch(urlObj.toString());
+    return await readJSON(result) as ContentList<'post'>;
   }
 
   async getContentList<T extends ContentType>(params: {

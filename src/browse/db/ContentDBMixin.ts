@@ -3,6 +3,7 @@ import { type PostTag, type Collection } from '../../entities/Post';
 import { getYearMonthString, type KeysOfValue } from '../../utils/Misc.js';
 import { type GetContentContext, type GetPreviousNextContentResult, type ContentList, type ContentType, type GetContentListParams, type PostWithComments, type ContentListSortBy, type GetCollectionListParams, type CollectionList, type GetPostTagListParams, type PostTagList } from '../types/Content.js';
 import { type CampaignDBConstructor } from './CampaignDBMixin.js';
+import { toFTSMatchQuery } from './FTSQuery.js';
 
 export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase) {
   return class ContentDB extends Base {
@@ -491,9 +492,13 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
       db?: { whereClauses: string[]; whereValues: any[]; },
       includeTotal = true
     ): ContentList<T> {
-      const { campaign, type: contentType, isViewable, datePublished, search, sortBy, limit, offset } = params;
+      const { campaign, campaignIds, type: contentType, isViewable, datePublished, search, sortBy, limit, offset } = params;
       const { whereClauses: extraWhereClauses = [], whereValues: extraWhereValues = [] } = db || {};
       const campaignId = !campaign ? null : (typeof campaign === 'string' ? campaign : campaign.id);
+      // What actually goes to FTS5. A query of nothing but whitespace escapes
+      // to null, which is treated as no search at all rather than as a search
+      // for the empty string - `MATCH ''` is a syntax error.
+      const matchQuery = search ? toFTSMatchQuery(search) : null;
       const tiers = params.type === 'post' ? (params as GetContentListParams<'post'>).tiers : null;
       const collection = params.type === 'post' ? (params as GetContentListParams<'post'>).collection : null;
       const tag = params.type === 'post' ? (params as GetContentListParams<'post'>).tag : null;
@@ -562,9 +567,23 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
           value: typeof tag === 'string' ? tag : tag.id
         });
       }
+      const whereClausesFromScope: string[] = [];
       const whereIns: { column: string; values: (string | number)[] }[] = [];
       if (contentSubtypes && contentSubtypes.length > 0) {
         whereIns.push({ column: 'content_subtype', values: contentSubtypes})
+      }
+      if (campaignIds) {
+        // Applied in SQL rather than to the returned page, so that `total` -
+        // and the paging built on it - counts only what this user may see.
+        // An empty list means no campaigns, which must yield nothing rather
+        // than everything; `IN ()` is not valid SQLite, so it is spelled as a
+        // condition that cannot hold.
+        if (campaignIds.length === 0) {
+          whereClausesFromScope.push('0 = 1');
+        }
+        else {
+          whereIns.push({ column: 'content.campaign_id', values: campaignIds });
+        }
       }
       if (tiers && tiers.length > 0) {
         const ids = tiers.map((tier) => typeof tier === 'string' ? tier : tier.id);
@@ -577,9 +596,10 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
       if (whereIns.length > 0) {
         whereClauseParts.push(...whereIns.map((wi) => `${wi.column} IN (${wi.values.map(() => '?').join(', ')})`));
       }
-      if (search) {
+      if (matchQuery) {
         whereClauseParts.push(`${contentType}_fts MATCH ?`);
       }
+      whereClauseParts.push(...whereClausesFromScope);
       whereClauseParts.push(...extraWhereClauses);
       const whereClause = whereClauseParts.length > 0 ? 'WHERE ' + whereClauseParts.join(' AND ') : '';
       const whereValues = [
@@ -589,8 +609,8 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
           return result;
         }, [])
       ];
-      if (search) {
-        whereValues.push(search);        
+      if (matchQuery) {
+        whereValues.push(matchQuery);
       }
       whereValues.push(...extraWhereValues);
       let orderByClause: string;
@@ -608,7 +628,15 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
           orderByClause = 'published_at ASC';
           break;
         case 'best_match':
-          orderByClause = `ORDER BY bm25(${contentType}_fts) DESC`;
+          // bm25() returns a negative score and the more negative it is, the
+          // better the match - so best-first is ascending. Ordering it the
+          // other way puts the least relevant rows at the top.
+          //
+          // Relevance only exists relative to a query. Without one the FTS
+          // table is not in the FROM at all, so asking for it would not just
+          // sort oddly, it would not parse; newest-first is the sensible
+          // reading of "best" for an unfiltered list.
+          orderByClause = matchQuery ? `bm25(${contentType}_fts) ASC` : 'published_at DESC';
           break;
         default:
           orderByClause = '';
@@ -628,7 +656,7 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
       }
 
       let fromClause: string;
-      if (search) {
+      if (matchQuery) {
         fromClause = `
           FROM
             ${contentType}_fts
@@ -1031,11 +1059,12 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
       const { campaign, search, sortBy, limit, offset } = params;
       const campaignId = typeof campaign === 'string' ? campaign : campaign.id;
 
+      const matchQuery = search ? toFTSMatchQuery(search) : null;
       const whereClauseParts: string[] = [ 'campaign_id = ?' ];
       const whereValues: (string | number)[] = [ campaignId ];
-      if (search) {
+      if (matchQuery) {
         whereClauseParts.push('collection_fts MATCH ?');
-        whereValues.push(search);
+        whereValues.push(matchQuery);
       }
       const whereClause = whereClauseParts.length > 0 ? 'WHERE ' + whereClauseParts.join(' AND ') : '';
 
@@ -1072,7 +1101,7 @@ export function ContentDBMixin<TBase extends CampaignDBConstructor>(Base: TBase)
       }
 
       let fromClause: string;
-      if (search) {
+      if (matchQuery) {
         fromClause = `
           FROM
             collection_fts

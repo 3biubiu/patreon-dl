@@ -32,12 +32,17 @@ export function ContentAPIMixin<TBase extends APIConstructor>(Base: TBase) {
   return class ContentAPI extends Base {
     getContentList<T extends ContentType>(params: GetContentListParams<T>) {
       const { sortBy = DEFAULT_CONTENT_LIST_SORT_BY, limit = DEFAULT_CONTENT_LIST_SIZE, offset = 0 } = params;
-      const list = this.db.getContentList({
+      // `params` carries a conditional type on `T` (the post-only fields), which
+      // TypeScript cannot resolve while `T` is still generic - so it cannot see
+      // that spreading it and overriding three fields yields the same shape
+      // back. The assertion covers only that pass-through; the three values are
+      // typed by the destructuring above.
+      const list = this.db.getContentList<T>({
         ...params,
         sortBy,
         limit,
         offset,
-      });
+      } as GetContentListParams<T>);
       for (const item of list.items) {
         switch (item.type) {
           case 'post':

@@ -4,6 +4,7 @@ import { type APIInstance } from '../../api';
 import Basehandler from './BaseHandler.js';
 import { getYearMonthString } from '../../../utils/Misc.js';
 import { type GetContentContext, type ContentListSortBy, type ContentType, type CollectionListSortBy } from '../../types/Content.js';
+import { getCampaignScope } from '../CampaignAccessGuard.js';
 
 const DEFAULT_ITEMS_PER_PAGE = 20;
 
@@ -41,10 +42,13 @@ export default class ContentAPIRequestHandler extends Basehandler {
       'is_viewable',
       ['true', 'false']
     ) === 'true' ? true : false : undefined;
-    const sortBy = this.getQueryParamValue<ContentListSortBy>(
+    // `best_match` orders by relevance and so only means anything alongside a
+    // search; the DB falls back to newest-first when it is asked for without
+    // one.
+    const sortBy = this.getQueryParamValue<ContentListSortBy | 'best_match'>(
       req,
       'sort_by',
-      ['a-z', 'z-a', 'latest', 'oldest'],
+      ['a-z', 'z-a', 'latest', 'oldest', 'best_match'],
       'a-z'
     );
     const datePublished = date_published === 'this_month' ? getYearMonthString() : date_published as string | undefined;
@@ -107,6 +111,43 @@ export default class ContentAPIRequestHandler extends Basehandler {
         }));
         break;
     }
+  }
+
+  /**
+   * Posts from every creator at once.
+   *
+   * The campaign-scoped listings are kept honest by a guard on the URL's own
+   * campaign id. This route has no such id, so the restriction has to travel
+   * into the query: `campaignIds` is applied in SQL, which keeps `total` - and
+   * therefore the pager - describing only what this account may see. Passing
+   * it is the whole reason this is a route of its own rather than
+   * `handleListRequest` without a campaign.
+   *
+   * An empty query returns nothing rather than the entire library: a search
+   * endpoint that lists everything when asked for nothing is a footgun for
+   * whatever calls it.
+   */
+  handleSearchRequest(req: Request, res: Response) {
+    const { limit, offset } = this.getPaginationParams(req, DEFAULT_ITEMS_PER_PAGE);
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const sortBy = this.getQueryParamValue<ContentListSortBy | 'best_match'>(
+      req,
+      'sort_by',
+      ['a-z', 'z-a', 'latest', 'oldest', 'best_match'],
+      'best_match'
+    );
+    if (!search) {
+      res.json({ items: [], total: 0 });
+      return;
+    }
+    res.json(this.#api.getContentList({
+      type: 'post',
+      search,
+      campaignIds: getCampaignScope(req),
+      sortBy,
+      limit,
+      offset
+    }));
   }
 
   handleCollectionRequest(_req: Request, res: Response, collectionId: string) {

@@ -1,5 +1,9 @@
 .users {
   width: 100%;
+  // The tables inside scroll on their own; the page itself must not, or the
+  // header and the tab bar drift off to the left with them.
+  max-width: 100%;
+  overflow-x: hidden;
   padding: 1.5rem 1rem 3rem;
 
   &__header {
@@ -17,10 +21,51 @@
     opacity: 0.65;
     font-size: 0.85em;
   }
+
+  // Each table carries `scroll={{ x: 'max-content' }}`, so its columns keep
+  // their natural widths and this is the box that moves. Without the touch
+  // hint the swipe feels like the page is stuck.
+  &__table {
+    .ant-table-body,
+    .ant-table-content {
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: thin;
+    }
+
+    // A visible bar rather than the overlay one the platform would draw only
+    // while moving: it is what says there is more to the right.
+    .ant-table-body::-webkit-scrollbar,
+    .ant-table-content::-webkit-scrollbar {
+      height: 6px;
+    }
+
+    .ant-table-body::-webkit-scrollbar-thumb,
+    .ant-table-content::-webkit-scrollbar-thumb {
+      border-radius: 3px;
+      background-color: var(--bs-border-color);
+    }
+  }
 }
 
 @media (min-width: 768px) {
   .users {
     padding-inline: 1.5rem;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .users {
+    padding-inline: 0.75rem;
+
+    &__header h2 {
+      font-size: 1.35rem;
+    }
+
+    // antd pads cells generously; on a phone that padding is most of what the
+    // reader has to swipe past.
+    &__table .ant-table-cell {
+      padding: 0.5rem 0.5rem !important;
+      white-space: nowrap;
+    }
   }
 }

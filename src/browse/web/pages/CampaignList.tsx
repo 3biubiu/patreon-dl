@@ -172,11 +172,13 @@ function CampaignList() {
             </Row>
           </Container>
           <LoadingOverlay loading={loading} className="mb-4">
-            {
-              list.campaigns.map((campaign) => (
-                <CampaignCard key={`campaign-card-${campaign.id}`} campaign={campaign} />
-              ))
-            }
+            <div className="campaign-list__grid">
+              {
+                list.campaigns.map((campaign) => (
+                  <CampaignCard key={`campaign-card-${campaign.id}`} campaign={campaign} />
+                ))
+              }
+            </div>
           </LoadingOverlay>
           <PageNav
             total={list.total}

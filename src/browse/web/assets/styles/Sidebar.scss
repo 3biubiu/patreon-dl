@@ -51,12 +51,92 @@
     padding-inline: 0;
   }
 
-  &__menu {
+  // Home / Favorites / History. Fixed height: it is the creator list below
+  // that gives way when the panel runs out of room.
+  &__nav {
+    flex: 0 0 auto;
+  }
+
+  // Takes whatever height is left over once the brand, the nav, the quota and
+  // the footer have had theirs, and scrolls inside it.
+  &__campaigns {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    // Without this the list refuses to shrink below its content height and
+    // pushes the footer off the bottom of the panel instead of scrolling.
+    min-height: 0;
+  }
+
+  &__campaigns-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem;
+    padding: 0.5rem 0.5rem 0.25rem 1rem;
+    border-top: 1px solid var(--bs-border-color);
+  }
+
+  &__campaigns-title {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    min-width: 0;
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    opacity: 0.6;
+  }
+
+  &__campaigns-count {
+    font-size: 0.6875rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    opacity: 0.8;
+  }
+
+  // Kept short so the panel is mostly list. The label is elided rather than
+  // wrapped: the menu it opens spells every order out in full.
+  &__campaigns-sort {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 8.5rem;
+    font-size: 0.75rem;
+  }
+
+  // Stands in for the header on the collapsed rail, where a heading and a
+  // dropdown have nowhere to go.
+  &__campaigns-rule {
+    flex: 0 0 auto;
+    margin: 0.5rem 0;
+    border-top: 1px solid var(--bs-border-color);
+  }
+
+  &__campaigns-list {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
+    // Firefox aside, keep the bar narrow enough not to eat into the labels.
+    &::-webkit-scrollbar {
+      width: 6px;
+    }
+    &::-webkit-scrollbar-thumb {
+      border-radius: 3px;
+      background-color: var(--bs-border-color);
+    }
+    &:hover::-webkit-scrollbar-thumb {
+      background-color: var(--bs-secondary-color);
+    }
+  }
+
+  // Nothing has been downloaded yet: still push the footer to the bottom.
+  &__spacer {
+    flex: 1 1 auto;
+    min-height: 0;
   }
 
   &__footer {
@@ -103,8 +183,9 @@
     }
   }
 
-  // Both menus would otherwise draw the panel's own right-hand border again.
-  &__menu .ant-menu,
+  // The menus would otherwise draw the panel's own right-hand border again.
+  &__nav .ant-menu,
+  &__campaigns-list .ant-menu,
   &__footer .ant-menu {
     border-inline-end: 0;
   }

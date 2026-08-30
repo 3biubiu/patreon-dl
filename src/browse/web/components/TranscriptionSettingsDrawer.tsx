@@ -1,4 +1,6 @@
+import "../assets/styles/TranscriptionSettingsDrawer.scss";
 import { Drawer, Tabs } from "antd";
+import { AudioOutlined, TranslationOutlined } from "@ant-design/icons";
 import { useMediaQuery, DESKTOP_QUERY } from "../utils/useMediaQuery";
 import TranscriptionSettingsPanel from "./settings/TranscriptionSettingsPanel";
 import TranslationSettingsPanel from "./settings/TranslationSettingsPanel";
@@ -36,15 +38,18 @@ function TranscriptionSettingsDrawer(props: TranscriptionSettingsDrawerProps) {
         // someone actually opens the drawer.
         open ? (
           <Tabs
+            className="transcription-settings-drawer__tabs"
             defaultActiveKey={defaultTab}
             items={[
               {
                 key: 'transcription',
+                icon: <AudioOutlined />,
                 label: 'Transcription',
                 children: <TranscriptionSettingsPanel />
               },
               {
                 key: 'translation',
+                icon: <TranslationOutlined />,
                 label: 'Translation',
                 children: <TranslationSettingsPanel />
               }

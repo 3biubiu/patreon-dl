@@ -5,7 +5,16 @@ import { Link } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
-import Icon from "../components/Icon";
+import {
+  AudioOutlined,
+  CloseOutlined,
+  DeleteOutlined,
+  FileTextOutlined,
+  ReloadOutlined,
+  SettingOutlined,
+  TranslationOutlined,
+  VideoCameraOutlined
+} from "@ant-design/icons";
 import TranscriptionSettingsDrawer from "../components/TranscriptionSettingsDrawer";
 import SubtitleViewer from "../components/SubtitleViewer";
 import { useMediaQuery, DESKTOP_QUERY } from "../utils/useMediaQuery";
@@ -87,6 +96,24 @@ function formatDuration(record: TranscriptionRecord) {
 }
 
 /**
+ * A tab's name with how many rows are behind it.
+ *
+ * The count is a pill rather than "(12)" in the label, so that it reads as a
+ * quantity at a glance and does not shift the name about as it changes - the
+ * same treatment the Applications tab gets on the Users page. A tab with
+ * nothing in it shows no pill at all rather than a zero.
+ */
+function TabLabel(props: { text: string; count: number; }) {
+  const { text, count } = props;
+  return (
+    <span className="transcription-history__tab-label">
+      {text}
+      {count > 0 ? <span className="transcription-history__tab-count">{count}</span> : null}
+    </span>
+  );
+}
+
+/**
  * The video's poster, or a stand-in of the same size.
  *
  * The server generates a frame for videos that never had a thumbnail
@@ -100,7 +127,7 @@ function VideoThumbnail(props: { mediaId: string }) {
   if (failed) {
     return (
       <span className="transcription-history__thumbnail transcription-history__thumbnail-placeholder">
-        <Icon name="movie" outlined />
+        <VideoCameraOutlined />
       </span>
     );
   }
@@ -349,7 +376,7 @@ function TranscriptionHistory() {
             {
               isDesktop ?
                 <Button size="small" danger loading={busy}>Cancel</Button>
-                : <Button size="small" danger loading={busy} icon={<Icon name="close" />} aria-label="Cancel" />
+                : <Button size="small" danger loading={busy} icon={<CloseOutlined />} aria-label="Cancel" />
             }
           </Popconfirm>
         );
@@ -382,7 +409,7 @@ function TranscriptionHistory() {
             {
               isDesktop ?
                 <Button size="small" loading={busy}>Retry</Button>
-                : <Button size="small" loading={busy} icon={<Icon name="refresh" />} aria-label="Retry" />
+                : <Button size="small" loading={busy} icon={<ReloadOutlined />} aria-label="Retry" />
             }
           </Popconfirm>
           {
@@ -408,7 +435,7 @@ function TranscriptionHistory() {
                 {
                   isDesktop ?
                     <Button size="small" loading={busy}>Translate</Button>
-                    : <Button size="small" loading={busy} icon={<Icon name="translate" />} aria-label="Translate" />
+                    : <Button size="small" loading={busy} icon={<TranslationOutlined />} aria-label="Translate" />
                 }
               </Popconfirm>
             ) : null
@@ -423,7 +450,7 @@ function TranscriptionHistory() {
             {
               isDesktop ?
                 <Button size="small" type="text" loading={busy}>Forget</Button>
-                : <Button size="small" type="text" loading={busy} icon={<Icon name="delete_outline" />} aria-label="Forget" />
+                : <Button size="small" type="text" loading={busy} icon={<DeleteOutlined />} aria-label="Forget" />
             }
           </Popconfirm>
         </div>
@@ -451,7 +478,7 @@ function TranscriptionHistory() {
             {
               isDesktop ?
                 <Button size="small" danger loading={busy}>Cancel</Button>
-                : <Button size="small" danger loading={busy} icon={<Icon name="close" />} aria-label="Cancel" />
+                : <Button size="small" danger loading={busy} icon={<CloseOutlined />} aria-label="Cancel" />
             }
           </Popconfirm>
         );
@@ -472,7 +499,7 @@ function TranscriptionHistory() {
             {
               isDesktop ?
                 <Button size="small" loading={busy}>Retry</Button>
-                : <Button size="small" loading={busy} icon={<Icon name="refresh" />} aria-label="Retry" />
+                : <Button size="small" loading={busy} icon={<ReloadOutlined />} aria-label="Retry" />
             }
           </Popconfirm>
         );
@@ -568,7 +595,7 @@ function TranscriptionHistory() {
     render: (_: unknown, record: TranscriptionRecord) => (
       isDesktop ?
         <Button size="small" onClick={() => setViewing(record)}>Read</Button>
-        : <Button size="small" icon={<Icon name="subject" />} aria-label="Read" onClick={() => setViewing(record)} />
+        : <Button size="small" icon={<FileTextOutlined />} aria-label="Read" onClick={() => setViewing(record)} />
     )
   };
 
@@ -593,7 +620,7 @@ function TranscriptionHistory() {
   ).length;
 
   const settingsButton = (
-    <Button icon={<Icon name="tune" />} onClick={() => setSettingsOpen(true)}>
+    <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
       Settings
     </Button>
   );
@@ -715,6 +742,7 @@ function TranscriptionHistory() {
       }
 
       <Tabs
+        className="transcription-history__tabs"
         activeKey={tab}
         onChange={(key) => setTab(key as ListTab)}
         tabBarExtraContent={{
@@ -726,17 +754,20 @@ function TranscriptionHistory() {
         items={[
           {
             key: 'transcription',
-            label: `Transcription${records.length ? ` (${records.length})` : ''}`,
+            icon: <AudioOutlined />,
+            label: <TabLabel text="Transcription" count={records.length} />,
             children: transcriptionPane
           },
           {
             key: 'translation',
-            label: `Translation${translationRecords.length ? ` (${translationRecords.length})` : ''}`,
+            icon: <TranslationOutlined />,
+            label: <TabLabel text="Translation" count={translationRecords.length} />,
             children: translationPane
           },
           {
             key: 'subtitles',
-            label: `Subtitles${subtitleRecords.length ? ` (${subtitleRecords.length})` : ''}`,
+            icon: <FileTextOutlined />,
+            label: <TabLabel text="Subtitles" count={subtitleRecords.length} />,
             children: subtitlesPane
           }
         ]}

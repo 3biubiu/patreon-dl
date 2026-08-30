@@ -1,11 +1,32 @@
 .campaign-list {
+  // The list is a grid of tiles now, so it wants more room than a column of
+  // rows did - each width fits one more tile than it otherwise would.
   &.mw-narrower {
-    max-width: 40.5em;
+    max-width: 52em;
   }
   &.mw-standard {
-    max-width: 47.5em;
+    max-width: 64em;
   }
   &.mw-wider {
-    max-width: 54.5em;
+    max-width: 76em;
+  }
+
+  // Column count follows the available width: as many tiles of at least
+  // --campaign-grid-min-width as fit, sharing the leftover space equally.
+  &__grid {
+    --campaign-grid-min-width: 11.5rem;
+
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--campaign-grid-min-width), 1fr));
+    gap: 1rem;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .campaign-list__grid {
+    // Two to a row on a phone rather than one wide tile per screen.
+    --campaign-grid-min-width: 8.5rem;
+    gap: 0.75rem;
   }
 }

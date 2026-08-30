@@ -1,6 +1,6 @@
 import "../assets/styles/Sidebar.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Avatar, Menu, Tooltip, type MenuProps } from "antd";
+import { Avatar, Menu, Select, Tooltip, type MenuProps } from "antd";
 import {
   HistoryOutlined,
   HomeOutlined,
@@ -20,6 +20,12 @@ import { useAuth } from "../contexts/AuthProvider";
 import { useQuota } from "../contexts/QuotaProvider";
 import { APP_NAME, getCampaignBaseUrl } from "../utils/Misc";
 import { type QuotaCounter, type QuotaStatus } from "../../types/Quota";
+import { type CampaignListSortBy } from "../../types/Campaign";
+import {
+  readSidebarSort,
+  writeSidebarSort,
+  SIDEBAR_SORT_OPTIONS
+} from "../utils/sidebarSortPreference";
 
 interface SidebarProps {
   /**
@@ -41,6 +47,14 @@ const TRANSCRIPTION_KEY = '/transcription';
 const SIGN_OUT_KEY = 'sign-out';
 const COLLAPSE_KEY = 'collapse';
 
+/**
+ * Enough to hold every creator in one request for all but the largest
+ * libraries; a bigger one is fetched again at its real size. The panel lists
+ * the whole library rather than a recent handful, so a second round trip in
+ * the rare case is better than paging something you scroll.
+ */
+const CAMPAIGN_FETCH_SIZE = 500;
+
 function Sidebar(props: SidebarProps) {
   const { collapsed = false, onNavigate, onToggleCollapse } = props;
   const { api } = useAPI();
@@ -50,18 +64,27 @@ function Sidebar(props: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
+  const [sortBy, setSortBy] = useState<CampaignListSortBy>(readSidebarSort);
 
   useEffect(() => {
     const abortController = new AbortController();
     void (async () => {
-      const campaigns = (await api.getCampaignList({ sortBy: 'last_downloaded', itemsPerPage: 10 })).campaigns;
+      let list = await api.getCampaignList({ sortBy, itemsPerPage: CAMPAIGN_FETCH_SIZE });
+      if (list.total > list.campaigns.length && !abortController.signal.aborted) {
+        list = await api.getCampaignList({ sortBy, itemsPerPage: list.total });
+      }
       if (!abortController.signal.aborted) {
-        setCampaigns(campaigns);
+        setCampaigns(list.campaigns);
       }
     })();
 
     return () => abortController.abort();
-  }, [api]);
+  }, [api, sortBy]);
+
+  const handleSortChange = useCallback((value: CampaignListSortBy) => {
+    setSortBy(value);
+    writeSidebarSort(value);
+  }, []);
 
   const campaignItems = useMemo(() => {
     return (campaigns || []).map((campaign) => ({
@@ -71,7 +94,7 @@ function Sidebar(props: SidebarProps) {
       icon: (
         <Avatar
           shape="square"
-          size={22}
+          size={30}
           src={`/media/campaign:${campaign.id}:avatar`}
         >
           {campaign.name?.charAt(0) || '?'}
@@ -81,32 +104,16 @@ function Sidebar(props: SidebarProps) {
     }));
   }, [campaigns]);
 
-  const items = useMemo<MenuProps['items']>(() => {
-    const items: NonNullable<MenuProps['items']> = [
-      { key: '/', icon: <HomeOutlined />, label: 'Home' },
-      // Both belong to the account rather than to a role. Favorites sits above
-      // History: it is the list the user built on purpose, not the trace
-      // browsing left behind.
-      { key: FAVORITES_KEY, icon: <StarOutlined />, label: 'Favorites' },
-      { key: HISTORY_KEY, icon: <HistoryOutlined />, label: 'History' }
-    ];
-    if (campaignItems.length > 0) {
-      // A group heading has nowhere to be read on the rail, so there the
-      // campaigns are just separated off instead of titled.
-      if (collapsed) {
-        items.push({ type: 'divider' }, ...campaignItems);
-      }
-      else {
-        items.push({
-          type: 'group',
-          key: 'recently-downloaded',
-          label: 'Recently downloaded',
-          children: campaignItems
-        });
-      }
-    }
-    return items;
-  }, [campaignItems, collapsed]);
+  // Stays put at the top of the panel. The creator list below it is what
+  // scrolls, so these three are always one click away however long it gets.
+  const items = useMemo<MenuProps['items']>(() => ([
+    { key: '/', icon: <HomeOutlined />, label: 'Home' },
+    // Both belong to the account rather than to a role. Favorites sits above
+    // History: it is the list the user built on purpose, not the trace
+    // browsing left behind.
+    { key: FAVORITES_KEY, icon: <StarOutlined />, label: 'Favorites' },
+    { key: HISTORY_KEY, icon: <HistoryOutlined />, label: 'History' }
+  ]), []);
 
   // Its own menu, so it can sit at the foot of the panel rather than wherever
   // the campaign list happens to end.
@@ -183,7 +190,7 @@ function Sidebar(props: SidebarProps) {
           {!collapsed ? <span className="sidebar__brand-text">{APP_NAME}</span> : null}
         </Link>
       </div>
-      <div className="sidebar__menu">
+      <div className="sidebar__nav">
         <Menu
           mode="inline"
           items={items}
@@ -191,6 +198,54 @@ function Sidebar(props: SidebarProps) {
           onClick={handleClick}
         />
       </div>
+      {
+        campaignItems.length > 0 ? (
+          <div className="sidebar__campaigns">
+            {
+              // The heading has nowhere to be read on the collapsed rail, so
+              // there the list is only separated off from the nav above it.
+              collapsed ? (
+                <div className="sidebar__campaigns-rule" />
+              ) : (
+                <div className="sidebar__campaigns-header">
+                  <span className="sidebar__campaigns-title">
+                    Creators
+                    <span className="sidebar__campaigns-count">{campaignItems.length}</span>
+                  </span>
+                  <Tooltip placement="right" title="Order">
+                    <Select<CampaignListSortBy>
+                      className="sidebar__campaigns-sort"
+                      size="small"
+                      variant="borderless"
+                      aria-label="Order creators by"
+                      value={sortBy}
+                      onChange={handleSortChange}
+                      options={SIDEBAR_SORT_OPTIONS}
+                      // The panel is narrower than the longest label, so the
+                      // menu is allowed to be wider than the control.
+                      popupMatchSelectWidth={false}
+                      placement="bottomRight"
+                    />
+                  </Tooltip>
+                </div>
+              )
+            }
+            {/* The whole library, not a recent handful - so this is the part
+                that scrolls when it outgrows the panel. */}
+            <div className="sidebar__campaigns-list">
+              <Menu
+                mode="inline"
+                items={campaignItems}
+                selectedKeys={selectedKeys}
+                onClick={handleClick}
+              />
+            </div>
+          </div>
+        ) : (
+          // Nothing to scroll yet, but the footer still belongs at the foot.
+          <div className="sidebar__spacer" />
+        )
+      }
       { !collapsed ? <QuotaSummary quota={quota} /> : null }
       <div className="sidebar__footer">
         <Menu

@@ -56,6 +56,51 @@
     row-gap: 0.5rem;
   }
 
+  // The three queues. A tab is a place here rather than a choice of view, so
+  // these keep the underline - what they gain is the icon set the rest of the
+  // admin pages use, and a count that reads as a quantity rather than as part
+  // of the name.
+  &__tabs {
+    .ant-tabs-tab {
+      padding-block: 0.6rem;
+    }
+
+    .ant-tabs-tab .anticon {
+      margin-inline-end: 0.45rem;
+      font-size: 1rem;
+      opacity: 0.75;
+    }
+
+    .ant-tabs-tab-active .anticon {
+      opacity: 1;
+    }
+  }
+
+  &__tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  // Fixed width per digit, so switching tabs while a queue drains does not
+  // shuffle the labels beside it.
+  &__tab-count {
+    min-width: 1.35rem;
+    padding-inline: 0.35rem;
+    border-radius: 999px;
+    background-color: var(--bs-tertiary-bg);
+    color: var(--bs-secondary-color);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.35rem;
+    text-align: center;
+  }
+
+  .ant-tabs-tab-active &__tab-count {
+    background-color: var(--bs-primary-bg-subtle, var(--bs-tertiary-bg));
+    color: var(--bs-primary);
+  }
+
   &__state {
     display: flex;
     flex-direction: column;

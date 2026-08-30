@@ -364,13 +364,22 @@ function Users() {
             label: 'Users',
             children: (
               <Table<AuthUser>
+                className="users__table"
                 rowKey="id"
                 dataSource={users}
                 pagination={false}
+                // Five columns plus a row of buttons will not fit a phone. The
+                // table keeps its natural widths and the wrapper scrolls, so
+                // the columns off to the right can still be reached instead of
+                // being squeezed into unreadable slivers or simply cut off.
+                scroll={{ x: 'max-content' }}
                 columns={[
                   {
                     title: 'Username',
                     dataIndex: 'username',
+                    // Pinned, so that scrolling sideways on a phone never
+                    // leaves you looking at a row you can no longer name.
+                    fixed: 'left',
                     render: (username: string, user) => (
                       <Space size={8}>
                         <span>{username}</span>
@@ -522,11 +531,13 @@ function Users() {
             ),
             children: (
               <Table<Registration>
+                className="users__table"
                 rowKey="id"
                 dataSource={registrations || []}
                 loading={registrations === null}
                 pagination={false}
                 locale={{ emptyText: 'No applications waiting' }}
+                scroll={{ x: 'max-content' }}
                 columns={[
                   {
                     title: 'Username',
@@ -654,13 +665,14 @@ function Users() {
           ) : null
         }
         <Table<LoginLogEntry>
-          className="users__login-log"
+          className="users__login-log users__table"
           rowKey={(entry, index) => `${entry.at}-${index ?? 0}`}
           dataSource={loginLog || []}
           loading={loginLog === null && loginLogLoading}
           pagination={false}
           size="small"
           locale={{ emptyText: 'Nothing recorded for this account yet' }}
+          scroll={{ x: 'max-content' }}
           columns={[
             {
               title: 'When',
@@ -687,6 +699,10 @@ function Users() {
             {
               title: 'Client',
               dataIndex: 'userAgent',
+              // A user agent string is long enough to push every other column
+              // off the screen on its own, so it is capped and elided; the
+              // whole of it is a hover away.
+              width: 220,
               ellipsis: true,
               render: (userAgent: string | null) => (
                 <Tooltip title={userAgent || undefined}>

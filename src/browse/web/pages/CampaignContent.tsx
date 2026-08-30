@@ -139,11 +139,19 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
     }
     const abortController = new AbortController();
     void (async () => {
-      const found = await api.getCollection(collectionId);
-      const campaign = found ? await api.getCampaign({ id: found.campaignId }) : null;
-      if (!abortController.signal.aborted) {
-        setCollection(found?.collection || null);
-        setCampaign(campaign);
+      try {
+        const found = await api.getCollection(collectionId);
+        const campaign = found ? await api.getCampaign({ id: found.campaignId }) : null;
+        if (!abortController.signal.aborted) {
+          setCollection(found?.collection || null);
+          setCampaign(campaign);
+        }
+      }
+      catch {
+        // `getCampaign` now reports a server that did not answer by throwing.
+        // The enclosing layout is loading the same creator and has somewhere
+        // to say so; here there is nothing to add, and the page stays as it
+        // was rather than raising an unhandled rejection.
       }
     })();
 

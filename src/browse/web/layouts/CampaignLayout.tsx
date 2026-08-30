@@ -1,5 +1,5 @@
 import { Container, Row, Col } from "react-bootstrap";
-import { Result } from "antd";
+import { Button, Result } from "antd";
 import { Outlet, useParams } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useEffect, useState } from "react";
@@ -23,30 +23,43 @@ function CampaignLayout() {
   const { setTitle } = useDocument();
   const [campaign, setCampaign] = useState<CampaignLayoutOutletContext['campaign']>(null);
   const [missing, setMissing] = useState(false);
+  // Kept apart from `missing`: a creator the library does not have is a
+  // settled answer, a server that did not reply is not one, and telling the
+  // second as the first would deny the existence of a creator who is in fact
+  // there.
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const abortController = new AbortController();
     setCampaign(null);
     setMissing(false);
+    setError(null);
     void (async () => {
-      let campaign;
-      if (campaignId) {
-        campaign = await api.getCampaign({ id: campaignId, withCounts: true });
-      } else {
-        campaign = await api.getCampaign({ vanity: decodeURIComponent(vanity!), withCounts: true });
-      }
-      if (!abortController.signal.aborted) {
-        // No such creator, or one this account is not permitted - which of the
-        // two it is deliberately cannot be told apart from here.
-        if (!campaign) {
-          setMissing(true);
-          return;
+      try {
+        let campaign;
+        if (campaignId) {
+          campaign = await api.getCampaign({ id: campaignId, withCounts: true });
+        } else {
+          campaign = await api.getCampaign({ vanity: decodeURIComponent(vanity!), withCounts: true });
         }
-        setCampaign({
-          ...campaign,
-          baseUrl: getCampaignBaseUrl(campaign)
-        });
-      };
+        if (!abortController.signal.aborted) {
+          // No such creator, or one this account is not permitted - which of
+          // the two it is deliberately cannot be told apart from here.
+          if (!campaign) {
+            setMissing(true);
+            return;
+          }
+          setCampaign({
+            ...campaign,
+            baseUrl: getCampaignBaseUrl(campaign)
+          });
+        }
+      }
+      catch (e) {
+        if (!abortController.signal.aborted) {
+          setError(e instanceof Error ? e.message : 'Could not load this creator');
+        }
+      }
     })();
 
     return () => abortController.abort();
@@ -55,6 +68,21 @@ function CampaignLayout() {
   useEffect(() => {
     setTitle(campaign?.name || null);
   }, [setTitle, campaign]);
+
+  if (error) {
+    return (
+      <Result
+        status="500"
+        title="Could not load this creator"
+        subTitle={`${error}. This says nothing about whether the creator is in your library - the request itself did not get through.`}
+        extra={
+          <Button type="primary" onClick={() => window.location.reload()}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
 
   if (missing) {
     return (

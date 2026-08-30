@@ -48,13 +48,38 @@ const DB_BUSY_TIMEOUT_MS = 30000;
  * process that opens the file afterwards inherits it.
  */
 function setWALJournalMode(db: Database.Database, logger?: Logger | null) {
-  // Returns the mode actually in effect, which is not necessarily the one
-  // asked for - so it is checked rather than assumed. WAL needs to mmap a
-  // "-shm" file that every process shares, which a network filesystem cannot
-  // provide; a database on a share therefore stays on the rollback journal.
-  // A symlink is not itself a problem here - what matters is the filesystem
-  // the link lands on.
-  const mode = db.pragma('journal_mode = WAL', { simple: true });
+  let mode: unknown;
+  try {
+    // Changing the journal mode rewrites the database header, which needs a
+    // moment with the file to itself. A download run that is mid-commit
+    // therefore makes this throw SQLITE_BUSY outright - and unlike an ordinary
+    // statement it does not wait for `busy_timeout` first. That must not stop
+    // the server from starting: the mode is only an optimisation, and the
+    // switch is retried every time the database is opened, so the first start
+    // that finds the file quiet will get it.
+    //
+    // The pragma also returns the mode actually in effect, which is not
+    // necessarily the one asked for, so the result is checked rather than
+    // assumed. WAL needs to mmap a "-shm" file that every process shares,
+    // which a network filesystem cannot provide; a database on a share stays
+    // on the rollback journal. A symlink is not itself a problem here - what
+    // matters is the filesystem the link lands on.
+    mode = db.pragma('journal_mode = WAL', { simple: true });
+  }
+  catch (error) {
+    commonLog(
+      logger,
+      'warn',
+      'DB',
+      'Could not switch the database to WAL journal mode - it is in use by ' +
+      'another process, most likely a download in progress. Browsing and ' +
+      'downloading at the same time may fail with "database is locked" until ' +
+      'the switch succeeds; starting the server again while nothing is ' +
+      'downloading will do it. Cause:',
+      error
+    );
+    return;
+  }
   if (mode === 'wal') {
     return;
   }

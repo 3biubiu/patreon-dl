@@ -207,9 +207,19 @@ class API {
     const result = await apiFetch(urlObj.toString());
     // A creator that is not there and one this account may not see answer the
     // same way, on purpose. Callers get `null` for both rather than an error
-    // body they would otherwise spread into a half-built campaign.
-    if (!result.ok) {
+    // body they would otherwise spread into a half-built campaign, and neither
+    // case can be told from the other.
+    if (result.status === 404 || result.status === 403) {
       return null;
+    }
+    // Anything else is a failure to answer, which is not the same thing as an
+    // answer of "no". Folding the two together makes a proxy's 502 - or a
+    // server too busy to reply - read as "this creator is not in your
+    // library", which is a lie about the user's own data. Thrown rather than
+    // returned as null so the caller can say what actually happened, the same
+    // way every other call in this client reports a failed request.
+    if (!result.ok) {
+      throw Error(`The server did not answer (HTTP ${result.status})`);
     }
     return await result.json();
   }

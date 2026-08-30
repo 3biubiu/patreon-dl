@@ -348,21 +348,36 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
       const joinUser = vanity ? `LEFT JOIN user ON user.user_id = campaign.creator_id` : ''
       const whereClause = vanity ? `WHERE user.vanity = ?` : `WHERE campaign.campaign_id = ?`;
       const whereValues = vanity ? [ vanity ] : [ id ];
+      // Correlated subqueries rather than grouped ones joined on afterwards.
+      // Written the other way - "GROUP BY campaign_id" over the whole table,
+      // then LEFT JOINed and filtered at the end - SQLite counts every
+      // campaign in the library before throwing all but one row away, so
+      // opening a single creator's page costs four full table scans. Keyed to
+      // `campaign.campaign_id` they are four indexed counts of one campaign
+      // instead.
       const row = this.get(
         `
         SELECT
           campaign.details,
-          IFNULL(media_count, 0) AS media_count,
-          IFNULL(post_count, 0) AS post_count,
-          IFNULL(product_count, 0) AS product_count,
-          IFNULL(collection_count, 0) AS collection_count
+          (
+            SELECT COUNT(*) FROM content
+            WHERE content.campaign_id = campaign.campaign_id AND content.content_type = 'post'
+          ) AS post_count,
+          (
+            SELECT COUNT(*) FROM content
+            WHERE content.campaign_id = campaign.campaign_id AND content.content_type = 'product'
+          ) AS product_count,
+          (
+            SELECT COUNT(*) FROM content_media
+            WHERE content_media.campaign_id = campaign.campaign_id
+          ) AS media_count,
+          (
+            SELECT COUNT(*) FROM collection
+            WHERE collection.campaign_id = campaign.campaign_id
+          ) AS collection_count
         FROM
           campaign
           ${joinUser}
-          LEFT JOIN (SELECT COUNT(content_id) AS post_count, campaign_id FROM content WHERE content_type = 'post' GROUP BY campaign_id) postc ON postc.campaign_id = campaign.campaign_id
-          LEFT JOIN (SELECT COUNT(content_id) AS product_count, campaign_id FROM content WHERE content_type = 'product' GROUP BY campaign_id) productc ON productc.campaign_id = campaign.campaign_id
-          LEFT JOIN (SELECT COUNT(media_id) AS media_count, campaign_id FROM content_media GROUP BY campaign_id) mc ON mc.campaign_id = campaign.campaign_id
-          LEFT JOIN (SELECT COUNT(collection_id) AS collection_count, campaign_id FROM collection GROUP BY campaign_id) collectionc ON collectionc.campaign_id = campaign.campaign_id
         ${whereClause}
         `,
         [...whereValues]

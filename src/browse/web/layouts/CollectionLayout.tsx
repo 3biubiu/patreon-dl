@@ -1,5 +1,5 @@
 import { Container, Row, Col } from "react-bootstrap";
-import { Result } from "antd";
+import { Button, Result } from "antd";
 import { Outlet, useParams } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
 import { useEffect, useState } from "react";
@@ -20,30 +20,56 @@ function CollectionLayout() {
   const [campaign, setCampaign] = useState<(CampaignWithCounts & { baseUrl: string; }) | null>(null);
   const [collection, setCollection] = useState<Collection | null>(null);
   const [missing, setMissing] = useState(false);
+  // A request that never got an answer is not the same as an answer of "gone"
+  // - see `CampaignLayout` for why the two are kept apart.
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const abortController = new AbortController();
+    setError(null);
     void (async () => {
-      const found = await api.getCollection(collectionId);
-      const campaign = found ?
-        await api.getCampaign({ id: found.campaignId, withCounts: true }) : null;
-      if (!abortController.signal.aborted) {
-        // The collection is gone, or belongs to a creator this account is not
-        // permitted. Either way there is nothing here to show.
-        if (!found || !campaign) {
-          setMissing(true);
-          return;
+      try {
+        const found = await api.getCollection(collectionId);
+        const campaign = found ?
+          await api.getCampaign({ id: found.campaignId, withCounts: true }) : null;
+        if (!abortController.signal.aborted) {
+          // The collection is gone, or belongs to a creator this account is
+          // not permitted. Either way there is nothing here to show.
+          if (!found || !campaign) {
+            setMissing(true);
+            return;
+          }
+          setCampaign({
+            ...campaign,
+            baseUrl: getCampaignBaseUrl(campaign)
+          });
+          setCollection(found.collection);
         }
-        setCampaign({
-          ...campaign,
-          baseUrl: getCampaignBaseUrl(campaign)
-        });
-        setCollection(found.collection);
-      };
+      }
+      catch (e) {
+        if (!abortController.signal.aborted) {
+          setError(e instanceof Error ? e.message : 'Could not load this collection');
+        }
+      }
     })();
 
     return () => abortController.abort();
   }, [api, collectionId]);
+
+  if (error) {
+    return (
+      <Result
+        status="500"
+        title="Could not load this collection"
+        subTitle={`${error}. This says nothing about whether the collection is still in your library - the request itself did not get through.`}
+        extra={
+          <Button type="primary" onClick={() => window.location.reload()}>
+            Try again
+          </Button>
+        }
+      />
+    );
+  }
 
   if (missing) {
     return (

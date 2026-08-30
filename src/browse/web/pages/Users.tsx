@@ -202,9 +202,15 @@ function Users() {
     let cancelled = false;
     void (async () => {
       try {
-        let list = await api.getCampaignList({ itemsPerPage: CAMPAIGN_FETCH_SIZE });
+        // Only the id and the name are kept below, so the per-creator totals
+        // are not worth the four table aggregates they cost.
+        let list = await api.getCampaignList({
+          itemsPerPage: CAMPAIGN_FETCH_SIZE, withCounts: false
+        });
         if (list.total > list.campaigns.length) {
-          list = await api.getCampaignList({ itemsPerPage: list.total });
+          list = await api.getCampaignList({
+            itemsPerPage: list.total, withCounts: false
+          });
         }
         if (!cancelled) {
           setCampaigns(list.campaigns.map(({ id, name }) => ({ id, name })));

@@ -71,9 +71,16 @@ function Sidebar(props: SidebarProps) {
   useEffect(() => {
     const abortController = new AbortController();
     void (async () => {
-      let list = await api.getCampaignList({ sortBy, itemsPerPage: CAMPAIGN_FETCH_SIZE });
+      // Names and avatars only: the per-creator totals behind `withCounts` are
+      // four full table aggregates that the page size does not reduce, and
+      // nothing in this panel shows them.
+      let list = await api.getCampaignList({
+        sortBy, itemsPerPage: CAMPAIGN_FETCH_SIZE, withCounts: false
+      });
       if (list.total > list.campaigns.length && !abortController.signal.aborted) {
-        list = await api.getCampaignList({ sortBy, itemsPerPage: list.total });
+        list = await api.getCampaignList({
+          sortBy, itemsPerPage: list.total, withCounts: false
+        });
       }
       if (!abortController.signal.aborted) {
         setCampaigns(list.campaigns);

@@ -30,15 +30,26 @@ export interface GetCampaignListParams {
    * paging built on it describe what the caller may actually see.
    */
   campaignIds?: string[] | null;
+  /**
+   * Include each campaign's post / product / media / collection totals.
+   *
+   * On by default because the creator list on the home page shows them. Each
+   * one is a full aggregate over `content`, `content_media` or `collection`,
+   * materialised whole however small the `limit` - so a caller that only needs
+   * names and avatars, as the sidebar does, should turn them off rather than
+   * pay for four table scans it will not read.
+   */
+  withCounts?: boolean;
 }
 
 export interface CampaignList {
-  campaigns: (Campaign & {
-    postCount: number;
-    productCount: number;
-    mediaCount: number;
-    collectionCount: number;
-  })[];
+  campaigns: CampaignWithCounts[];
+  total: number;
+}
+
+/** What comes back when the totals were not asked for. */
+export interface CampaignSummaryList {
+  campaigns: Campaign[];
   total: number;
 }
 

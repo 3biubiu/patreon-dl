@@ -25,10 +25,19 @@ export default class CampaignAPIRequestHandler extends Basehandler {
       ['a-z', 'z-a', 'most_content', 'most_media', 'last_downloaded'],
       'a-z'
     );
+    // The four per-campaign totals are full table aggregates that a LIMIT does
+    // not reduce, so a caller that only needs names and avatars - the sidebar -
+    // says so and is spared them.
+    const withCounts = req.query['with_counts'] ? this.getQueryParamValue<'true' | 'false'>(
+      req,
+      'with_counts',
+      ['true', 'false']
+    ) === 'true' : true;
     const list = this.#api.getCampaignList({
       sortBy,
       limit,
       offset,
+      withCounts,
       // Narrowed in the query rather than after it, so that `total` - and the
       // paging the browser builds from it - counts only what this user may see.
       campaignIds: getCampaignScope(req)

@@ -26,6 +26,49 @@ const DB_SCHEMA_VERSION = '1.2.0';
  */
 const DB_BUSY_TIMEOUT_MS = 30000;
 
+/**
+ * Puts the database in WAL mode, so that downloading and browsing can happen
+ * at the same time.
+ *
+ * Under the default rollback journal a reader and a writer are mutually
+ * exclusive, and the way SQLite avoids starving the writer makes that worse
+ * than it sounds: a writer waiting to commit takes a PENDING lock, and from
+ * then on *every new read is blocked* until the commit lands. Since
+ * better-sqlite3 is synchronous, one blocked read stalls the whole server -
+ * not the one request that touched the database, all of them. Meanwhile the
+ * writer is waiting for the reads already in flight to finish, and a download
+ * run that loses that race gives up with SQLITE_BUSY ("database is locked")
+ * and the record is simply lost.
+ *
+ * WAL takes readers and writers off each other's path entirely, which is the
+ * whole of the fix: the browse server never writes anything but a settings
+ * row, so with WAL the two processes stop contending at all.
+ *
+ * The mode is stored in the database header, so this is set once and every
+ * process that opens the file afterwards inherits it.
+ */
+function setWALJournalMode(db: Database.Database, logger?: Logger | null) {
+  // Returns the mode actually in effect, which is not necessarily the one
+  // asked for - so it is checked rather than assumed. WAL needs to mmap a
+  // "-shm" file that every process shares, which a network filesystem cannot
+  // provide; a database on a share therefore stays on the rollback journal.
+  // A symlink is not itself a problem here - what matters is the filesystem
+  // the link lands on.
+  const mode = db.pragma('journal_mode = WAL', { simple: true });
+  if (mode === 'wal') {
+    return;
+  }
+  commonLog(
+    logger,
+    'warn',
+    'DB',
+    `Could not switch the database to WAL journal mode - it is "${String(mode)}". ` +
+    'Downloading while the browse server is running may fail with "database is ' +
+    'locked". WAL requires a local filesystem: a database kept on a network ' +
+    'share cannot use it.'
+  );
+}
+
 export async function openDB(file: string, dryRun = false, logger?: Logger | null): Promise<Database.Database> {
   const dbFileExists = dryRun ? false : existsSync(file);
 
@@ -53,6 +96,12 @@ export async function openDB(file: string, dryRun = false, logger?: Logger | nul
       verbose: logger ? (msg) => commonLog(logger, 'debug', 'DB', msg) : undefined
     }
   );
+
+  // An in-memory database has no file to journal and reports "memory" here,
+  // which is not a failure to report.
+  if (!dryRun) {
+    setWALJournalMode(db, logger);
+  }
 
   try {
     db.exec('PRAGMA foreign_keys = OFF;');

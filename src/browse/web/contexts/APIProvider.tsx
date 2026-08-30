@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import { type CampaignList, type CampaignListSortBy, type CampaignWithCounts } from '../../types/Campaign';
+import { type CampaignList, type CampaignListSortBy, type CampaignSummaryList, type CampaignWithCounts } from '../../types/Campaign';
 import { type ContentType, type ContentList, type ContentListSortBy, type PostWithComments, type CollectionListSortBy, type CollectionList, type PostTagList } from '../../types/Content';
 import { type Campaign, type Product } from '../../../entities';
 import { type BrowseSettings, type BrowseSettingOptions as BrowseSettingOptions } from '../../types/Settings';
@@ -80,14 +80,35 @@ class API {
     sortBy?: CampaignListSortBy;
     page?: number;
     itemsPerPage: number;
-  }): Promise<CampaignList> {
+    withCounts?: false;
+  }): Promise<CampaignSummaryList>;
+  async getCampaignList(params: {
+    sortBy?: CampaignListSortBy;
+    page?: number;
+    itemsPerPage: number;
+    withCounts?: boolean;
+  }): Promise<CampaignList>;
+  async getCampaignList(params: {
+    sortBy?: CampaignListSortBy;
+    page?: number;
+    itemsPerPage: number;
+    /**
+     * Ask for the per-creator totals. They cost four full table aggregates
+     * that the page size does not reduce, so a caller showing only names and
+     * avatars should pass `false`.
+     */
+    withCounts?: boolean;
+  }): Promise<CampaignList | CampaignSummaryList> {
     const urlObj = new URL('/api/campaigns', window.location.href);
     if (params.sortBy) {
       urlObj.searchParams.append('sort_by', params.sortBy);
     }
+    if (params.withCounts === false) {
+      urlObj.searchParams.set('with_counts', 'false');
+    }
     this.#setPaginationParams(urlObj, params);
     const result = await apiFetch(urlObj.toString());
-    return await result.json();
+    return await result.json() as CampaignList | CampaignSummaryList;
   }
 
   /**

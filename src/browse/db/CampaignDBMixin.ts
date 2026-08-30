@@ -1,7 +1,7 @@
 import { type Reward } from '../../entities/Reward.js';
 import { type Campaign } from '../../entities/Campaign.js';
 import { type UserDBConstructor } from './UserDBMixin.js';
-import { type CampaignList, type CampaignWithCounts, type GetCampaignListParams, type GetCampaignParams } from '../types/Campaign.js';
+import { type CampaignList, type CampaignSummaryList, type CampaignWithCounts, type GetCampaignListParams, type GetCampaignParams } from '../types/Campaign.js';
 
 export type CampaignDBConstructor = new (
   ...args: any[]
@@ -210,8 +210,10 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
       }
     }
 
-    getCampaignList(params: GetCampaignListParams): CampaignList {
-      const { sortBy, limit, offset, campaignIds } = params;
+    getCampaignList(params: GetCampaignListParams & { withCounts: false }): CampaignSummaryList;
+    getCampaignList(params?: GetCampaignListParams): CampaignList;
+    getCampaignList(params: GetCampaignListParams = {}): CampaignList | CampaignSummaryList {
+      const { sortBy, limit, offset, campaignIds, withCounts = true } = params;
       this.log('debug', 'Get campaigns from DB:', params);
       // A caller permitted no campaigns is answered without asking the DB:
       // an empty list in SQL would be "IN ()", which SQLite will not parse.
@@ -254,58 +256,75 @@ export function CampaignDBMixin<TBase extends UserDBConstructor>(Base: TBase) {
         limitOffsetClause = 'LIMIT ?';
         limitOffsetValues.push(limit);
       }
-      const postCountSelect = `
-        SELECT
-          COUNT(*) AS post_count,
-          campaign_id
-        FROM content
-        WHERE content_type = 'post' GROUP BY campaign_id
-      `;
-      const productCountSelect = `
-        SELECT
-          COUNT(*) AS product_count,
-          campaign_id
-        FROM content
-        WHERE content_type = 'product' GROUP BY campaign_id
-      `;
-      const mediaCountSelect = this.getMediaListSQL({
-        select: 'COUNT(content_media.media_id) AS media_count, content_media.campaign_id',
-        groupBy: 'content_media.campaign_id'
-      });
-      const collectionCountSelect = `
-        SELECT
-          COUNT(collection_id) AS collection_count,
-          campaign_id
-        FROM collection GROUP BY campaign_id
-      `;
+      // Every count below is a full aggregate that SQLite materialises whole,
+      // so `limit` buys nothing: asking for ten campaigns costs the same as
+      // asking for all of them. They are therefore only joined in when
+      // something actually needs them - either the caller will read them, or
+      // the requested order is defined by them.
+      const needsContentCounts = withCounts || sortBy === 'most_content';
+      const needsMediaCount = withCounts || sortBy === 'most_media';
+      const selectParts = [ 'details' ];
+      const joinParts: string[] = [];
+      if (needsContentCounts) {
+        selectParts.push(
+          'IFNULL(post_count, 0) post_count',
+          'IFNULL(product_count, 0) product_count',
+          'COALESCE(post_count, 0) + COALESCE(product_count, 0) content_count'
+        );
+        joinParts.push(
+          `LEFT JOIN (
+            SELECT COUNT(*) AS post_count, campaign_id
+            FROM content WHERE content_type = 'post' GROUP BY campaign_id
+          ) postc ON postc.campaign_id = campaign.campaign_id`,
+          `LEFT JOIN (
+            SELECT COUNT(*) AS product_count, campaign_id
+            FROM content WHERE content_type = 'product' GROUP BY campaign_id
+          ) productc ON productc.campaign_id = campaign.campaign_id`
+        );
+      }
+      if (needsMediaCount) {
+        selectParts.push('IFNULL(media_count, 0) media_count');
+        joinParts.push(
+          `LEFT JOIN (${this.getMediaListSQL({
+            select: 'COUNT(content_media.media_id) AS media_count, content_media.campaign_id',
+            groupBy: 'content_media.campaign_id'
+          })}) mc ON mc.campaign_id = campaign.campaign_id`
+        );
+      }
+      // Shown on the creator cards but never sorted by, so this one follows
+      // `withCounts` alone.
+      if (withCounts) {
+        selectParts.push('IFNULL(collection_count, 0) AS collection_count');
+        joinParts.push(
+          `LEFT JOIN (
+            SELECT COUNT(collection_id) AS collection_count, campaign_id
+            FROM collection GROUP BY campaign_id
+          ) cc ON cc.campaign_id = campaign.campaign_id`
+        );
+      }
       try {
         const rows = this.all(
           `
           SELECT
-            details,
-            IFNULL(post_count, 0) post_count,
-            IFNULL(product_count, 0) product_count,
-            IFNULL(media_count, 0) media_count,
-            IFNULL(collection_count, 0) AS collection_count,
-            COALESCE(post_count, 0) + COALESCE(product_count, 0) content_count
+            ${selectParts.join(', ')}
           FROM campaign
-            LEFT JOIN (${postCountSelect}) postc ON postc.campaign_id = campaign.campaign_id
-            LEFT JOIN (${productCountSelect}) productc ON productc.campaign_id = campaign.campaign_id 
-            LEFT JOIN (${mediaCountSelect}) mc ON mc.campaign_id = campaign.campaign_id 
-            LEFT JOIN (${collectionCountSelect}) cc ON cc.campaign_id = campaign.campaign_id
+            ${joinParts.join(' ')}
           ${scopeClause}
           ${orderByClause}
           ${limitOffsetClause}
           `,
           [...scopeValues, ...limitOffsetValues]
         );
-        const campaigns = rows.map((row) => ({
-          ...JSON.parse(row.details) as Campaign,
-          postCount: (row.post_count || 0) as number,
-          collectionCount: (row.collection_count || 0) as number,
-          productCount: (row.product_count || 0) as number,
-          mediaCount: (row.media_count || 0) as number
-        }));
+        const campaigns = rows.map((row) => {
+          const campaign = JSON.parse(row.details) as Campaign;
+          return withCounts ? {
+            ...campaign,
+            postCount: (row.post_count || 0) as number,
+            collectionCount: (row.collection_count || 0) as number,
+            productCount: (row.product_count || 0) as number,
+            mediaCount: (row.media_count || 0) as number
+          } : campaign;
+        });
         const totalResult = this.get(
           `SELECT COUNT(*) AS campaign_count FROM campaign ${scopeClause}`,
           [...scopeValues]

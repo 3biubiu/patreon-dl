@@ -1,7 +1,7 @@
 import "../assets/styles/MediaGrid.scss";
 import { type Downloadable } from "../../../entities/Downloadable";
 import { Badge, Stack } from "react-bootstrap";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import VideoPlayer, { type VideoPlayerSource } from "./VideoPlayer";
 
 import Lightbox from "./Lightbox";
@@ -121,6 +121,24 @@ function MediaGrid(props: MediaGridProps) {
     }
     return result;
   }, []);
+  // Which video is actually on show. The post being rendered can change
+  // without this component being remounted - the previous/next links on a post
+  // page swap `items` under the same instance - and the video that was playing
+  // belongs to the post that has gone. Left alone it stays up, over a grid
+  // still hidden on its behalf, and goes on playing.
+  //
+  // Derived rather than only cleared in the effect below, so the very first
+  // render after the swap is already right: an effect runs after the commit,
+  // which would show the stale player for a frame.
+  const activeVideo =
+    playing && lgItemProps.some(({ id }) => id === playing.id) ? playing : null;
+
+  useEffect(() => {
+    if (playing && !activeVideo) {
+      setPlaying(null);
+    }
+  }, [ playing, activeVideo ]);
+
   if (lgItemProps.length === 0) {
     return null;
   }
@@ -145,7 +163,7 @@ function MediaGrid(props: MediaGridProps) {
     ));
 
   const grid = (
-    <div className={`media-grid media-grid--${cells}${playing ? ' media-grid--hidden' : ''}`}>
+    <div className={`media-grid media-grid--${cells}${activeVideo ? ' media-grid--hidden' : ''}`}>
       {items}
       {
         lgItemProps.length > 4 ?
@@ -169,10 +187,10 @@ function MediaGrid(props: MediaGridProps) {
     <>
       {grid}
       {
-        playing ? (
+        activeVideo ? (
           <VideoPlayer
-            key={playing.id}
-            source={playing}
+            key={activeVideo.id}
+            source={activeVideo}
             autoPlay
             onClose={() => setPlaying(null)}
           />

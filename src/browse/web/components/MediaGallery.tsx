@@ -199,6 +199,16 @@ function MediaGallery(props: MediaGalleryProps) {
   }, []);
 
   const tiles = useMemo(() => items.map(buildTile), [items]);
+
+  // `items` can be swapped under a mounted gallery - paging the media list
+  // does exactly that - and a video from the page that has gone should not be
+  // left holding the state. The row guard below already keeps it off screen;
+  // this stops it reappearing unbidden if its page comes back round.
+  useEffect(() => {
+    if (playing && !tiles.some((tile) => tile.id === playing.id)) {
+      setPlaying(null);
+    }
+  }, [ playing, tiles ]);
   // Row packing changes with the container width, but the slides do not - so
   // the lightbox is only re-read when the tiles themselves change.
   const itemsKey = useMemo(() => tiles.map((tile) => tile.id).join('|'), [tiles]);

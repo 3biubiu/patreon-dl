@@ -374,18 +374,10 @@ function Users() {
                 rowKey="id"
                 dataSource={users}
                 pagination={false}
-                // Five columns plus a row of buttons will not fit a phone. The
-                // table keeps its natural widths and the wrapper scrolls, so
-                // the columns off to the right can still be reached instead of
-                // being squeezed into unreadable slivers or simply cut off.
-                scroll={{ x: 'max-content' }}
                 columns={[
                   {
                     title: 'Username',
                     dataIndex: 'username',
-                    // Pinned, so that scrolling sideways on a phone never
-                    // leaves you looking at a row you can no longer name.
-                    fixed: 'left',
                     render: (username: string, user) => (
                       <Space size={8}>
                         <span>{username}</span>
@@ -467,7 +459,7 @@ function Users() {
                     key: 'actions',
                     align: 'right',
                     render: (_, user) => (
-                      <Space size={4}>
+                      <Space size={4} wrap>
                         {
                           user.banned ? (
                             <Popconfirm
@@ -543,7 +535,6 @@ function Users() {
                 loading={registrations === null}
                 pagination={false}
                 locale={{ emptyText: 'No applications waiting' }}
-                scroll={{ x: 'max-content' }}
                 columns={[
                   {
                     title: 'Username',
@@ -559,7 +550,7 @@ function Users() {
                     key: 'actions',
                     align: 'right',
                     render: (_, registration) => (
-                      <Space size={4}>
+                      <Space size={4} wrap>
                         <Popconfirm
                           title={`Approve ${registration.username}?`}
                           description="The account is created as an ordinary user on the default daily limit. You can change that afterwards."
@@ -678,7 +669,6 @@ function Users() {
           pagination={false}
           size="small"
           locale={{ emptyText: 'Nothing recorded for this account yet' }}
-          scroll={{ x: 'max-content' }}
           columns={[
             {
               title: 'When',
@@ -705,10 +695,9 @@ function Users() {
             {
               title: 'Client',
               dataIndex: 'userAgent',
-              // A user agent string is long enough to push every other column
-              // off the screen on its own, so it is capped and elided; the
-              // whole of it is a hover away.
-              width: 220,
+              // A user agent string would take the whole row if it could, and
+              // the columns beside it are the ones being read. It gets no more
+              // than its share and is elided; the whole of it is a hover away.
               ellipsis: true,
               render: (userAgent: string | null) => (
                 <Tooltip title={userAgent || undefined}>

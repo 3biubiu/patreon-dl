@@ -1,6 +1,11 @@
 @use "./mixins";
 
 .transcription-history {
+  // The page sits directly against the sidebar without this - every other
+  // admin page (History, Users) carries the same gutter.
+  width: 100%;
+  padding: 1.5rem 1rem 3rem;
+
   &__video {
     display: flex;
     align-items: center;
@@ -124,6 +129,12 @@
     display: flex;
     gap: 0.25rem;
     flex-wrap: wrap;
+  }
+}
+
+@media (min-width: 768px) {
+  .transcription-history {
+    padding-inline: 1.5rem;
   }
 }
 

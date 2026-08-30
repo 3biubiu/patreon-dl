@@ -1,7 +1,7 @@
 .users {
   width: 100%;
-  // The tables inside scroll on their own; the page itself must not, or the
-  // header and the tab bar drift off to the left with them.
+  // Nothing here scrolls sideways - not the page, not the tables inside it.
+  // A cramped column on a phone reads better than one parked off-screen.
   max-width: 100%;
   overflow-x: hidden;
   padding: 1.5rem 1rem 3rem;
@@ -22,27 +22,11 @@
     font-size: 0.85em;
   }
 
-  // Each table carries `scroll={{ x: 'max-content' }}`, so its columns keep
-  // their natural widths and this is the box that moves. Without the touch
-  // hint the swipe feels like the page is stuck.
+  // The columns share whatever width there is and long values wrap inside
+  // their cell, which is what keeps the table within the viewport.
   &__table {
-    .ant-table-body,
-    .ant-table-content {
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: thin;
-    }
-
-    // A visible bar rather than the overlay one the platform would draw only
-    // while moving: it is what says there is more to the right.
-    .ant-table-body::-webkit-scrollbar,
-    .ant-table-content::-webkit-scrollbar {
-      height: 6px;
-    }
-
-    .ant-table-body::-webkit-scrollbar-thumb,
-    .ant-table-content::-webkit-scrollbar-thumb {
-      border-radius: 3px;
-      background-color: var(--bs-border-color);
+    .ant-table-cell {
+      word-break: break-word;
     }
   }
 }
@@ -61,11 +45,10 @@
       font-size: 1.35rem;
     }
 
-    // antd pads cells generously; on a phone that padding is most of what the
-    // reader has to swipe past.
+    // antd pads cells generously; on a phone that padding is width the
+    // values themselves could be using.
     &__table .ant-table-cell {
       padding: 0.5rem 0.5rem !important;
-      white-space: nowrap;
     }
   }
 }

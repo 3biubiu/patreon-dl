@@ -17,6 +17,7 @@ import SearchInputBox from "../components/SearchInputBox";
 import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
 import { LoadingBlock, LoadingOverlay } from "../components/Loading";
 import { readViewCache, writeViewCache } from "../utils/viewCache";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface ViewParams {
   search: string;
@@ -61,6 +62,7 @@ const viewParamsReducer = (
 function CollectionList() {
   const { api } = useAPI();
   const { settings } = useBrowseSettings();
+  const { t } = useLanguage();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const location = useLocation();
   const cacheKey = `collection-list:${location.key}`;
@@ -146,11 +148,11 @@ function CollectionList() {
   }
 
   const subject = {
-    singular: 'collection',
-    plural: 'collections'
+    singular: t('subject_collection'),
+    plural: t('subject_collections')
   };
   if (viewParams.search) {
-    const w = ` with "${viewParams.search}"`;
+    const w = t('with_query', { query: viewParams.search });
     subject.singular += w;
     subject.plural += w;
   }
@@ -163,7 +165,7 @@ function CollectionList() {
             <Row className="mb-3 g-0 justify-content-center align-items-center">
               <Col className="w-auto flex-fill">
                 <SearchInputBox
-                  placeholder="Search collections"
+                  placeholder={t('search_collections')}
                   onConfirm={search}
                 />
               </Col>
@@ -179,14 +181,14 @@ function CollectionList() {
               <Col className="w-auto d-flex justify-content-end">
                 <Select
                   className="content-toolbar__sort"
-                  aria-label="Sort"
+                  aria-label={t('sort')}
                   value={viewParams.sortBy}
                   onChange={(sortBy: CollectionListSortBy) => setViewParams({ sortBy })}
                   options={[
                     { value: 'a-z', label: 'A-Z' },
                     { value: 'z-a', label: 'Z-A' },
-                    { value: 'last_created', label: 'Last created' },
-                    { value: 'last_updated', label: 'Last updated' }
+                    { value: 'last_created', label: t('sort_last_created') },
+                    { value: 'last_updated', label: t('sort_last_updated') }
                   ]}
                 />
               </Col>

@@ -8,6 +8,7 @@ import { ClearOutlined, FilterOutlined } from "@ant-design/icons";
 import { useSearchParams } from "react-router";
 import { type SearchInputBoxHandle } from "./SearchInputBox";
 import SortSelect from "./SortSelect";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface FilterModalButtonProps<S extends FilterSearchParams> {
   options: FilterData<S>;
@@ -82,6 +83,7 @@ const contentFilterReducer = <S extends FilterSearchParams>(currentFilter: Filte
 
 function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButtonProps<S>) {
   const { options: filterOptions, onFilter, searchInputBox } = props;
+  const { t } = useLanguage();
   const [ searchParams, setSearchParams ] = useSearchParams();
   const [modalFilter, setModalFilterValues] = useReducer(contentFilterReducer, null);
   const [appliedFilter, setAppliedFilterValues] = useReducer(contentFilterReducer, null);
@@ -354,7 +356,7 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
               type={activeCount > 0 ? 'primary' : 'default'}
               onClick={showPanel}
             >
-              Filters
+              {t('filters')}
             </Button>
           </Badge>
         ) : null
@@ -365,7 +367,7 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
             icon={<ClearOutlined />}
             onClick={handleClear}
           >
-            Clear
+            {t('clear')}
           </Button>
         ) : null
       }
@@ -379,7 +381,7 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
         ) : null
       }
       <Drawer
-        title="Filters"
+        title={t('filters')}
         placement="right"
         width={360}
         rootClassName="filter-panel"
@@ -387,8 +389,8 @@ function FilterModalButton<S extends FilterSearchParams>(props: FilterModalButto
         onClose={hidePanel}
         footer={
           <div className="filter-panel__footer">
-            <Button onClick={handleClear}>Clear all</Button>
-            <Button type="primary" onClick={handleApply}>Apply</Button>
+            <Button onClick={handleClear}>{t('clear_all')}</Button>
+            <Button type="primary" onClick={handleApply}>{t('apply')}</Button>
           </div>
         }
       >

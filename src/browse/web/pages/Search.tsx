@@ -9,19 +9,22 @@ import { LoadingOverlay } from "../components/Loading";
 import PostList from "../components/PostList";
 import PageNav from "../components/PageNav";
 import ShowingText from "../components/ShowingText";
+import { useLanguage } from "../contexts/LanguageProvider";
 import { type ContentList, type ContentListSortBy } from "../../types/Content";
 
 type SearchSortBy = ContentListSortBy | 'best_match';
 
-const SORT_OPTIONS: { value: SearchSortBy; label: string; }[] = [
-  { value: 'best_match', label: 'Best match' },
-  { value: 'latest', label: 'Latest' },
-  { value: 'oldest', label: 'Oldest' },
-  { value: 'a-z', label: 'A-Z' },
-  { value: 'z-a', label: 'Z-A' }
-];
+const SORT_VALUES: SearchSortBy[] = [ 'best_match', 'latest', 'oldest', 'a-z', 'z-a' ];
 
-const SORT_VALUES = SORT_OPTIONS.map(({ value }) => value);
+function getSortOptions(t: ReturnType<typeof useLanguage>['t']): { value: SearchSortBy; label: string; }[] {
+  return [
+    { value: 'best_match', label: t('sort_best_match') },
+    { value: 'latest', label: t('sort_latest') },
+    { value: 'oldest', label: t('sort_oldest') },
+    { value: 'a-z', label: 'A-Z' },
+    { value: 'z-a', label: 'Z-A' }
+  ];
+}
 
 /**
  * Posts from every creator, by search term.
@@ -36,6 +39,7 @@ function Search() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
   const { settings } = useBrowseSettings();
+  const { t } = useLanguage();
   const [ searchParams, setSearchParams ] = useSearchParams();
 
   const query = (searchParams.get('q') || '').trim();
@@ -52,8 +56,8 @@ function Search() {
   const [ error, setError ] = useState<string | null>(null);
 
   useEffect(() => {
-    setTitle(query ? `Search - ${query}` : 'Search');
-  }, [ setTitle, query ]);
+    setTitle(query ? `${t('nav_search')} - ${query}` : t('nav_search'));
+  }, [ setTitle, query, t ]);
 
   // Arriving on a link with ?q= already set, or stepping back onto an earlier
   // search, should put that query in the box rather than leave it stale.
@@ -123,16 +127,16 @@ function Search() {
 
   return (
     <div className={`search mw-${settings.maxContentWidth.toLowerCase()}`}>
-      <h2 className="search__heading">Search</h2>
+      <h2 className="search__heading">{t('search_heading')}</h2>
       <div className="search__controls">
         <Input.Search
           className="search__input"
           size="large"
           allowClear
           autoFocus
-          placeholder="Search posts from every creator"
+          placeholder={t('search_placeholder')}
           value={input}
-          enterButton="Search"
+          enterButton={t('search_button')}
           onChange={(e) => setInput(e.target.value)}
           // Takes the value from the event: clearing the box fires this in the
           // same tick as the change, before state has caught up.
@@ -141,10 +145,10 @@ function Search() {
         <Select<SearchSortBy>
           className="search__sort"
           size="large"
-          aria-label="Order results by"
+          aria-label={t('search_order_aria')}
           value={sortBy}
           onChange={(sort) => updateParams({ sort })}
-          options={SORT_OPTIONS}
+          options={getSortOptions(t)}
         />
       </div>
       {
@@ -152,7 +156,7 @@ function Search() {
           <Empty
             className="search__empty"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="Type something above to search every post in the library."
+            description={t('search_empty_prompt')}
           />
         ) : (
           <>
@@ -163,7 +167,7 @@ function Search() {
                     total={list.total}
                     page={page}
                     itemsPerPage={itemsPerPage}
-                    subject={{ singular: 'post', plural: 'posts' }}
+                    subject={{ singular: t('subject_post'), plural: t('subject_posts') }}
                   />
                 </div>
               ) : null
@@ -182,7 +186,7 @@ function Search() {
                   <Empty
                     className="search__empty"
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={`Nothing matches "${query}".`}
+                    description={t('search_nothing', { query })}
                   />
                 ) : null
               }

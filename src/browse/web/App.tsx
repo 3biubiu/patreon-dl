@@ -6,7 +6,10 @@ import "material-icons/iconfont/material-icons.css";
 import "./assets/styles/App.scss";
 import { useEffect } from "react";
 import { ConfigProvider, theme as antdTheme } from "antd";
+import enUS from "antd/locale/en_US";
+import zhCN from "antd/locale/zh_CN";
 import { APIProvider } from "./contexts/APIProvider";
+import { useLanguage, LanguageProvider } from "./contexts/LanguageProvider";
 import { Routes, Route } from 'react-router';
 import CampaignList from "./pages/CampaignList";
 import MainLayout from './layouts/MainLayout';
@@ -39,6 +42,16 @@ function App() {
   // the colour-mode attribute it reads off the root element.
   const dark = useMediaQuery(DARK_SCHEME_QUERY);
 
+  // The rest of the app stays outside this inner component so the language
+  // (which decides the antd locale below) can be read here.
+  return <LanguageProvider><ThemedApp dark={dark} /></LanguageProvider>;
+}
+
+function ThemedApp(props: { dark: boolean }) {
+  const { dark } = props;
+  const { language } = useLanguage();
+  const antdLocale = language === 'zh' ? zhCN : enUS;
+
   useEffect(() => {
     document.documentElement.setAttribute('data-bs-theme', dark ? 'dark' : 'light');
   }, [dark]);
@@ -68,6 +81,7 @@ function App() {
   );
   return (
     <ConfigProvider
+      locale={antdLocale}
       theme={{
         algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {

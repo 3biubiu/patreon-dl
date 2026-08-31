@@ -20,6 +20,7 @@ import { useGlobalModals } from "../contexts/GlobalModalsProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { useQuota } from "../contexts/QuotaProvider";
 import { APP_NAME, getCampaignBaseUrl } from "../utils/Misc";
+import { useLanguage } from "../contexts/LanguageProvider";
 import { type QuotaCounter, type QuotaStatus } from "../../types/Quota";
 import { type CampaignListSortBy } from "../../types/Campaign";
 import {
@@ -63,6 +64,7 @@ function Sidebar(props: SidebarProps) {
   const { showBrowseSettingsModal } = useGlobalModals();
   const { user, signOut } = useAuth();
   const { quota } = useQuota();
+  const { t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
@@ -95,6 +97,19 @@ function Sidebar(props: SidebarProps) {
     writeSidebarSort(value);
   }, []);
 
+  // Localized labels for the creator sort dropdown; the two plain alphabetical
+  // orders are the same in both languages, so they stay as they are.
+  const sidebarSortOptions = useMemo(() => SIDEBAR_SORT_OPTIONS.map(({ value }) => {
+    let label: string;
+    switch (value) {
+      case 'last_downloaded': label = t('sort_last_downloaded'); break;
+      case 'most_content': label = t('sort_most_content'); break;
+      case 'most_media': label = t('sort_most_media'); break;
+      default: label = value === 'a-z' ? 'A-Z' : 'Z-A';
+    }
+    return { value, label };
+  }), [ t ]);
+
   const campaignItems = useMemo(() => {
     return (campaigns || []).map((campaign) => ({
       key: getCampaignBaseUrl(campaign),
@@ -116,17 +131,17 @@ function Sidebar(props: SidebarProps) {
   // Stays put at the top of the panel. The creator list below it is what
   // scrolls, so these three are always one click away however long it gets.
   const items = useMemo<MenuProps['items']>(() => ([
-    { key: '/', icon: <HomeOutlined />, label: 'Home' },
+    { key: '/', icon: <HomeOutlined />, label: t('nav_home') },
     // Directly under Home: it searches the whole library, so it belongs with
     // the destination that shows the whole library rather than down among the
     // lists that belong to the account.
-    { key: SEARCH_KEY, icon: <SearchOutlined />, label: 'Search' },
+    { key: SEARCH_KEY, icon: <SearchOutlined />, label: t('nav_search') },
     // Both belong to the account rather than to a role. Favorites sits above
     // History: it is the list the user built on purpose, not the trace
     // browsing left behind.
-    { key: FAVORITES_KEY, icon: <StarOutlined />, label: 'Favorites' },
-    { key: HISTORY_KEY, icon: <HistoryOutlined />, label: 'History' }
-  ]), []);
+    { key: FAVORITES_KEY, icon: <StarOutlined />, label: t('nav_favorites') },
+    { key: HISTORY_KEY, icon: <HistoryOutlined />, label: t('nav_history') }
+  ]), [t]);
 
   // Its own menu, so it can sit at the foot of the panel rather than wherever
   // the campaign list happens to end.
@@ -135,22 +150,22 @@ function Sidebar(props: SidebarProps) {
     // Hidden from everyone else. The server refuses these endpoints to
     // non-administrators regardless of what the menu shows.
     if (user?.role === 'admin') {
-      items.push({ key: USERS_KEY, icon: <TeamOutlined />, label: 'Users' });
-      items.push({ key: TRANSCRIPTION_KEY, icon: <AudioOutlined />, label: 'Transcription' });
+      items.push({ key: USERS_KEY, icon: <TeamOutlined />, label: t('nav_users') });
+      items.push({ key: TRANSCRIPTION_KEY, icon: <AudioOutlined />, label: t('nav_transcription') });
     }
     items.push(
-      { key: SETTINGS_KEY, icon: <SettingOutlined />, label: 'Settings' },
-      { key: SIGN_OUT_KEY, icon: <LogoutOutlined />, label: 'Sign out' }
+      { key: SETTINGS_KEY, icon: <SettingOutlined />, label: t('nav_settings') },
+      { key: SIGN_OUT_KEY, icon: <LogoutOutlined />, label: t('nav_signout') }
     );
     if (onToggleCollapse) {
       items.push({
         key: COLLAPSE_KEY,
         icon: collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />,
-        label: collapsed ? 'Expand' : 'Collapse'
+        label: collapsed ? t('expand') : t('collapse')
       });
     }
     return items;
-  }, [user?.role, collapsed, onToggleCollapse]);
+  }, [user?.role, collapsed, onToggleCollapse, t]);
 
   // A campaign stays selected while any of its sub-pages is open.
   const selectedKeys = useMemo(() => {
@@ -225,18 +240,18 @@ function Sidebar(props: SidebarProps) {
               ) : (
                 <div className="sidebar__campaigns-header">
                   <span className="sidebar__campaigns-title">
-                    Creators
+                    {t('nav_creators')}
                     <span className="sidebar__campaigns-count">{campaignItems.length}</span>
                   </span>
-                  <Tooltip placement="right" title="Order">
+                  <Tooltip placement="right" title={t('order')}>
                     <Select<CampaignListSortBy>
                       className="sidebar__campaigns-sort"
                       size="small"
                       variant="borderless"
-                      aria-label="Order creators by"
+                      aria-label={t('order_creators_aria')}
                       value={sortBy}
                       onChange={handleSortChange}
-                      options={SIDEBAR_SORT_OPTIONS}
+                      options={sidebarSortOptions}
                       // The panel is narrower than the longest label, so the
                       // menu is allowed to be wider than the control.
                       popupMatchSelectWidth={false}
@@ -285,21 +300,22 @@ function Sidebar(props: SidebarProps) {
  */
 function QuotaSummary(props: { quota: QuotaStatus | null; }) {
   const { quota } = props;
+  const { t } = useLanguage();
   if (!quota || !quota.limited) {
     return null;
   }
   const resetsAt = new Date(quota.resetsAt);
   const rows: { label: string; counter: QuotaCounter; }[] = [
-    { label: 'Posts', counter: quota.posts },
-    { label: 'Videos', counter: quota.videos }
+    { label: t('quota_posts'), counter: quota.posts },
+    { label: t('quota_videos'), counter: quota.videos }
   ];
   return (
     <Tooltip
       placement="right"
-      title={`Resets at 08:00 Beijing time (${resetsAt.toLocaleString()}). Opening the same post or video again is free.`}
+      title={t('quota_tooltip', { time: resetsAt.toLocaleString() })}
     >
       <div className="sidebar__quota">
-        <div className="sidebar__quota-title">Today's allowance</div>
+        <div className="sidebar__quota-title">{t('quota_today')}</div>
         {
           rows.map(({ label, counter }) => (
             <div key={label} className="sidebar__quota-row">
@@ -311,7 +327,7 @@ function QuotaSummary(props: { quota: QuotaStatus | null; }) {
               >
                 {
                   counter.limit === null ?
-                    'Unlimited' :
+                    t('quota_unlimited') :
                     `${counter.remaining ?? 0} / ${counter.limit}`
                 }
               </span>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Tooltip } from "antd";
 import { useAPI } from "../contexts/APIProvider";
 import Icon from "./Icon";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface FavoriteButtonProps {
   postId: string;
@@ -17,6 +18,7 @@ interface FavoriteButtonProps {
 function FavoriteButton(props: FavoriteButtonProps) {
   const { postId } = props;
   const { api } = useAPI();
+  const { t } = useLanguage();
   // null while the initial state is still being fetched, so the button does
   // not offer an action it might have to take back.
   const [ favorite, setFavorite ] = useState<boolean | null>(null);
@@ -70,7 +72,7 @@ function FavoriteButton(props: FavoriteButtonProps) {
     }
   }, [ api, busy, favorite, flashNotice, postId ]);
 
-  const label = favorite ? 'Remove from favorites' : 'Add to favorites';
+  const label = favorite ? t('fav_remove') : t('fav_add');
 
   return (
     <Tooltip title={notice || label} open={notice ? true : undefined}>

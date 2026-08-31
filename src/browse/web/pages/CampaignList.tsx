@@ -16,6 +16,7 @@ import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock, LoadingOverlay } from "../components/Loading";
 import { readViewCache, writeViewCache } from "../utils/viewCache";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface ViewParams {
   sortBy: CampaignListSortBy;
@@ -56,6 +57,7 @@ function CampaignList() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
   const { settings } = useBrowseSettings();
+  const { t } = useLanguage();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const location = useLocation();
   const cacheKey = `campaign-list:${location.key}`;
@@ -66,8 +68,8 @@ function CampaignList() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   useEffect(() => {
-    setTitle('Home');
-  }, [setTitle]);
+    setTitle(t('nav_home'));
+  }, [setTitle, t]);
 
   useEffect(() => {
     const { sortBy, page } = viewParams;
@@ -141,7 +143,7 @@ function CampaignList() {
     <Container fluid>
       <Row className="g-0 justify-content-center">
         <Col md={10} sm={12} className={`campaign-list mw-${settings.maxContentWidth.toLowerCase()}`}>
-          <h2 className="my-4">Creators</h2>
+          <h2 className="my-4">{t('creators_heading')}</h2>
           <Container fluid className="p-0">
             <Row className="mb-2 g-0 justify-content-center align-items-center">
               <Col className="w-auto flex-fill">
@@ -150,22 +152,22 @@ function CampaignList() {
                   page={viewParams.page}
                   itemsPerPage={viewParams.itemsPerPage}
                   subject={{
-                    singular: 'creator',
-                    plural: 'creators'
+                    singular: t('subject_creator'),
+                    plural: t('subject_creators')
                   }} /> : null }
               </Col>
               <Col className="w-auto d-flex justify-content-end">
                 <Select
                   className="content-toolbar__sort"
-                  aria-label="Sort"
+                  aria-label={t('sort')}
                   value={viewParams.sortBy}
                   onChange={(sortBy: CampaignListSortBy) => setViewParams({ sortBy })}
                   options={[
                     { value: 'a-z', label: 'A-Z' },
                     { value: 'z-a', label: 'Z-A' },
-                    { value: 'most_media', label: 'Most media' },
-                    { value: 'most_content', label: 'Most content' },
-                    { value: 'last_downloaded', label: 'Last downloaded' }
+                    { value: 'most_media', label: t('sort_most_media') },
+                    { value: 'most_content', label: t('sort_most_content') },
+                    { value: 'last_downloaded', label: t('sort_last_downloaded') }
                   ]}
                 />
               </Col>

@@ -8,6 +8,7 @@ import { LoadingBlock } from "../components/Loading";
 import Icon from "../components/Icon";
 import { DESKTOP_QUERY, useMediaQuery } from "../utils/useMediaQuery";
 import { MAX_FAVORITES, type FavoriteListItem } from "../../types/History";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 function formatWhen(value: string) {
   const date = new Date(value);
@@ -43,7 +44,8 @@ function FavoriteThumbnail(props: { mediaId: string | null }) {
 /** Links to the post, or plain text once the post has left the library. */
 function EntryTitle(props: { title: string | null; to: string | null }) {
   const { title, to } = props;
-  const text = title || 'Untitled';
+  const { t } = useLanguage();
+  const text = title || t('untitled');
   if (!to) {
     return <span className="history__title history__title--gone">{text}</span>;
   }
@@ -61,14 +63,15 @@ function EntryTitle(props: { title: string | null; to: string | null }) {
 function Favorites() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
+  const { t } = useLanguage();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [ favorites, setFavorites ] = useState<FavoriteListItem[] | null>(null);
   const [ busyPostId, setBusyPostId ] = useState<string | null>(null);
   const [ error, setError ] = useState<string | null>(null);
 
   useEffect(() => {
-    setTitle('Favorites');
-  }, [ setTitle ]);
+    setTitle(t('nav_favorites'));
+  }, [ setTitle, t ]);
 
   const load = useCallback(async () => {
     try {
@@ -76,10 +79,10 @@ function Favorites() {
       setError(null);
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load favorites');
+      setError(e instanceof Error ? e.message : t('could_not_load_favorites'));
       setFavorites([]);
     }
-  }, [ api ]);
+  }, [ api, t ]);
 
   useEffect(() => { void load(); }, [ load ]);
 
@@ -91,12 +94,12 @@ function Favorites() {
       setError(null);
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not update favorites');
+      setError(e instanceof Error ? e.message : t('could_not_update_favorites'));
     }
     finally {
       setBusyPostId(null);
     }
-  }, [ api ]);
+  }, [ api, t ]);
 
   if (!favorites) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;
@@ -105,8 +108,8 @@ function Favorites() {
   return (
     <div className="history">
       <div className="history__header">
-        <h2 className="m-0">Favorites</h2>
-        <span className="history__note">{favorites.length} of {MAX_FAVORITES} saved.</span>
+        <h2 className="m-0">{t('nav_favorites')}</h2>
+        <span className="history__note">{t('favorites_note', { count: favorites.length, limit: MAX_FAVORITES })}</span>
       </div>
       {
         error ? <Alert className="mb-3" type="error" title={error} showIcon /> : null
@@ -118,7 +121,7 @@ function Favorites() {
         locale={{
           emptyText: (
             <Empty
-              description="No favorites yet. Open a post and tap the star."
+              description={t('favorites_empty')}
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           )
@@ -131,7 +134,7 @@ function Favorites() {
             render: (_, item) => <FavoriteThumbnail mediaId={item.thumbnailMediaId} />
           },
           {
-            title: 'Post',
+            title: t('col_post'),
             key: 'title',
             render: (_, item) => (
               <div className="history__entry">
@@ -141,7 +144,7 @@ function Favorites() {
             )
           },
           ...(isDesktop ? [ {
-            title: 'Saved',
+            title: t('col_saved'),
             dataIndex: 'favoritedAt',
             width: 200,
             render: (favoritedAt: string) => formatWhen(favoritedAt)
@@ -152,21 +155,21 @@ function Favorites() {
             width: isDesktop ? 110 : 56,
             render: (_: unknown, item: FavoriteListItem) => (
               <Popconfirm
-                title="Remove from favorites?"
-                okText="Remove"
-                cancelText="Never mind"
+                title={t('confirm_remove_question')}
+                okText={t('remove')}
+                cancelText={t('never_mind')}
                 onConfirm={() => void removeFavorite(item.postId)}
               >
                 {
                   isDesktop ?
-                    <Button size="small" type="text" loading={busyPostId === item.postId}>Remove</Button>
+                    <Button size="small" type="text" loading={busyPostId === item.postId}>{t('remove')}</Button>
                     : (
                       <Button
                         size="small"
                         type="text"
                         loading={busyPostId === item.postId}
                         icon={<Icon name="delete_outline" />}
-                        aria-label="Remove from favorites"
+                        aria-label={t('fav_remove')}
                       />
                     )
                 }

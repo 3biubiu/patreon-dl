@@ -10,6 +10,7 @@ import Icon from "../components/Icon";
 import { DESKTOP_QUERY, useMediaQuery } from "../utils/useMediaQuery";
 import { type ViewedPostListItem, type WatchedVideoListItem } from "../../types/History";
 import { type AuthUser } from "../../types/Auth";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 function formatWhen(value: string) {
   const date = new Date(value);
@@ -63,7 +64,8 @@ function HistoryThumbnail(props: { mediaId: string | null; video?: boolean; }) {
  */
 function EntryTitle(props: { title: string | null; to: string | null; }) {
   const { title, to } = props;
-  const text = title || 'Untitled';
+  const { t } = useLanguage();
+  const text = title || t('untitled');
   if (!to) {
     return <span className="history__title history__title--gone">{text}</span>;
   }
@@ -93,6 +95,7 @@ function History() {
   const { api } = useAPI();
   const { user: currentUser } = useAuth();
   const { setTitle } = useDocument();
+  const { t } = useLanguage();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const isAdmin = currentUser?.role === 'admin';
   const [ users, setUsers ] = useState<AuthUser[] | null>(null);
@@ -103,8 +106,8 @@ function History() {
   const [ error, setError ] = useState<string | null>(null);
 
   useEffect(() => {
-    setTitle('History');
-  }, [setTitle]);
+    setTitle(t('nav_history'));
+  }, [setTitle, t]);
 
   // The names an administrator chooses from. Loaded once, on its own, so a
   // glance at one's own history is not made to wait on the whole user list.
@@ -131,11 +134,11 @@ function History() {
       setError(null);
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load history');
+      setError(e instanceof Error ? e.message : t('could_not_load_history'));
       setVideos([]);
       setPosts([]);
     }
-  }, [api, targetUser]);
+  }, [api, targetUser, t]);
 
   useEffect(() => {
     void load();
@@ -151,7 +154,7 @@ function History() {
       dataSource={videos}
       pagination={false}
       locale={{
-        emptyText: <Empty description="No videos watched yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        emptyText: <Empty description={t('history_empty_videos')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       }}
       columns={[
         {
@@ -161,7 +164,7 @@ function History() {
           render: (_, item) => <HistoryThumbnail mediaId={item.mediaId} video />
         },
         {
-          title: 'Video',
+          title: t('col_video'),
           key: 'title',
           render: (_, item) => (
             <div className="history__entry">
@@ -171,7 +174,7 @@ function History() {
           )
         },
         {
-          title: 'Progress',
+          title: t('col_progress'),
           key: 'progress',
           width: isDesktop ? 200 : 120,
           render: (_, item) => (
@@ -189,7 +192,7 @@ function History() {
           )
         },
         ...(isDesktop ? [ {
-          title: 'Watched',
+          title: t('col_watched'),
           dataIndex: 'watchedAt',
           width: 200,
           render: (watchedAt: string) => formatWhen(watchedAt)
@@ -204,7 +207,7 @@ function History() {
       dataSource={posts}
       pagination={false}
       locale={{
-        emptyText: <Empty description="No posts opened yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        emptyText: <Empty description={t('history_empty_posts')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       }}
       columns={[
         {
@@ -214,7 +217,7 @@ function History() {
           render: (_, item) => <HistoryThumbnail mediaId={item.thumbnailMediaId} />
         },
         {
-          title: 'Post',
+          title: t('col_post'),
           key: 'title',
           render: (_, item) => (
             <div className="history__entry">
@@ -224,7 +227,7 @@ function History() {
           )
         },
         ...(isDesktop ? [ {
-          title: 'Opened',
+          title: t('col_opened'),
           dataIndex: 'viewedAt',
           width: 200,
           render: (viewedAt: string) => formatWhen(viewedAt)
@@ -236,7 +239,7 @@ function History() {
   return (
     <div className="history">
       <div className="history__header">
-        <h2 className="m-0">History</h2>
+        <h2 className="m-0">{t('nav_history')}</h2>
         {
           isAdmin ? (
             <Select
@@ -246,13 +249,13 @@ function History() {
               onChange={(value) => setTargetUser(value === currentUser?.id ? null : value)}
               options={(users || []).map((u) => ({
                 value: u.id,
-                label: u.id === currentUser?.id ? `${u.username} (you)` : u.username
+                label: u.id === currentUser?.id ? `${u.username}${t('you_suffix')}` : u.username
               }))}
-              aria-label="Whose history"
+              aria-label={t('history_whose_aria')}
             />
           ) : null
         }
-        <span className="history__note">The last twenty of each are kept.</span>
+        <span className="history__note">{t('history_note')}</span>
       </div>
       {
         error ? (
@@ -262,8 +265,8 @@ function History() {
       <Tabs
         defaultActiveKey="videos"
         items={[
-          { key: 'videos', label: `Videos (${videos.length})`, children: videosTable },
-          { key: 'posts', label: `Posts (${posts.length})`, children: postsTable }
+          { key: 'videos', label: t('history_tab_videos', { count: videos.length }), children: videosTable },
+          { key: 'posts', label: t('history_tab_posts', { count: posts.length }), children: postsTable }
         ]}
       />
     </div>

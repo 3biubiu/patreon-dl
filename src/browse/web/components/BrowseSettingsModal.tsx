@@ -1,5 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useBrowseSettings } from "../contexts/BrowseSettingsProvider";
+import { useLanguage } from "../contexts/LanguageProvider";
+import { type AppLanguage } from "../i18n/translations";
 import { Col, Form, Modal, Row } from "react-bootstrap";
 
 interface BrowseSettingsModalProps {
@@ -10,6 +12,7 @@ interface BrowseSettingsModalProps {
 function BrowseSettingsModal(props: BrowseSettingsModalProps) {
   const { show, onClose } = props;
   const { settings, options, updateSettings, refreshSettings } = useBrowseSettings();
+  const { language, setLanguage, t } = useLanguage();
 
   useEffect(() => {
     if (!show) {
@@ -34,6 +37,10 @@ function BrowseSettingsModal(props: BrowseSettingsModalProps) {
     updateSettings(setting);
   }, [updateSettings]);
 
+  const handleLanguageChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setLanguage(e.target.value as AppLanguage);
+  }, [setLanguage]);
+
   if (!settings || !options) {
     return null;
   }
@@ -51,7 +58,22 @@ function BrowseSettingsModal(props: BrowseSettingsModalProps) {
         <Form>
           <Form.Group as={Row} className="mb-3">
             <Form.Label column sm={5}>
-              List items per page:
+              {t('settings_language')}
+            </Form.Label>
+            <Col sm={7}>
+              <Form.Select
+                value={language}
+                onChange={handleLanguageChange}
+              >
+                <option value="en">{t('option_english')}</option>
+                <option value="zh">{t('option_chinese')}</option>
+              </Form.Select>
+            </Col>
+          </Form.Group>
+
+          <Form.Group as={Row} className="mb-3">
+            <Form.Label column sm={5}>
+              {t('settings_list_per_page')}
             </Form.Label>
             <Col sm={7}>
               {
@@ -73,7 +95,7 @@ function BrowseSettingsModal(props: BrowseSettingsModalProps) {
 
           <Form.Group as={Row} className="mb-3">
             <Form.Label column sm={5}>
-              Gallery items per page:
+              {t('settings_gallery_per_page')}
             </Form.Label>
             <Col sm={7}>
               {
@@ -95,7 +117,7 @@ function BrowseSettingsModal(props: BrowseSettingsModalProps) {
 
           <Form.Group as={Row} className="mb-3">
             <Form.Label column sm={5}>
-              Max. content width:
+              {t('settings_max_width')}
             </Form.Label>
             <Col sm={7}>
               {

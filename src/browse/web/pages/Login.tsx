@@ -5,6 +5,7 @@ import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { APP_NAME } from "../utils/Misc";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface LoginFormValues {
   username: string;
@@ -27,6 +28,7 @@ type Mode = 'signIn' | 'register';
 function Login() {
   const { api } = useAPI();
   const { signIn } = useAuth();
+  const { t } = useLanguage();
   const [ mode, setMode ] = useState<Mode>('signIn');
   const [ error, setError ] = useState<string | null>(null);
   /** Shown on the sign-in form after an application goes through. */
@@ -93,8 +95,8 @@ function Login() {
               className="login__error"
               type="success"
               showIcon
-              title={`Sent for "${applied}"`}
-              description="An administrator has to approve it before you can sign in."
+              title={t('login_sent_for', { name: applied })}
+              description={t('login_approval_note')}
             />
           ) : null
         }
@@ -109,8 +111,8 @@ function Login() {
               >
                 <Form.Item
                   name="username"
-                  label="Username"
-                  rules={[ { required: true, message: 'Enter your username' } ]}
+                  label={t('login_username')}
+                  rules={[ { required: true, message: t('login_enter_username') } ]}
                 >
                   <Input
                     prefix={<UserOutlined />}
@@ -120,8 +122,8 @@ function Login() {
                 </Form.Item>
                 <Form.Item
                   name="password"
-                  label="Password"
-                  rules={[ { required: true, message: 'Enter your password' } ]}
+                  label={t('login_password')}
+                  rules={[ { required: true, message: t('login_enter_password') } ]}
                 >
                   <Input.Password
                     prefix={<LockOutlined />}
@@ -134,13 +136,13 @@ function Login() {
                   block
                   loading={submitting}
                 >
-                  Sign in
+                  {t('login_signin')}
                 </Button>
               </Form>
               <div className="login__switch">
-                <span>No account?</span>
+                <span>{t('login_no_account')}</span>
                 <Button type="link" size="small" onClick={() => switchMode('register')}>
-                  Apply for one
+                  {t('login_apply')}
                 </Button>
               </div>
             </>
@@ -154,10 +156,10 @@ function Login() {
               >
                 <Form.Item
                   name="username"
-                  label="Username"
+                  label={t('login_username')}
                   rules={[
-                    { required: true, message: 'Choose a username' },
-                    { max: 32, message: 'At most 32 characters' }
+                    { required: true, message: t('login_choose_username') },
+                    { max: 32, message: t('login_username_max') }
                   ]}
                 >
                   <Input
@@ -168,10 +170,10 @@ function Login() {
                 </Form.Item>
                 <Form.Item
                   name="password"
-                  label="Password"
+                  label={t('login_password')}
                   rules={[
-                    { required: true, message: 'Choose a password' },
-                    { min: 6, message: 'At least 6 characters' }
+                    { required: true, message: t('login_choose_password') },
+                    { min: 6, message: t('login_password_min') }
                   ]}
                 >
                   <Input.Password
@@ -181,17 +183,17 @@ function Login() {
                 </Form.Item>
                 <Form.Item
                   name="confirmPassword"
-                  label="Confirm password"
+                  label={t('login_confirm_password')}
                   dependencies={[ 'password' ]}
                   rules={[
-                    { required: true, message: 'Type the password again' },
+                    { required: true, message: t('login_type_password_again') },
                     // Caught here rather than by the server, which is only
                     // ever sent the one password.
                     ({ getFieldValue }) => ({
                       validator: (_, value) => (
                         !value || value === getFieldValue('password') ?
                           Promise.resolve() :
-                          Promise.reject(Error('The two passwords do not match'))
+                          Promise.reject(Error(t('login_password_mismatch')))
                       )
                     })
                   ]}
@@ -207,13 +209,13 @@ function Login() {
                   block
                   loading={submitting}
                 >
-                  Send application
+                  {t('login_send_application')}
                 </Button>
               </Form>
               <div className="login__switch">
-                <span>An administrator reviews every application.</span>
+                <span>{t('login_admin_reviews')}</span>
                 <Button type="link" size="small" onClick={() => switchMode('signIn')}>
-                  Back to sign in
+                  {t('login_back_to_signin')}
                 </Button>
               </div>
             </>

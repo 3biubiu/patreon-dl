@@ -8,6 +8,7 @@ import { ScrollProvider } from "../contexts/MainContentScrollProvider";
 import { useSidebar } from "../contexts/SidebarProvider";
 import { DESKTOP_QUERY, useMediaQuery } from "../utils/useMediaQuery";
 import { APP_NAME } from "../utils/Misc";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 const { Header, Sider } = Layout;
 
@@ -16,6 +17,7 @@ const SIDER_COLLAPSED_WIDTH = 80;
 
 function MainLayout() {
   const { collapsed, setCollapsed } = useSidebar();
+  const { t } = useLanguage();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [ drawerOpen, setDrawerOpen ] = useState(false);
   const { token } = theme.useToken();
@@ -65,7 +67,7 @@ function MainLayout() {
               <Button
                 type="text"
                 icon={<MenuOutlined />}
-                aria-label="Open menu"
+                aria-label={t('open_menu_aria')}
                 onClick={() => setDrawerOpen(true)}
               />
               <Link to="/" className="main-layout__brand">{APP_NAME}</Link>

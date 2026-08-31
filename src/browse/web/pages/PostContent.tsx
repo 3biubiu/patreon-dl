@@ -18,6 +18,7 @@ import { useDocument } from "../contexts/DocumentProvider";
 import { getContentUrl } from "../utils/Misc";
 import { LoadingBlock } from "../components/Loading";
 import { useQuotaRefresh } from "../contexts/QuotaProvider";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface PostNav {
   previous: PostWithComments | null;
@@ -73,6 +74,7 @@ function PostContent() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
   const { settings } = useBrowseSettings();
+  const { t } = useLanguage();
   const { scrollTo } = useScroll();
   const refreshQuota = useQuotaRefresh();
   const [post, setContent] = useReducer(contentReducer, null);;
@@ -151,7 +153,7 @@ function PostContent() {
         </span>
         <span className="post-nav__text">
           <span className="post-nav__direction">
-            {direction === 'previous' ? 'Previous' : 'Next'}
+            {direction === 'previous' ? t('previous') : t('next')}
           </span>
           <span className="post-nav__title">{target.title}</span>
         </span>
@@ -168,7 +170,7 @@ function PostContent() {
         </div>
       </ContentColumn>
     );
-  }, [postNav, scrollTo, settings]);
+  }, [postNav, scrollTo, settings, t]);
 
   if (quotaMessage) {
     return (
@@ -176,7 +178,7 @@ function PostContent() {
         <Result
           className="py-5"
           status="warning"
-          title="Daily limit reached"
+          title={t('daily_limit_reached')}
           subTitle={quotaMessage}
         />
       </ContentColumn>
@@ -198,7 +200,7 @@ function PostContent() {
       {
         post.comments && (
           <ContentColumn settings={settings} className="pt-2 pb-4 px-4">
-            <h5 className="mb-3">{post.commentCount} {post.comments.length > 1 ? 'comments' : 'comment'}</h5>
+            <h5 className="mb-3">{post.commentCount} {t(post.comments.length > 1 ? 'comments' : 'comments')}</h5>
             <CommentsPanel comments={post.comments} />
           </ContentColumn>
         )

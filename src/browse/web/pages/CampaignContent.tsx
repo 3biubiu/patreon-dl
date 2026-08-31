@@ -25,6 +25,7 @@ import { type CampaignLayoutOutletContext } from "../layouts/CampaignLayout";
 import { type Campaign } from "../../../entities";
 import { LoadingBlock, LoadingOverlay } from "../components/Loading";
 import { readViewCache, writeViewCache } from "../utils/viewCache";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface CampaignContentProps<T extends ContentType> {
   type: T;
@@ -78,6 +79,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   const { api } = useAPI();
   const { setTitle } = useDocument();
   const { settings, updateSettings } = useBrowseSettings();
+  const { t } = useLanguage();
   const [viewParams, setViewParams] = useReducer(viewParamsReducer, getInitialViewParams(settings));
   const [collection, setCollection] = useState<Collection | null>(null);
   const location = useLocation();
@@ -96,17 +98,17 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   let searchInputBoxPlaceholder: string;
   switch (contentType) {
     case 'post':
-      subject = { singular: 'post', plural: 'posts' };
-      searchInputBoxPlaceholder = 'Search posts';
+      subject = { singular: t('subject_post'), plural: t('subject_posts') };
+      searchInputBoxPlaceholder = t('search_posts');
       break;
     case 'product':
     default:
-      subject = { singular: 'product', plural: 'products' };
-      searchInputBoxPlaceholder = 'Search products';
+      subject = { singular: t('subject_product'), plural: t('subject_products') };
+      searchInputBoxPlaceholder = t('search_products');
       break;
   }
   if (contentType === 'post' && isCollection) {
-    const w = ' in collection';
+    const w = t('in_collection');
     subject.singular += w;
     subject.plural += w;
     searchInputBoxPlaceholder += w;
@@ -114,20 +116,20 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
   const withStrParts: string[] = [];
   const q = viewParams.filter?.options.find((opt) => opt.searchParam === 'search')?.value?.trim();
   if (q) {
-    withStrParts.push(`with "${q}"`);
+    withStrParts.push(t('with_query', { query: q }));
   }
-  const t = viewParams.filter?.options.find((opt) => opt.searchParam === 'tag_id')?.value?.trim();
-  if (t) {
-    let t2 = t;
-    if (t.startsWith('user_defined;')) {
-      t2 = t.substring('user_defined;'.length);
+  const tag = viewParams.filter?.options.find((opt) => opt.searchParam === 'tag_id')?.value?.trim();
+  if (tag) {
+    let tagLabel = tag;
+    if (tag.startsWith('user_defined;')) {
+      tagLabel = tag.substring('user_defined;'.length);
     }
-    if (t2) {
-      withStrParts.push(`tagged "${t2}"`);
+    if (tagLabel) {
+      withStrParts.push(t('tagged_query', { tag: tagLabel }));
     }
   }
   if (withStrParts.length > 0) {
-    const w = withStrParts.join(' and ');
+    const w = withStrParts.join(t('separator_and'));
     subject.singular += ` ${w}`;
     subject.plural += ` ${w}`;
   }
@@ -182,14 +184,14 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
         parts.push(collection.title);
       }
       if (campaign?.name) {
-        parts.push(`Collection from ${campaign.name}`);
+        parts.push(t('collection_from', { name: campaign.name }));
       }
       if (collection.numPosts !== null) {
-        parts.push(`${collection.numPosts} posts`);
+        parts.push(t('posts_count', { count: collection.numPosts }));
       }
       setTitle(parts.join(' | '));
     }
-  }, [setTitle, isCollection, collection, campaign]);
+  }, [setTitle, isCollection, collection, campaign, t]);
 
   const gotoPage = useCallback((page: number, replaceState = false) => {
     setSearchParams((/*prev*/) => {
@@ -414,7 +416,7 @@ function CampaignContent<T extends ContentType>(props: CampaignContentProps<T>) 
           list && list.items.length === 0 ? (
             <Card className="my-4" style={{ height: "10em" }}>
               <Card.Body className="d-flex justify-content-center align-items-center">
-                No {contentType === 'post' ? 'posts' : 'products'}
+                No {contentType === 'post' ? t('subject_posts') : t('subject_products')}
               </Card.Body>
             </Card>
           ) : null

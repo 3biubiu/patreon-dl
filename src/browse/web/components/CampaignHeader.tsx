@@ -6,6 +6,7 @@ import RawDataExtractor from "../utils/RawDataExtractor";
 import { Stack } from "react-bootstrap";
 import { Tabs } from "antd";
 import MediaImage from "./MediaImage";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 interface CampaignHeaderProps {
   campaign: CampaignWithCounts & { baseUrl: string; };
@@ -15,6 +16,7 @@ function CampaignHeader(props: CampaignHeaderProps) {
   const { campaign } = props;
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useLanguage();
   const coverMediaId = campaign.coverPhoto.downloaded?.path ? campaign.coverPhoto.id : null;
   const avatarMediaId = campaign.avatarImage.downloaded?.path ? campaign.avatarImage.id : null;
 
@@ -22,30 +24,30 @@ function CampaignHeader(props: CampaignHeaderProps) {
     const links: { title: string; url: string; }[] = [];
     if (campaign.postCount > 0) {
       links.push({
-        title: 'Posts',
+        title: t('header_posts'),
         url: `${campaign.baseUrl}/posts`
       });
     }
     if (campaign.collectionCount > 0) {
       links.push({
-        title: 'Collections',
+        title: t('header_collections'),
         url: `${campaign.baseUrl}/collections`
       });
     }
     if (campaign.productCount > 0) {
       links.push({
-        title: 'Shop',
+        title: t('header_shop'),
         url: `${campaign.baseUrl}/shop`
       });
     }
     if (campaign.mediaCount > 0) {
       links.push({
-        title: 'Media',
+        title: t('header_media'),
         url: `${campaign.baseUrl}/media`
       });
     }
     links.push({
-      title: 'About',
+      title: t('header_about'),
       url: `${campaign.baseUrl}/about`
     });
     const activeKey = links.find(({ url }) => location.pathname === url)?.url;
@@ -59,7 +61,7 @@ function CampaignHeader(props: CampaignHeaderProps) {
         />
       </div>
     )
-  }, [campaign, location.pathname, navigate])
+  }, [campaign, location.pathname, navigate, t])
 
   const coverPhoto = useMemo(() => {
     if (!coverMediaId) {

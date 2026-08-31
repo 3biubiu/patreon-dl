@@ -9,7 +9,7 @@ import { MAX_FAVORITES } from '../types/History.js';
  * makes resuming possible, not a browsing history, and the cap is what keeps
  * the file small enough to be rewritten whole on every update.
  */
-const MAX_ENTRIES = 10;
+const MAX_ENTRIES = 20;
 
 /**
  * An entry as stored. `campaignId` is bookkeeping the browser never sees - it

@@ -1,13 +1,15 @@
 import "../assets/styles/History.scss";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Empty, Progress, Table, Tabs, Tag } from "antd";
+import { Alert, Empty, Progress, Select, Table, Tabs, Tag } from "antd";
 import { Link } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
+import { useAuth } from "../contexts/AuthProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
 import Icon from "../components/Icon";
 import { DESKTOP_QUERY, useMediaQuery } from "../utils/useMediaQuery";
 import { type ViewedPostListItem, type WatchedVideoListItem } from "../../types/History";
+import { type AuthUser } from "../../types/Auth";
 
 function formatWhen(value: string) {
   const date = new Date(value);
@@ -77,16 +79,25 @@ function contentUrl(item: WatchedVideoListItem) {
 }
 
 /**
- * The last ten videos played and the last ten posts opened, per account.
+ * The last twenty videos played and the last twenty posts opened, per account.
  *
- * Ten is not an arbitrary display limit - it is everything the server keeps.
+ * Twenty is not an arbitrary display limit - it is everything the server keeps.
  * The videos here are exactly the ones that will pick up where they were left,
  * which is what the list is really showing.
+ *
+ * An administrator sees a picker to choose whose history is shown, since they
+ * may look at every account's - the list endpoints accept a `userId` only from
+ * an administrator.
  */
 function History() {
   const { api } = useAPI();
+  const { user: currentUser } = useAuth();
   const { setTitle } = useDocument();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
+  const isAdmin = currentUser?.role === 'admin';
+  const [ users, setUsers ] = useState<AuthUser[] | null>(null);
+  /** Whose history is shown. `null` is the signed-in account's own. */
+  const [ targetUser, setTargetUser ] = useState<string | null>(null);
   const [ videos, setVideos ] = useState<WatchedVideoListItem[] | null>(null);
   const [ posts, setPosts ] = useState<ViewedPostListItem[] | null>(null);
   const [ error, setError ] = useState<string | null>(null);
@@ -95,11 +106,25 @@ function History() {
     setTitle('History');
   }, [setTitle]);
 
+  // The names an administrator chooses from. Loaded once, on its own, so a
+  // glance at one's own history is not made to wait on the whole user list.
+  useEffect(() => {
+    if (!isAdmin) {
+      return;
+    }
+    let cancelled = false;
+    void api.listUsers()
+      .then((list) => { if (!cancelled) { setUsers(list); } })
+      .catch(() => { if (!cancelled) { setUsers([]); } });
+    return () => { cancelled = true; };
+  }, [api, isAdmin]);
+
   const load = useCallback(async () => {
     try {
+      const userId = targetUser ?? undefined;
       const [ watched, viewed ] = await Promise.all([
-        api.listWatchedVideos(),
-        api.listViewedPosts()
+        api.listWatchedVideos(userId),
+        api.listViewedPosts(userId)
       ]);
       setVideos(watched);
       setPosts(viewed);
@@ -110,7 +135,7 @@ function History() {
       setVideos([]);
       setPosts([]);
     }
-  }, [api]);
+  }, [api, targetUser]);
 
   useEffect(() => {
     void load();
@@ -212,7 +237,22 @@ function History() {
     <div className="history">
       <div className="history__header">
         <h2 className="m-0">History</h2>
-        <span className="history__note">The last ten of each are kept.</span>
+        {
+          isAdmin ? (
+            <Select
+              style={{ minWidth: 180 }}
+              loading={users === null}
+              value={targetUser ?? currentUser?.id}
+              onChange={(value) => setTargetUser(value === currentUser?.id ? null : value)}
+              options={(users || []).map((u) => ({
+                value: u.id,
+                label: u.id === currentUser?.id ? `${u.username} (you)` : u.username
+              }))}
+              aria-label="Whose history"
+            />
+          ) : null
+        }
+        <span className="history__note">The last twenty of each are kept.</span>
       </div>
       {
         error ? (

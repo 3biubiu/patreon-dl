@@ -501,14 +501,27 @@ class API {
     });
   }
 
-  /** The videos this account may resume, most recent first. */
-  async listWatchedVideos(): Promise<WatchedVideoListItem[]> {
-    const data = await readJSON(await apiFetch('/api/history/videos'));
+  /**
+   * The videos this account may resume, most recent first.
+   *
+   * An administrator may pass another account's id to see its history instead;
+   * the server only honours that from an administrator.
+   */
+  async listWatchedVideos(userId?: string): Promise<WatchedVideoListItem[]> {
+    const urlObj = new URL('/api/history/videos', window.location.href);
+    if (userId) {
+      urlObj.searchParams.set('userId', userId);
+    }
+    const data = await readJSON(await apiFetch(urlObj.toString()));
     return data.videos as WatchedVideoListItem[];
   }
 
-  async listViewedPosts(): Promise<ViewedPostListItem[]> {
-    const data = await readJSON(await apiFetch('/api/history/posts'));
+  async listViewedPosts(userId?: string): Promise<ViewedPostListItem[]> {
+    const urlObj = new URL('/api/history/posts', window.location.href);
+    if (userId) {
+      urlObj.searchParams.set('userId', userId);
+    }
+    const data = await readJSON(await apiFetch(urlObj.toString()));
     return data.posts as ViewedPostListItem[];
   }
 

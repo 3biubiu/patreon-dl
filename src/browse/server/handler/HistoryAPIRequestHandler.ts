@@ -42,7 +42,7 @@ export default class HistoryAPIRequestHandler extends Basehandler {
   }
 
   handleListVideosRequest(req: Request, res: Response) {
-    const userId = this.#userId(req, res);
+    const userId = this.#targetUserId(req, res);
     if (!userId) {
       return;
     }
@@ -124,7 +124,7 @@ export default class HistoryAPIRequestHandler extends Basehandler {
   }
 
   handleListPostsRequest(req: Request, res: Response) {
-    const userId = this.#userId(req, res);
+    const userId = this.#targetUserId(req, res);
     if (!userId) {
       return;
     }
@@ -219,6 +219,27 @@ export default class HistoryAPIRequestHandler extends Basehandler {
     }
     this.#store.removeFavorite(userId, postId);
     res.json({ ok: true, favorite: false });
+  }
+
+  /**
+   * Whose history a listing is for. An administrator may name any account with
+   * `?userId=`; everyone else - and an administrator who does not ask - gets
+   * their own. Naming an account that has no history is an empty list, not a
+   * bad request.
+   */
+  #targetUserId(req: Request, res: Response): string | null {
+    const user = (req as AuthenticatedRequest).authUser;
+    if (!user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return null;
+    }
+    if (user.role === 'admin') {
+      const asked = req.query.userId;
+      if (typeof asked === 'string' && asked) {
+        return asked;
+      }
+    }
+    return user.id;
   }
 
   /**

@@ -132,7 +132,7 @@ export function useWatchHistory(video: HTMLVideoElement | null) {
       }
       ready = true;
       // Recorded from the moment it is played, so a video that is only glanced
-      // at still takes its place among the ten.
+      // at still takes its place among the twenty.
       report();
       timer = window.setInterval(() => report(), REPORT_INTERVAL_MS);
       video.addEventListener('pause', handleStop);

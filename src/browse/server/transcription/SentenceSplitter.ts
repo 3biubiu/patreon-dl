@@ -98,7 +98,27 @@ const SYSTEM_PROMPT = [
   '   be byte-for-byte the text you were given.',
   '',
   `Output the text with ${BREAK} between captions and nothing else - no`,
-  'explanation, no numbering, no code fences.'
+  'explanation, no numbering, no code fences.',
+  '',
+  'Examples - note how the text is returned exactly as given, with tags',
+  'inserted only where a caption should end:',
+  '',
+  'Input: "In this video I want to cover three things. First, how to set up the',
+  'project. Second, how the build works. And third, common pitfalls. Alright,',
+  'let\'s get started."',
+  'Output: "In this video I want to cover three things.<br>First, how to set',
+  'up the project.<br>Second, how the build works.<br>And third, common',
+  'pitfalls.<br>Alright, let\'s get started."',
+  '',
+  'Input: "这个视频主要分为三个部分，第一部分讲环境的搭建，第二部分讲编译的流程，第三部分',
+  '讲一些常见的问题和踩坑，好，那我们开始吧。"',
+  'Output: "这个视频主要分为三个部分，<br>第一部分讲环境的搭建，<br>第二部分讲编译的流程，<br>第三部分',
+  `讲一些常见的问题和踩坑，<br>好，那我们开始吧。"`,
+  '',
+  'Input: "The countdown is three, two, one, and we have liftoff."',
+  'Output: "The countdown is three, two, one,<br>and we have liftoff." - the',
+  'reveal that follows a buildup is where a reader looks away to read, so a',
+  'caption break there keeps the punchline on screen as it happens.'
 ].join('\n');
 
 interface GeminiResponse {

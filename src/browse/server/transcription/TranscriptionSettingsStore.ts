@@ -4,6 +4,33 @@ import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import { type Logger } from '../../../utils/logging/index.js';
 import { type TranscriptionProvider } from '../../types/Transcription.js';
 import { DEFAULT_PROXY_URL } from './GeminiTranscriber.js';
+import { type VADOptions } from './VoiceActivityDetector.js';
+
+/**
+ * The detector settings an administrator can override from the browser.
+ * `null` throughout means the built-in defaults - see `VoiceActivityDetector`.
+ */
+export interface VADOverrides {
+  /** Speech probability above which a frame counts as speech. */
+  threshold: number | null;
+  /** Silence shorter than this does not end a speech run, in seconds. */
+  minSilenceDuration: number | null;
+  /** Each interval is widened by this much at both ends, in seconds. */
+  speechPad: number | null;
+  /**
+   * Silence up to this long is kept as part of the speech around it; anything
+   * longer is cut out of the upload, in seconds.
+   */
+  mergeGap: number | null;
+}
+
+/** What the ranges a settings form is held to are, so a typo stays a typo. */
+export const VAD_RANGES = {
+  threshold: { min: 0.1, max: 0.9 },
+  minSilenceDuration: { min: 0.2, max: 5 },
+  speechPad: { min: 0, max: 1 },
+  mergeGap: { min: 0, max: 30 }
+};
 
 interface SettingsFile {
   /** Which provider transcribes. Null means the default. */
@@ -21,6 +48,8 @@ interface SettingsFile {
    * empty string means an administrator deliberately turned it off.
    */
   geminiProxyUrl: string | null;
+  /** Detector overrides. `null` for a field means the built-in default. */
+  vad: VADOverrides;
 }
 
 const EMPTY: SettingsFile = {
@@ -31,13 +60,36 @@ const EMPTY: SettingsFile = {
   geminiApiKey: null,
   geminiModel: null,
   geminiBaseUrl: null,
-  geminiProxyUrl: null
+  geminiProxyUrl: null,
+  vad: { threshold: null, minSilenceDuration: null, speechPad: null, mergeGap: null }
 };
 
 export const DEFAULT_PROVIDER: TranscriptionProvider = 'openrouter';
 
 function readProvider(value: unknown): TranscriptionProvider | null {
   return value === 'openrouter' || value === 'gemini' ? value : null;
+}
+
+/** One override field, clamped to its range and rounded to something sane. */
+function readVadNumber(value: unknown, range: { min: number; max: number }) {
+  const number = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+  return Math.round(
+    Math.max(range.min, Math.min(range.max, number)) * 1000
+  ) / 1000;
+}
+
+/** The saved overrides with anything unusable read back as "not set". */
+function readVad(value: unknown): VADOverrides {
+  const vad = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  return {
+    threshold: readVadNumber(vad.threshold, VAD_RANGES.threshold),
+    minSilenceDuration: readVadNumber(vad.minSilenceDuration, VAD_RANGES.minSilenceDuration),
+    speechPad: readVadNumber(vad.speechPad, VAD_RANGES.speechPad),
+    mergeGap: readVadNumber(vad.mergeGap, VAD_RANGES.mergeGap)
+  };
 }
 
 /**
@@ -86,7 +138,8 @@ export default class TranscriptionSettingsStore {
           geminiApiKey: parsed.geminiApiKey || null,
           geminiModel: parsed.geminiModel || null,
           geminiBaseUrl: parsed.geminiBaseUrl || null,
-          geminiProxyUrl: parsed.geminiProxyUrl ?? null
+          geminiProxyUrl: parsed.geminiProxyUrl ?? null,
+          vad: readVad(parsed.vad)
         }, logger);
       }
       catch (error) {
@@ -183,7 +236,37 @@ export default class TranscriptionSettingsStore {
       : this.getApiKeySource();
   }
 
-  /** Passing `null` for a key clears it and falls back to the environment. */
+  /**
+   * The detector settings in force: only what was set, so the caller decides
+   * what the defaults are and how its own configuration merges with these.
+   */
+  getVADOverrides(): Partial<VADOptions> {
+    const overrides: Partial<VADOptions> = {};
+    const vad = this.#data.vad;
+    if (vad.threshold !== null) {
+      overrides.threshold = vad.threshold;
+    }
+    if (vad.minSilenceDuration !== null) {
+      overrides.minSilenceDuration = vad.minSilenceDuration;
+    }
+    if (vad.speechPad !== null) {
+      overrides.speechPad = vad.speechPad;
+    }
+    if (vad.mergeGap !== null) {
+      overrides.mergeGap = vad.mergeGap;
+    }
+    return overrides;
+  }
+
+  /** The overrides exactly as saved, for the settings form to show. */
+  getVADSettings(): VADOverrides {
+    return { ...this.#data.vad };
+  }
+
+  /**
+   * Passing `null` for a key clears it and falls back to the environment.
+   * Passing `null` for a detector field puts its built-in default back.
+   */
   update(params: {
     provider?: TranscriptionProvider | null;
     apiKey?: string | null;
@@ -193,6 +276,7 @@ export default class TranscriptionSettingsStore {
     geminiModel?: string | null;
     geminiBaseUrl?: string | null;
     geminiProxyUrl?: string | null;
+    vad?: Partial<Record<keyof VADOverrides, number | null>>;
   }) {
     if (params.provider !== undefined) {
       this.#data.provider = readProvider(params.provider);
@@ -218,6 +302,22 @@ export default class TranscriptionSettingsStore {
     if (params.geminiProxyUrl !== undefined) {
       // Kept verbatim, empty string included - see `getGeminiProxyUrl`.
       this.#data.geminiProxyUrl = params.geminiProxyUrl;
+    }
+    if (params.vad !== undefined) {
+      this.#data.vad = {
+        threshold: params.vad.threshold !== undefined ?
+          readVadNumber(params.vad.threshold, VAD_RANGES.threshold)
+          : this.#data.vad.threshold,
+        minSilenceDuration: params.vad.minSilenceDuration !== undefined ?
+          readVadNumber(params.vad.minSilenceDuration, VAD_RANGES.minSilenceDuration)
+          : this.#data.vad.minSilenceDuration,
+        speechPad: params.vad.speechPad !== undefined ?
+          readVadNumber(params.vad.speechPad, VAD_RANGES.speechPad)
+          : this.#data.vad.speechPad,
+        mergeGap: params.vad.mergeGap !== undefined ?
+          readVadNumber(params.vad.mergeGap, VAD_RANGES.mergeGap)
+          : this.#data.vad.mergeGap
+      };
     }
     this.#save();
   }

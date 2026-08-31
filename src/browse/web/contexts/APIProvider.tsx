@@ -598,6 +598,13 @@ class API {
     geminiProxyUrl?: string;
     /** The vocabulary file, verbatim. Omitted leaves it alone. */
     vocabulary?: string;
+    /** Detector overrides. `null` for a field puts its default back. */
+    vad?: {
+      threshold?: number | null;
+      minSilenceDuration?: number | null;
+      speechPad?: number | null;
+      mergeGap?: number | null;
+    };
   }): Promise<TranscriptionSettings> {
     const data = await readJSON(await apiFetch('/api/transcription/settings', {
       method: 'PUT',
@@ -678,6 +685,8 @@ class API {
     batchLines?: number;
     disableThinking?: boolean;
     segmentation?: boolean;
+    sourceSegmentation?: boolean;
+    polish?: boolean;
     maxLineCjk?: number;
     maxLineLatin?: number;
   }): Promise<TranslationSettings> {

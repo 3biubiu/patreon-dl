@@ -10,6 +10,24 @@ import { type Logger } from '../../../utils/logging/index.js';
 export const MAX_TERMS = 1000;
 /** Past this the documented advice is that biasing starts to work against itself. */
 export const RECOMMENDED_TERMS = 100;
+/**
+ * Mappings past which the translation prompt stops carrying all of them. A
+ * mapping costs far more room than a bare term - both sides, plus the arrow -
+ * and the translation is billed per call with the list attached to every one.
+ */
+export const MAX_MAPPINGS = 200;
+
+/** One term, and the Chinese it must become when the file is translated. */
+export interface TermMapping {
+  term: string;
+  translation: string;
+}
+
+/** What `parse` reads out of the file: the terms, and which of them map. */
+export interface ParsedVocabulary {
+  terms: string[];
+  mappings: TermMapping[];
+}
 
 /**
  * The domain terms the speech model is steered towards.
@@ -20,6 +38,16 @@ export const RECOMMENDED_TERMS = 100;
  * middle of that, and the terms most worth adding are exactly the ones with
  * awkward punctuation in them.
  *
+ * A line may carry a translation after `=>`:
+ *
+ *     zenithal priming => 天顶喷涂
+ *
+ * The left side is still a biasing term for the transcription, and the whole
+ * line becomes a rule the translation follows - the same file steers what the
+ * model hears and what the translator calls it, so a term corrected in the
+ * transcript is not then re-mangled in the Chinese. Lines without `=>` bias
+ * the transcription and the polishing pass only.
+ *
  * Re-read whenever the file's timestamp moves, so an edit takes effect on the
  * next clip without anything being restarted.
  */
@@ -28,12 +56,14 @@ export default class VocabularyStore {
 
   #filePath: string;
   #terms: string[];
+  #mappings: TermMapping[];
   #mtimeMs: number | null;
   #logger?: Logger | null;
 
   constructor(filePath: string, logger?: Logger | null) {
     this.#filePath = filePath;
     this.#terms = [];
+    this.#mappings = [];
     this.#mtimeMs = null;
     this.#logger = logger;
   }
@@ -44,11 +74,22 @@ export default class VocabularyStore {
 
   /**
    * The terms as the provider should be given them: comments and blank lines
-   * gone, duplicates gone, and no more than the ceiling allows.
+   * gone, duplicates gone, and no more than the ceiling allows. A line with a
+   * translation contributes its left side.
    */
   getTerms(): string[] {
     this.#refresh();
     return this.#terms;
+  }
+
+  /**
+   * The terms that carry a Chinese translation, for the translator to be
+   * steered with. No ceiling from the provider applies here - only this
+   * project's own sense of how much belongs in every call.
+   */
+  getMappings(): TermMapping[] {
+    this.#refresh();
+    return this.#mappings;
   }
 
   /** The file as it stands, for an editor to show. Empty when there is none. */
@@ -82,6 +123,7 @@ export default class VocabularyStore {
     catch {
       // No file is a valid state: the feature simply adds no bias.
       this.#terms = [];
+      this.#mappings = [];
       this.#mtimeMs = null;
       return;
     }
@@ -89,14 +131,23 @@ export default class VocabularyStore {
       return;
     }
     this.#mtimeMs = mtimeMs;
-    this.#terms = VocabularyStore.parse(this.getText(), (message) => this.log('warn', message));
-    this.log('debug', `Loaded ${this.#terms.length} vocabulary terms from "${this.#filePath}"`);
+    const parsed = VocabularyStore.parse(this.getText(), (message) => this.log('warn', message));
+    this.#terms = parsed.terms;
+    this.#mappings = parsed.mappings;
+    this.log('debug',
+      `Loaded ${this.#terms.length} vocabulary terms (${this.#mappings.length} with translations) ` +
+      `from "${this.#filePath}"`
+    );
   }
 
-  /** One term per line, `#` comments, blanks and repeats dropped. */
-  static parse(text: string, warn?: (message: string) => void): string[] {
-    const seen = new Set<string>();
-    const terms: string[] = [];
+  /**
+   * One term per line, `#` comments, blanks and repeats dropped. A line of
+   * the form `term => translation` counts once, by its term, and wins over a
+   * plain line for the same term whichever order they appear in - it carries
+   * everything the plain one does, and the translation besides.
+   */
+  static parse(text: string, warn?: (message: string) => void): ParsedVocabulary {
+    const byKey = new Map<string, { term: string; translation: string | null }>();
     for (const line of text.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) {
@@ -104,18 +155,45 @@ export default class VocabularyStore {
       }
       // Case is kept - a brand name is worth biasing towards as it is written -
       // but a term repeated in two cases is still one term to the provider.
-      const key = trimmed.toLowerCase();
-      if (seen.has(key)) {
+      const arrow = trimmed.indexOf('=>');
+      const term = (arrow >= 0 ? trimmed.slice(0, arrow) : trimmed).trim();
+      const translation = arrow >= 0 ? trimmed.slice(arrow + 2).trim() : null;
+      if (!term || (arrow >= 0 && !translation)) {
+        // An arrow with an empty half is a line somebody is halfway through
+        // writing; biasing with a dangling term helps nobody.
         continue;
       }
-      seen.add(key);
-      terms.push(trimmed);
+      // A mapped line always wins over a plain one for the same term, in
+      // either order: it carries everything the plain one does, and the
+      // translation besides.
+      const key = term.toLowerCase();
+      const existing = byKey.get(key);
+      if (!existing || translation !== null || existing.translation === null) {
+        byKey.set(key, { term, translation });
+      }
     }
+
+    const entries = [ ...byKey.values() ];
+    const terms = entries.map((entry) => entry.term);
+    const mappings = entries
+      .filter((entry) => entry.translation !== null)
+      .map((entry) => ({ term: entry.term, translation: entry.translation as string }));
+
     if (terms.length > MAX_TERMS) {
       warn?.(
         `Vocabulary has ${terms.length} terms; only the first ${MAX_TERMS} are sent.`
       );
-      return terms.slice(0, MAX_TERMS);
+      return {
+        terms: terms.slice(0, MAX_TERMS),
+        mappings: mappings.slice(0, MAX_MAPPINGS)
+      };
+    }
+    if (mappings.length > MAX_MAPPINGS) {
+      warn?.(
+        `Vocabulary has ${mappings.length} term translations; only the first ${MAX_MAPPINGS} ` +
+        'are offered to the translator.'
+      );
+      return { terms, mappings: mappings.slice(0, MAX_MAPPINGS) };
     }
     if (terms.length > RECOMMENDED_TERMS) {
       warn?.(
@@ -124,7 +202,7 @@ export default class VocabularyStore {
         `pulling the transcript towards themselves.`
       );
     }
-    return terms;
+    return { terms, mappings };
   }
 
   protected log(level: LogLevel, ...msg: any[]) {

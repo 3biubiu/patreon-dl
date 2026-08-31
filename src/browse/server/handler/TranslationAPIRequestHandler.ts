@@ -70,6 +70,7 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       disableThinking: this.#settings.getDisableThinking(),
       segmentation: this.#settings.getSegmentation(),
       sourceSegmentation: this.#settings.getSourceSegmentation(),
+      polish: this.#settings.getPolish(),
       maxLineCjk: this.#settings.getMaxLineCjk(),
       maxLineLatin: this.#settings.getMaxLineLatin(),
       totalRequests: this.#settings.getTotalRequests(),
@@ -135,6 +136,9 @@ export default class TranslationAPIRequestHandler extends Basehandler {
     }
     if (body.sourceSegmentation !== undefined) {
       patch.sourceSegmentation = !!body.sourceSegmentation;
+    }
+    if (body.polish !== undefined) {
+      patch.polish = !!body.polish;
     }
     if (body.maxLineCjk !== undefined) {
       const value = Number(body.maxLineCjk);

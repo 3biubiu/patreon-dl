@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Form, Input, Popconfirm, Radio, Space, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Popconfirm, Radio, Space, Tag } from "antd";
 import { useAPI } from "../../contexts/APIProvider";
 import { LoadingBlock } from "../Loading";
 import {
@@ -18,6 +18,11 @@ interface FormValues {
   geminiBaseUrl: string;
   geminiProxyUrl: string;
   vocabulary: string;
+  /** Detector overrides. `null` is the built-in default, shown as a placeholder. */
+  vadThreshold: number | null;
+  vadMinSilenceDuration: number | null;
+  vadSpeechPad: number | null;
+  vadMergeGap: number | null;
 }
 
 function formatMoney(value: number | null | undefined) {
@@ -116,7 +121,11 @@ function TranscriptionSettingsPanel() {
       geminiModel: result.gemini.model,
       geminiBaseUrl: result.gemini.baseUrl,
       geminiProxyUrl: result.gemini.proxyUrl,
-      vocabulary: result.vocabulary.text
+      vocabulary: result.vocabulary.text,
+      vadThreshold: result.vad.values.threshold,
+      vadMinSilenceDuration: result.vad.values.minSilenceDuration,
+      vadSpeechPad: result.vad.values.speechPad,
+      vadMergeGap: result.vad.values.mergeGap
     });
   }, [ form ]);
 
@@ -145,7 +154,15 @@ function TranscriptionSettingsPanel() {
         // Sent even when blank: blank is "go direct", which has to be
         // distinguishable from "not mentioned".
         geminiProxyUrl: values.geminiProxyUrl ?? '',
-        vocabulary: values.vocabulary ?? ''
+        vocabulary: values.vocabulary ?? '',
+        // Blank is "the default", which is worth saving rather than leaving
+        // whatever was there.
+        vad: {
+          threshold: values.vadThreshold ?? null,
+          minSilenceDuration: values.vadMinSilenceDuration ?? null,
+          speechPad: values.vadSpeechPad ?? null,
+          mergeGap: values.vadMergeGap ?? null
+        }
       };
       // Left blank means "leave the stored key alone", not "clear it" -
       // clearing is its own button, so an edit to the model cannot wipe a key
@@ -356,18 +373,96 @@ function TranscriptionSettingsPanel() {
             }
             <Form.Item
               name="vocabulary"
-              label={`Domain terms (${settings.vocabulary.termCount} in use)`}
+              label={
+                `Domain terms (${settings.vocabulary.termCount} in use` +
+                (settings.vocabulary.mappingCount > 0 ?
+                  `, ${settings.vocabulary.mappingCount} translated`
+                  : '') +
+                ')'
+              }
               extra={
                 `One term or phrase per line; lines starting with # are comments. ` +
                 `Only distinct jargon, brand names and proper nouns - everyday words ` +
-                `pull the transcript towards themselves. The same file can be edited ` +
-                `directly at ${settings.vocabulary.path}, and is re-read for each clip.`
+                `pull the transcript towards themselves. A line may also fix the ` +
+                `Chinese for a term, as "zenithal priming => 天顶喷涂": it still biases ` +
+                `the transcription, and the translation renders it that way every time. ` +
+                `The same file can be edited directly at ${settings.vocabulary.path}, ` +
+                `and is re-read for each clip.`
               }
             >
               <Input.TextArea
                 autoSize={{ minRows: 6, maxRows: 20 }}
                 spellCheck={false}
                 placeholder={'non-metallic metal\nzenithal priming\nCobalt Violet Grey'}
+              />
+            </Form.Item>
+          </Card>
+
+          <Card
+            title="Voice activity detection"
+            extra={
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
+                Blank means the default
+              </span>
+            }
+          >
+            <p style={{ marginTop: 0 }}>
+              The detector decides which parts of the audio reach the
+              transcriber. Words being cut off at their start or end means the
+              detection threshold is too high or the padding too small;
+              subtitles appearing over stretches of silence means the opposite.
+              Takes effect from the next video.
+            </p>
+            <Form.Item
+              name="vadThreshold"
+              label="Speech threshold"
+              extra={`Probability above which a frame counts as speech. Default ${settings.vad.defaults.threshold}.`}
+            >
+              <InputNumber
+                min={settings.vad.ranges.threshold.min}
+                max={settings.vad.ranges.threshold.max}
+                step={0.05}
+                placeholder={String(settings.vad.defaults.threshold)}
+                style={{ width: '12rem' }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="vadMinSilenceDuration"
+              label="Minimum silence (seconds)"
+              extra={`Silence shorter than this does not end a stretch of speech. Default ${settings.vad.defaults.minSilenceDuration}.`}
+            >
+              <InputNumber
+                min={settings.vad.ranges.minSilenceDuration.min}
+                max={settings.vad.ranges.minSilenceDuration.max}
+                step={0.1}
+                placeholder={String(settings.vad.defaults.minSilenceDuration)}
+                style={{ width: '12rem' }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="vadSpeechPad"
+              label="Padding (seconds)"
+              extra={`Each stretch of speech is widened by this much at both ends, so the first and last words are not clipped. Default ${settings.vad.defaults.speechPad}.`}
+            >
+              <InputNumber
+                min={settings.vad.ranges.speechPad.min}
+                max={settings.vad.ranges.speechPad.max}
+                step={0.1}
+                placeholder={String(settings.vad.defaults.speechPad)}
+                style={{ width: '12rem' }}
+              />
+            </Form.Item>
+            <Form.Item
+              name="vadMergeGap"
+              label="Merge silence (seconds)"
+              extra={`Silence up to this long is kept inside the upload; anything longer is cut out. Default ${settings.vad.defaults.mergeGap}.`}
+            >
+              <InputNumber
+                min={settings.vad.ranges.mergeGap.min}
+                max={settings.vad.ranges.mergeGap.max}
+                step={0.5}
+                placeholder={String(settings.vad.defaults.mergeGap)}
+                style={{ width: '12rem' }}
               />
             </Form.Item>
           </Card>

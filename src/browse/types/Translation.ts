@@ -101,6 +101,12 @@ export interface TranslationSettings {
    * changes the file the transcription itself produces.
    */
   sourceSegmentation: boolean;
+  /**
+   * Whether the transcript's text is repaired by the model - recognition
+   * errors, filler syllables, punctuation - after it is transcribed. Costs
+   * calls like `sourceSegmentation` does.
+   */
+  polish: boolean;
   /** Longest Chinese line, in characters. */
   maxLineCjk: number;
   /** Longest line for a language written with spaces, in words. */

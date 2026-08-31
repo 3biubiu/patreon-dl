@@ -3,7 +3,9 @@ import { type Logger } from '../../../utils/logging/index.js';
 import { commonLog } from '../../../utils/logging/Logger.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type TranscriptionQueue from '../transcription/TranscriptionQueue.js';
+import type VocabularyStore from '../transcription/VocabularyStore.js';
 import SentenceSplitter from '../transcription/SentenceSplitter.js';
+import SubtitlePolisher from '../transcription/SubtitlePolisher.js';
 import GeminiTranslator, { DEFAULT_BASE_URL, DEFAULT_MODEL } from './GeminiTranslator.js';
 import TranslationQueue from './TranslationQueue.js';
 import TranslationSettingsStore from './TranslationSettingsStore.js';
@@ -46,7 +48,8 @@ export function createTranslationServices(
   index: TranscriptionIndex,
   transcriptionQueue: TranscriptionQueue,
   config?: TranslationConfig | null,
-  logger?: Logger | null
+  logger?: Logger | null,
+  vocabulary?: VocabularyStore | null
 ): TranslationServices {
   const settings = TranslationSettingsStore.load(
     path.resolve(dataDir, '.patreon-dl', 'translation.json'),
@@ -60,7 +63,11 @@ export function createTranslationServices(
       baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL,
       proxyUrl: config?.proxyUrl !== undefined ? config.proxyUrl || null : settings.getProxyUrl(),
       prompt: settings.getPrompt(),
-      disableThinking: settings.getDisableThinking()
+      disableThinking: settings.getDisableThinking(),
+      // The term translations from the transcription's vocabulary file: the
+      // same list that steered what the model heard, offered to every call as
+      // what those terms must become in Chinese.
+      vocabulary: vocabulary?.getMappings() || []
     }),
     logger
   );
@@ -89,6 +96,28 @@ export function createTranslationServices(
       logger
     ),
     () => settings.getSourceSegmentation()
+  );
+
+  // The other pass that runs during transcription: the text itself, repaired
+  // in place after the cutting. Spends this key like the splitter does, and
+  // steers its corrections with the transcription's own vocabulary - the list
+  // the Gemini transcriber is biased with, offered to the model again as
+  // reference where biasing could not reach.
+  transcriptionQueue.setPolisher(
+    new SubtitlePolisher(
+      () => ({
+        apiKey: config?.apiKey || settings.getApiKey(),
+        model: config?.model || settings.getModel() || DEFAULT_MODEL,
+        baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL,
+        proxyUrl: config?.proxyUrl !== undefined ?
+          config.proxyUrl || null
+          : settings.getProxyUrl(),
+        disableThinking: settings.getDisableThinking()
+      }),
+      logger
+    ),
+    () => settings.getPolish(),
+    () => vocabulary?.getTerms() || []
   );
 
   // The other half of the checkbox on the transcribe confirmation: asking to

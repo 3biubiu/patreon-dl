@@ -15,7 +15,12 @@ export type TranscriptionState =
   | 'cancelled';
 
 /** Which part of a running job is under way. */
-export type TranscriptionStage = 'detecting' | 'transcribing' | 'segmenting' | 'writing';
+export type TranscriptionStage =
+  | 'detecting'
+  | 'transcribing'
+  | 'segmenting'
+  | 'polishing'
+  | 'writing';
 
 /**
  * One video's transcription, from the moment it is asked for to whatever
@@ -129,10 +134,37 @@ export interface VocabularySettings {
   path: string;
   text: string;
   termCount: number;
+  /**
+   * Terms carrying a translation after `=>`. What the translation is steered
+   * with, and zero on a file with no arrows in it.
+   */
+  mappingCount: number;
   /** Set when the list has grown past the point where biasing still helps. */
   warning: string | null;
   /** False on a provider with no biasing, so the form can say why it is idle. */
   supported: boolean;
+}
+
+/** The detector settings an administrator can override. Null is the default. */
+export interface VADOverrides {
+  threshold: number | null;
+  minSilenceDuration: number | null;
+  speechPad: number | null;
+  mergeGap: number | null;
+}
+
+/** The detector's built-in settings, and the ranges a form is held to. */
+export interface VADSettings {
+  /** What an administrator saved; `null` for a field means the default. */
+  values: VADOverrides;
+  /** What each field is when nobody has set it, so the form can say so. */
+  defaults: VADOverrides;
+  ranges: {
+    threshold: { min: number; max: number };
+    minSilenceDuration: { min: number; max: number };
+    speechPad: { min: number; max: number };
+    mergeGap: { min: number; max: number };
+  };
 }
 
 /**
@@ -150,6 +182,7 @@ export interface TranscriptionSettings {
   openrouter: ProviderSettings;
   gemini: GeminiProviderSettings;
   vocabulary: VocabularySettings;
+  vad: VADSettings;
 }
 
 /** A record is still moving while it is in one of these states. */

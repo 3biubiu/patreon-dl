@@ -53,6 +53,7 @@ const STAGE_LABEL: Record<TranscriptionStage, string> = {
   detecting: 'Finding speech',
   transcribing: 'Transcribing',
   segmenting: 'Splitting sentences',
+  polishing: 'Repairing text',
   writing: 'Writing subtitles'
 };
 

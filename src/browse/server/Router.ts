@@ -8,7 +8,6 @@ import ContentAPIRequestHandler from './handler/ContentAPIRequestHandler.js';
 import MediaRequestHandler from './handler/MediaRequestHandler.js';
 import SettingsAPIRequestHandler from './handler/SettingsAPIRequestHandler.js';
 import MediaAPIRequestHandler from './handler/MediaAPIRequestHandler.js';
-import VideoThumbnailer from './VideoThumbnailer.js';
 import AuthAPIRequestHandler from './handler/AuthAPIRequestHandler.js';
 import type AuthStore from './AuthStore.js';
 import { getSessionUser, refreshSessionIfStale, type AuthenticatedRequest } from './AuthGuard.js';
@@ -423,17 +422,17 @@ export function getRouter(
   logger?: Logger | null,
   translationConfig?: TranslationConfig | null
 ) {
-  const videoThumbnailer = new VideoThumbnailer(dataDir, pathToFFmpeg, logger);
   const transcription = createTranscriptionServices(dataDir, transcriptionConfig, pathToFFmpeg, logger);
   // After transcription, and given its index and queue: a translation reads
   // the subtitle a transcription wrote, and follows one when asked to.
   const translation = createTranslationServices(
-    dataDir, transcription.index, transcription.queue, translationConfig, logger
+    dataDir, transcription.index, transcription.queue, translationConfig, logger,
+    transcription.vocabulary
   );
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
-    media: new MediaRequestHandler(db, dataDir, videoThumbnailer, quotaStore, logger),
+    media: new MediaRequestHandler(db, dataDir, quotaStore, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
     auth: new AuthAPIRequestHandler(authStore, historyStore, quotaStore, loginLogStore, logger),

@@ -174,7 +174,12 @@ export function createTranscriptionServices(
   });
 
   const queue = new TranscriptionQueue(
-    dataDir, extractor, vad, transcriber, index, config?.vad, logger
+    dataDir, extractor, vad, transcriber, index,
+    // The startup configuration decides, and what an administrator saved in
+    // the browser fills in whatever it left alone. Read per job, so a
+    // threshold changed in the settings is what the next video runs with.
+    () => ({ ...settings.getVADOverrides(), ...config?.vad }),
+    logger
   );
   // A request made just before a restart is still a request. Ones that were
   // already under way are not resumed - the index has marked those failed.

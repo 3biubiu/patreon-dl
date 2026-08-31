@@ -50,6 +50,13 @@ interface SettingsFile {
    * transcription's own subtitle is cut by when it is on.
    */
   sourceSegmentation: boolean;
+  /**
+   * Whether the transcript's text is repaired by the model after it is
+   * transcribed - recognition errors, filler syllables, punctuation. Costs
+   * calls, about the same as `sourceSegmentation`, and also changes the file
+   * the transcription itself produces.
+   */
+  polish: boolean;
   maxLineCjk: number | null;
   maxLineLatin: number | null;
   /** Calls spent since this counter was last reset. */
@@ -67,6 +74,7 @@ const EMPTY: SettingsFile = {
   disableThinking: false,
   segmentation: true,
   sourceSegmentation: true,
+  polish: false,
   maxLineCjk: null,
   maxLineLatin: null,
   totalRequests: 0
@@ -116,6 +124,9 @@ export default class TranslationSettingsStore {
           // Absent in files written before this existed, and on by default.
           segmentation: parsed.segmentation ?? true,
           sourceSegmentation: parsed.sourceSegmentation ?? true,
+          // Off by default: unlike the segmentation toggles this rewrites
+          // what was said, and an administrator should choose that.
+          polish: parsed.polish ?? false,
           maxLineCjk: parsed.maxLineCjk || null,
           maxLineLatin: parsed.maxLineLatin || null,
           totalRequests: parsed.totalRequests || 0
@@ -197,6 +208,10 @@ export default class TranslationSettingsStore {
     return this.#data.sourceSegmentation;
   }
 
+  getPolish(): boolean {
+    return this.#data.polish;
+  }
+
   getMaxLineCjk(): number {
     return this.#data.maxLineCjk || DEFAULT_SEGMENTER_OPTIONS.maxCjk;
   }
@@ -242,6 +257,7 @@ export default class TranslationSettingsStore {
     disableThinking?: boolean;
     segmentation?: boolean;
     sourceSegmentation?: boolean;
+    polish?: boolean;
     maxLineCjk?: number | null;
     maxLineLatin?: number | null;
   }) {
@@ -279,6 +295,9 @@ export default class TranslationSettingsStore {
     }
     if (params.sourceSegmentation !== undefined) {
       this.#data.sourceSegmentation = params.sourceSegmentation;
+    }
+    if (params.polish !== undefined) {
+      this.#data.polish = params.polish;
     }
     if (params.maxLineCjk !== undefined) {
       this.#data.maxLineCjk = params.maxLineCjk === null ?

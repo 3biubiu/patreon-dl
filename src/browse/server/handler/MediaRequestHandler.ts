@@ -6,7 +6,6 @@ import fs from 'fs';
 import Basehandler from './BaseHandler.js';
 import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
-import type VideoThumbnailer from '../VideoThumbnailer.js';
 import { checkMediaAccess, isMediaElementRequest } from '../MediaAccessGuard.js';
 import type QuotaStore from '../QuotaStore.js';
 import { consumeQuota } from '../QuotaGuard.js';
@@ -66,20 +65,17 @@ export default class MediaRequestHandler extends Basehandler {
 
   #db: DBInstance;
   #dataDir: string;
-  #videoThumbnailer: VideoThumbnailer;
   #quotaStore: QuotaStore;
 
   constructor(
     db: DBInstance,
     dataDir: string,
-    videoThumbnailer: VideoThumbnailer,
     quotaStore: QuotaStore,
     logger?: Logger | null
   ) {
     super(logger);
     this.#db = db;
     this.#dataDir = dataDir;
-    this.#videoThumbnailer = videoThumbnailer;
     this.#quotaStore = quotaStore;
   }
 
@@ -105,7 +101,7 @@ export default class MediaRequestHandler extends Basehandler {
     );
   }
 
-  async handleMediaRequest(req: Request, res: Response, id: string) {
+  handleMediaRequest(req: Request, res: Response, id: string) {
     // The gate that keeps a media URL from working anywhere but inside the
     // page that served it. It lives here rather than in the route so that a
     // refusal can be logged with the headers behind it.
@@ -141,21 +137,11 @@ export default class MediaRequestHandler extends Basehandler {
       mediaFilePath = downloaded?.path ? path.resolve(this.#dataDir, downloaded.path) : null;
     }
     if (isRequestingThumbnail && mediaFilePath && !isThumbnail && !looksLikeImage(mediaFilePath, downloaded?.mimeType)) {
-        // No stored thumbnail. For videos we can still produce one locally by
-        // grabbing a frame, which is the only option when Patreon supplied no
-        // cover image for the post.
-        if (looksLikeVideo(mediaFilePath, downloaded?.mimeType) && isUsableFile(mediaFilePath)) {
-          const generated = await this.#videoThumbnailer.getThumbnail(mediaFilePath);
-          if (generated) {
-            res.sendFile(generated, { headers: { 'Content-Type': 'image/jpeg' }, dotfiles: 'allow' });
-            return;
-          }
-          this.log('warn',
-            `Could not generate a poster frame for "${mediaFilePath}" - ` +
-            `check that FFmpeg is installed, or pass its path with "--ffmpeg"`
-          );
-        }
-        this.log('warn', `Thumbnail for media file "${mediaFilePath}" unavailable`);
+        // No stored thumbnail, and a video is not its own poster frame.
+        // Thumbnail files are prepared offline - nothing is generated here,
+        // so a request like this is answered immediately rather than by
+        // holding the page up while FFmpeg grabs a frame.
+        this.log('debug', `Thumbnail for media file "${mediaFilePath}" unavailable`);
         res.status(404).send('Media not found');
         return;
     }

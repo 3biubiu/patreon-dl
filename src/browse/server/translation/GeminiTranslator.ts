@@ -65,6 +65,12 @@ export interface TranslatorSettings {
   proxyUrl: string | null;
   prompt: string | null;
   disableThinking: boolean;
+  /**
+   * Term translations from the transcription's vocabulary file, offered to
+   * every call as reference. Read per call, so an edit to the file is what
+   * the next batch is steered with.
+   */
+  vocabulary: { term: string; translation: string }[];
 }
 
 /**
@@ -263,7 +269,24 @@ export default class GeminiTranslator {
   ): Promise<Map<number, string>> {
     // Read once per call: an administrator can change the key, model or
     // prompt between one batch and the next.
-    const { apiKey, model, baseUrl, proxyUrl, prompt, disableThinking } = this.#settings();
+    const { apiKey, model, baseUrl, proxyUrl, prompt, disableThinking, vocabulary } =
+      this.#settings();
+
+    const systemParts: { text: string }[] = [ { text: buildSystemPrompt(prompt) } ];
+    if (vocabulary.length > 0) {
+      // The same terms the transcription was biased with, here as rules about
+      // what they become in Chinese. Without this a term the vocabulary
+      // corrected in the transcript gets re-mangled by the translation - one
+      // line of "背景虚化" and the next of "背景过滤", for the same word.
+      systemParts.push({ text: [
+        '<terminology>',
+        'These terms appear in the subtitles. When one of them - or a close ' +
+        'variant of one - is in a line, translate it exactly as given, and use ' +
+        'the same rendering every time it appears.',
+        ...vocabulary.map(({ term, translation }) => `${term} => ${translation}`),
+        '</terminology>'
+      ].join('\n') });
+    }
 
     const said: string[] = [];
     if (context.length > 0) {
@@ -278,7 +301,7 @@ export default class GeminiTranslator {
     said.push(JSON.stringify(lines));
 
     const body: Record<string, unknown> = {
-      systemInstruction: { parts: [ { text: buildSystemPrompt(prompt) } ] },
+      systemInstruction: { parts: systemParts },
       contents: [ { role: 'user', parts: [ { text: said.join('') } ] } ],
       generationConfig: {
         // Low, not zero: subtitles read better for a little freedom, and zero

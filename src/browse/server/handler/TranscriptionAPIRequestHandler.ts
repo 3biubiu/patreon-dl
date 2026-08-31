@@ -14,6 +14,8 @@ import GeminiTranscriber, {
   DEFAULT_MODEL as GEMINI_DEFAULT_MODEL
 } from '../transcription/GeminiTranscriber.js';
 import VocabularyStore, { RECOMMENDED_TERMS } from '../transcription/VocabularyStore.js';
+import { DEFAULTS as VAD_DEFAULTS } from '../transcription/VoiceActivityDetector.js';
+import { VAD_RANGES } from '../transcription/TranscriptionSettingsStore.js';
 import { listSubtitlesFor, readSubtitleAsVTT } from '../transcription/SubtitleLibrary.js';
 import {
   type GeminiProviderSettings,
@@ -187,11 +189,12 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
 
   #describeVocabulary(provider: TranscriptionProvider) {
     const text = this.#vocabulary.getText();
-    const terms = VocabularyStore.parse(text);
+    const { terms, mappings } = VocabularyStore.parse(text);
     return {
       path: this.#vocabulary.filePath,
       text,
       termCount: terms.length,
+      mappingCount: mappings.length,
       warning: terms.length > RECOMMENDED_TERMS ?
         `${terms.length} terms. Biasing works best at up to ${RECOMMENDED_TERMS}; ` +
         'past that, ordinary words in the list start pulling the transcript ' +
@@ -221,7 +224,17 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
       configured: !!this.#settings.getActiveApiKey(),
       openrouter,
       gemini,
-      vocabulary: this.#describeVocabulary(provider)
+      vocabulary: this.#describeVocabulary(provider),
+      vad: {
+        values: this.#settings.getVADSettings(),
+        defaults: {
+          threshold: VAD_DEFAULTS.threshold,
+          minSilenceDuration: VAD_DEFAULTS.minSilenceDuration,
+          speechPad: VAD_DEFAULTS.speechPad,
+          mergeGap: VAD_DEFAULTS.mergeGap
+        },
+        ranges: VAD_RANGES
+      }
     };
     res.json({ settings });
   }
@@ -330,6 +343,22 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
         });
         return;
       }
+    }
+
+    // The detector overrides: a missing field means "leave it as it is", so
+    // the form can save the credentials without touching them.
+    if (typeof body.vad === 'object' && body.vad !== null) {
+      const vad = body.vad as Record<string, unknown>;
+      const read = (field: string) =>
+        field in vad ?
+          (Number.isFinite(Number(vad[field])) ? Number(vad[field]) : null)
+          : undefined;
+      patch.vad = {
+        threshold: read('threshold'),
+        minSilenceDuration: read('minSilenceDuration'),
+        speechPad: read('speechPad'),
+        mergeGap: read('mergeGap')
+      };
     }
 
     this.#settings.update(patch);

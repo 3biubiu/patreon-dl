@@ -70,9 +70,9 @@ export function snapToSpliceGrid(seconds: number) {
  * The two ffmpeg passes transcription needs: raw PCM for the voice detector,
  * and compressed clips for upload.
  *
- * `child_process` rather than fluent-ffmpeg, which the poster frames use: the
- * detector wants PCM off stdout a frame at a time, and buffering a whole film
- * to hand it over in one piece would cost a couple of hundred megabytes.
+ * `child_process` rather than fluent-ffmpeg: the detector wants PCM off
+ * stdout a frame at a time, and buffering a whole film to hand it over in
+ * one piece would cost a couple of hundred megabytes.
  */
 export default class AudioExtractor {
   name = 'AudioExtractor';

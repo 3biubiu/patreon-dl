@@ -62,7 +62,7 @@ export interface VADOptions {
   mergeGap?: number;
 }
 
-const DEFAULTS: Required<VADOptions> = {
+export const DEFAULTS: Required<VADOptions> = {
   // faster-whisper's own VAD defaults, which is the bar to meet rather than
   // beat. A miss here is not a caption the model gets wrong, it is audio the
   // model never hears: the detector decides what is uploaded, so everything

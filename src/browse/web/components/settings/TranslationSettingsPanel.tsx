@@ -14,6 +14,7 @@ interface FormValues {
   disableThinking: boolean;
   segmentation: boolean;
   sourceSegmentation: boolean;
+  polish: boolean;
   maxLineCjk: number;
   maxLineLatin: number;
 }
@@ -68,6 +69,7 @@ function TranslationSettingsPanel() {
       disableThinking: result.disableThinking,
       segmentation: result.segmentation,
       sourceSegmentation: result.sourceSegmentation,
+      polish: result.polish,
       maxLineCjk: result.maxLineCjk,
       maxLineLatin: result.maxLineLatin
     });
@@ -114,6 +116,7 @@ function TranslationSettingsPanel() {
       disableThinking: values.disableThinking,
       segmentation: values.segmentation,
       sourceSegmentation: values.sourceSegmentation,
+      polish: values.polish,
       maxLineCjk: values.maxLineCjk,
       maxLineLatin: values.maxLineLatin
     };
@@ -291,6 +294,23 @@ function TranslationSettingsPanel() {
               'estimated. Unlike the setting below this one costs calls - about five per hour ' +
               'of speech - and it changes the subtitle the transcription itself writes. It is ' +
               'skipped when no key is set.'
+            }
+          >
+            <Switch />
+          </Form.Item>
+
+          <Form.Item
+            name="polish"
+            label="Repair the source text"
+            valuePropName="checked"
+            extra={
+              'Asks the model to fix what the transcription got wrong: misrecognised ' +
+              'words, filler syllables (um, uh, 呃), missing punctuation, and terms pulled ' +
+              'towards the transcription vocabulary. It runs on whole captions and never ' +
+              'touches their timings, and a caption it would rewrite too heavily is kept ' +
+              'as it was. Off by default, because it changes what was said; costs about ' +
+              'six calls per hour of speech, and needs the key above. It is skipped when ' +
+              'no key is set.'
             }
           >
             <Switch />

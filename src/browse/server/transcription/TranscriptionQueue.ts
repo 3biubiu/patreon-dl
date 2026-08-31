@@ -10,6 +10,7 @@ import type TranscriptionIndex from './TranscriptionIndex.js';
 import { buildSRT, type Segment } from './SubtitleBuilder.js';
 import { type Word } from './CaptionAssembler.js';
 import type SentenceSplitter from './SentenceSplitter.js';
+import type SubtitlePolisher from './SubtitlePolisher.js';
 
 /**
  * Most audio sent in one request. The endpoint's upstreams give up after 60
@@ -72,7 +73,7 @@ export default class TranscriptionQueue {
   #vad: VoiceActivityDetector;
   #transcriber: Transcriber;
   #index: TranscriptionIndex;
-  #vadOptions?: VADOptions;
+  #getVADOptions?: () => VADOptions | undefined;
   #logger?: Logger | null;
 
   #pending: QueueEntry[];
@@ -80,6 +81,11 @@ export default class TranscriptionQueue {
   #draining: boolean;
   #onFinished: ((mediaId: string, succeeded: boolean) => void) | null;
   #splitter: { splitter: SentenceSplitter; enabled: () => boolean } | null;
+  #polisher: {
+    polisher: SubtitlePolisher;
+    enabled: () => boolean;
+    getTerms: () => string[];
+  } | null;
 
   constructor(
     dataDir: string,
@@ -87,7 +93,7 @@ export default class TranscriptionQueue {
     vad: VoiceActivityDetector,
     transcriber: Transcriber,
     index: TranscriptionIndex,
-    vadOptions?: VADOptions,
+    getVADOptions?: () => VADOptions | undefined,
     logger?: Logger | null
   ) {
     this.#dataDir = dataDir;
@@ -95,13 +101,14 @@ export default class TranscriptionQueue {
     this.#vad = vad;
     this.#transcriber = transcriber;
     this.#index = index;
-    this.#vadOptions = vadOptions;
+    this.#getVADOptions = getVADOptions;
     this.#logger = logger;
     this.#pending = [];
     this.#current = null;
     this.#draining = false;
     this.#onFinished = null;
     this.#splitter = null;
+    this.#polisher = null;
   }
 
   /**
@@ -115,6 +122,23 @@ export default class TranscriptionQueue {
    */
   setSentenceSplitter(splitter: SentenceSplitter, enabled: () => boolean) {
     this.#splitter = { splitter, enabled };
+  }
+
+  /**
+   * Who repairs the caption text before the subtitle is written, whether they
+   * are wanted right now, and the domain vocabulary they steer corrections
+   * with.
+   *
+   * Set for the same reason the splitter is: the polisher spends the
+   * translation key and reads the transcription's own vocabulary file, so it
+   * is assembled with those pieces and this class stays free of both.
+   */
+  setPolisher(
+    polisher: SubtitlePolisher,
+    enabled: () => boolean,
+    getTerms: () => string[]
+  ) {
+    this.#polisher = { polisher, enabled, getTerms };
   }
 
   /**
@@ -273,7 +297,9 @@ export default class TranscriptionQueue {
     this.#index.markRunning(mediaId, 'detecting');
     const intervals = await this.#vad.detect(
       videoPath,
-      this.#vadOptions,
+      // Read per job rather than held, so a threshold changed in the settings
+      // is what the next video runs with.
+      this.#getVADOptions?.(),
       (fraction) => this.#index.markProgress(mediaId, fraction * DETECT_SHARE * 100),
       signal
     );
@@ -345,6 +371,26 @@ export default class TranscriptionQueue {
     if (this.#splitter?.enabled() && this.#splitter.splitter.isConfigured()) {
       this.#index.markStage(mediaId, 'segmenting');
       captions = await this.#splitter.splitter.split(collected, collectedWords, signal);
+    }
+
+    // The text itself is the other thing worth a model's opinion: recognition
+    // errors, filler syllables, the punctuation the transcription never had.
+    // It runs after the cutting, on whole captions whose timings it keeps,
+    // and a failure leaves the text as it was - the transcription is already
+    // paid for, and an unpolished subtitle beats no subtitle.
+    if (this.#polisher?.enabled() && this.#polisher.polisher.isConfigured()) {
+      this.#index.markStage(mediaId, 'polishing');
+      try {
+        captions = await this.#polisher.polisher.polish(
+          captions, this.#polisher.getTerms(), signal
+        );
+      }
+      catch (error) {
+        if (signal.aborted) {
+          throw error;
+        }
+        this.log('warn', 'Polishing failed; writing the captions as they came back:', error);
+      }
     }
 
     this.#index.markStage(mediaId, 'writing');

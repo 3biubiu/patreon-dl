@@ -27,7 +27,6 @@ import type Logger from '../../../utils/logging/Logger.js';
 import { createProxyAgentFor } from '../../../utils/Proxy.js';
 import { alignWords, type Word } from './CaptionAssembler.js';
 import { type Segment } from './SubtitleBuilder.js';
-import { similarity } from './SubtitlePolisher.js';
 
 export interface SplitterSettings {
   apiKey: string | null;
@@ -72,8 +71,6 @@ const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hang
  * round-trip on nothing.
  */
 const BREAK_TAG = /^<\s*br\s*\/?\s*>/i;
-/** For splitting the full answer text - no anchor, matches anywhere. */
-const BREAK_TAG_GLOBAL = /<\s*br\s*\/?\s*>/gi;
 
 /** Length of the break tag at `at`, or 0 when there is not one. */
 function breakAt(text: string, at: number) {
@@ -322,107 +319,6 @@ function toSegments(
 }
 
 /**
- * Minimum similarity for a sentence to be considered matched to a word range.
- * Same threshold VideoCaptioner uses.
- */
-const MATCH_SIMILARITY_THRESHOLD = 0.5;
-/** Maximum words to shift when searching for a sentence match. */
-const MATCH_MAX_SHIFT = 30;
-
-/**
- * Matches each LLM sentence to the best word range using a sliding window,
- * and returns the character offsets of the word boundaries.
- *
- * This is the safety net that `locateBreaks` does not provide. A model that
- * puts a `<br>` one clause too early or too late is caught here, because the
- * sentence it produced is matched to the words independently of where the tag
- * was placed. The offset returned is the end of the last matched word, not the
- * position the model chose.
- *
- * A sentence that cannot be matched above the threshold is dropped rather than
- * guessed at: the original rule-based caption boundary will stand in its place
- * through the fallback in `split()`.
- */
-function alignSentencesToWords(
-  sentences: string[],
-  transcript: string,
-  starts: number[],
-  words: Word[],
-  firstWordIndex: number
-): number[] {
-  const offsets: number[] = [];
-  let cursor = firstWordIndex;
-
-  for (const sentence of sentences) {
-    const cleaned = sentence.replace(/\s+/g, ' ').trim();
-    if (!cleaned) {
-      continue;
-    }
-    const wordCount = (cleaned.match(WORD) || []).length;
-    if (wordCount === 0) {
-      continue;
-    }
-
-    const maxWindow = Math.min(wordCount * 2, words.length - cursor);
-    const minWindow = Math.max(1, Math.floor(wordCount / 2));
-    const maxStart = Math.min(cursor + MATCH_MAX_SHIFT + 1, words.length - minWindow + 1);
-
-    let bestRatio = 0;
-    let bestEnd = -1;
-
-    // Try window sizes ordered by closeness to the expected word count.
-    const windowSizes: number[] = [];
-    for (let ws = minWindow; ws <= maxWindow; ws++) {
-      windowSizes.push(ws);
-    }
-    windowSizes.sort((a, b) => Math.abs(a - wordCount) - Math.abs(b - wordCount));
-
-    for (const windowSize of windowSizes) {
-      for (let start = cursor; start < maxStart && start + windowSize <= words.length; start++) {
-        const end = start + windowSize;
-        const lastWord = words[end - 1];
-        const substr = transcript.slice(starts[start], starts[end - 1] + lastWord.text.length);
-        const ratio = similarity(cleaned, substr.replace(/\s+/g, ' ').trim());
-        if (ratio > bestRatio) {
-          bestRatio = ratio;
-          bestEnd = end;
-        }
-        if (ratio >= 0.98) {
-          break;
-        }
-      }
-      if (bestRatio >= 0.98) {
-        break;
-      }
-    }
-
-    if (bestRatio >= MATCH_SIMILARITY_THRESHOLD && bestEnd > 0) {
-      const lastWord = words[bestEnd - 1];
-      offsets.push(starts[bestEnd - 1] + lastWord.text.length);
-      cursor = bestEnd;
-    }
-    // A sentence that could not be matched leaves no offset here. The caller
-    // falls back to the original rule-based boundaries for the unmatchable
-    // stretch, which is safer than trusting a boundary the model misplaced.
-  }
-
-  return offsets;
-}
-
-/**
- * Splits the LLM answer by `<br>` tags and returns the cleaned sentence texts.
- * These are the sentences the model *intended* to produce, independently of
- * where `locateBreaks` mapped the tags to in the source. Used by the alignment
- * step to match each sentence to the word range that best fits it.
- */
-function extractSentences(answer: string): string[] {
-  return answer
-    .split(BREAK_TAG_GLOBAL)
-    .map((s) => s.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-}
-
-/**
  * Splits the source transcript with a language model, falling back to the
  * captions it was given.
  *
@@ -468,7 +364,6 @@ export default class SentenceSplitter {
     const chunks = this.#chunk(transcript, starts, words);
     const offsets: number[] = [];
     let failed = 0;
-    let alignedCount = 0;
 
     for (const chunk of chunks) {
       if (signal?.aborted) {
@@ -476,28 +371,8 @@ export default class SentenceSplitter {
       }
       const source = transcript.slice(chunk.from, chunk.to);
       try {
-        const { offsets: rawOffsets, sentences } = await this.#ask(source, maxCjk, maxLatin, signal);
-        // Align each LLM sentence to the best word range independently.
-        // This catches breaks the model placed at the wrong clause boundary,
-        // because the sentence text is matched to the words, not the tag position.
-        const aligned = alignSentencesToWords(
-          sentences, transcript, starts, words, chunk.wordIndex
-        );
-        if (aligned.length > 0) {
-          const adjusted = aligned.map((o) => o);
-          offsets.push(...adjusted);
-          if (adjusted.length !== rawOffsets.length) {
-            this.log('debug',
-              `Alignment adjusted boundaries in chunk at ${chunk.from}-${chunk.to}: ` +
-              `${rawOffsets.length} raw → ${adjusted.length} aligned`
-            );
-          }
-          alignedCount++;
-        }
-        else {
-          // Alignment produced nothing useful; trust the raw offsets.
-          offsets.push(...rawOffsets.map((offset) => offset + chunk.from));
-        }
+        const { offsets: chunkOffsets } = await this.#ask(source, maxCjk, maxLatin, signal);
+        offsets.push(...chunkOffsets.map((offset) => offset + chunk.from));
       }
       catch (error) {
         if (signal?.aborted) {
@@ -521,7 +396,6 @@ export default class SentenceSplitter {
     this.log('info',
       `Segmented ${segments.length} captions into ${result.length} across ` +
       `${chunks.length} request(s)` +
-      (alignedCount > 0 ? ` (${alignedCount} aligned)` : '') +
       (failed > 0 ? `, ${failed} of which fell back to the original cut` : '')
     );
     return result.length > 0 ? result : segments;
@@ -557,16 +431,14 @@ export default class SentenceSplitter {
     maxCjk: number,
     maxLatin: number,
     signal?: AbortSignal
-  ): Promise<{ offsets: number[]; sentences: string[] }> {
+  ): Promise<{ offsets: number[] }> {
     const contents: { role: string; parts: { text: string }[] }[] = [
       { role: 'user', parts: [ { text: `Segment this transcript:\n\n${source}` } ] }
     ];
     let intact: number[] | null = null;
-    let lastAnswer = '';
 
     for (let step = 1; step <= MAX_STEPS; step++) {
       const answer = await this.#post(contents, maxCjk, maxLatin, signal);
-      lastAnswer = answer;
       const found = locateBreaks(source, answer);
 
       if ('error' in found) {
@@ -584,7 +456,7 @@ export default class SentenceSplitter {
       intact = found.offsets;
       const over = tooLong(source, found.offsets, maxCjk, maxLatin);
       if (over.length === 0) {
-        return { offsets: found.offsets, sentences: extractSentences(lastAnswer) };
+        return { offsets: found.offsets };
       }
       if (step === MAX_STEPS) {
         break;
@@ -601,7 +473,7 @@ export default class SentenceSplitter {
     if (!intact) {
       throw Error('The model never returned the transcript unchanged');
     }
-    return { offsets: intact, sentences: extractSentences(lastAnswer) };
+    return { offsets: intact };
   }
 
   async #post(

@@ -16,10 +16,12 @@ const CONTEXT_LINES = 2;
 /** Below this a batch is not split any further; it is repaired line by line. */
 const MIN_SPLIT_LINES = 8;
 /**
- * A repair call is only worth making for a tail. When a batch comes back
- * missing more than this share of its lines the model misunderstood the batch
- * rather than ran out of room, and asking again about most of it is a second
- * call for the same answer.
+ * Above this share of missing lines a batch is re-asked as split halves
+ * rather than repaired in one call. The model lost the batch as a whole -
+ * renumbered it past recognition, or had its answer cut off at the output
+ * ceiling - so the same lines in one call would come back the same way,
+ * while a half is a smaller answer it can keep in order. Below it, the
+ * missing lines are one repair call for the tail that did not arrive.
  */
 const MAX_REPAIR_SHARE = 0.5;
 
@@ -399,29 +401,77 @@ export default class TranslationQueue {
     }
 
     const short = batch.filter((cue) => !translations.has(cue.index));
-    if (short.length > 0 && short.length <= batch.length * MAX_REPAIR_SHARE) {
-      // One more call, for the missing lines only. Asking for the whole batch
-      // again would be the same answer at the same price for the part that
-      // already arrived.
-      this.log('debug', `Repairing ${short.length} of ${batch.length} captions`);
+    if (short.length === 0) {
+      return { translations, requests };
+    }
+
+    // A batch that lost more than half its lines - most often one that came
+    // back with nothing at all, its items renumbered past recognition or its
+    // JSON cut off at the output ceiling - is re-asked in halves rather than
+    // repaired. A repair of the same size would be the same call again, while
+    // a half is a smaller answer the model has to keep in order, and the
+    // halves recurse until one is small enough to come back whole. Without
+    // this a wholly lost batch was simply left in English - too much of it
+    // missing to repair, and the job finishing as if it had gone well.
+    if (short.length > batch.length * MAX_REPAIR_SHARE &&
+        short.length >= MIN_SPLIT_LINES * 2 && !signal.aborted) {
+      this.log('warn',
+        `Only ${translations.size} of ${batch.length} captions in a batch came back ` +
+        `translated; asking again for the missing ${short.length} in two halves`
+      );
+      const middle = Math.floor(short.length / 2);
       try {
-        const repair = await this.#translator.translateBatch(
-          short.map((cue) => ({ i: cue.index, t: cue.text })),
-          context,
+        const first = await this.#translateBatch(short.slice(0, middle), context, signal);
+        requests += first.requests;
+        for (const [ index, text ] of first.translations) {
+          translations.set(index, text);
+        }
+        const second = await this.#translateBatch(
+          short.slice(middle),
+          this.#tailOf(short.slice(0, middle)),
           signal
         );
-        requests += repair.requests;
-        for (const [ index, text ] of repair.translations) {
+        requests += second.requests;
+        for (const [ index, text ] of second.translations) {
           translations.set(index, text);
         }
       }
       catch (error) {
-        // A failed repair leaves the lines it was for untranslated, which
-        // `buildTranslatedSRT` renders as the original. Not worth losing the
-        // rest of the batch over.
+        // A hard failure in the recovery is not allowed to lose the rest of
+        // the job over lines that were already missing: whatever the halves
+        // produced is kept, and the rest keeps its English as before.
+        if (signal.aborted) {
+          throw error;
+        }
         requests += error instanceof TranslationError ? error.requests : 0;
-        this.log('debug', `Repair failed: ${(error as Error).message}`);
+        this.log('warn',
+          `Could not recover the missing captions: ${(error as Error).message}`
+        );
       }
+      return { translations, requests };
+    }
+
+    // One more call, for the missing lines only. Asking for the whole batch
+    // again would be the same answer at the same price for the part that
+    // already arrived.
+    this.log('debug', `Repairing ${short.length} of ${batch.length} captions`);
+    try {
+      const repair = await this.#translator.translateBatch(
+        short.map((cue) => ({ i: cue.index, t: cue.text })),
+        context,
+        signal
+      );
+      requests += repair.requests;
+      for (const [ index, text ] of repair.translations) {
+        translations.set(index, text);
+      }
+    }
+    catch (error) {
+      // A failed repair leaves the lines it was for untranslated, which
+      // `buildTranslatedSRT` renders as the original. Not worth losing the
+      // rest of the batch over.
+      requests += error instanceof TranslationError ? error.requests : 0;
+      this.log('debug', `Repair failed: ${(error as Error).message}`);
     }
 
     return { translations, requests };

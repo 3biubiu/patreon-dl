@@ -16,6 +16,12 @@ export const RECOMMENDED_TERMS = 100;
  * and the translation is billed per call with the list attached to every one.
  */
 export const MAX_MAPPINGS = 200;
+/**
+ * Total terms offered to the translator per call, mappings and pure terms
+ * together. Mappings are counted first, so they are never crowded out by
+ * pure-English paint names.
+ */
+export const MAX_TRANSLATION_TERMS = 1000;
 
 /** One term, and the Chinese it must become when the file is translated. */
 export interface TermMapping {
@@ -90,6 +96,26 @@ export default class VocabularyStore {
   getMappings(): TermMapping[] {
     this.#refresh();
     return this.#mappings;
+  }
+
+  /**
+   * All terms the translator should know about: mappings with their Chinese
+   * rendering, and pure-English terms (paint names, brand names) with an
+   * empty translation to signal "keep in the original".
+   *
+   * Mappings are counted first, so they are never crowded out by the longer
+   * list of paint names. The total is held to `MAX_TRANSLATION_TERMS`.
+   */
+  getTranslationTerms(): TermMapping[] {
+    this.#refresh();
+    const pureTerms = this.#terms
+      .filter((term) => !this.#mappings.some((m) => m.term === term))
+      .map((term) => ({ term, translation: '' }));
+    const combined = [ ...this.#mappings, ...pureTerms ];
+    if (combined.length > MAX_TRANSLATION_TERMS) {
+      return combined.slice(0, MAX_TRANSLATION_TERMS);
+    }
+    return combined;
   }
 
   /** The file as it stands, for an editor to show. Empty when there is none. */

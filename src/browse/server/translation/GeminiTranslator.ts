@@ -278,14 +278,34 @@ export default class GeminiTranslator {
       // what they become in Chinese. Without this a term the vocabulary
       // corrected in the transcript gets re-mangled by the translation - one
       // line of "背景虚化" and the next of "背景过滤", for the same word.
-      systemParts.push({ text: [
+      //
+      // A term with a translation (term => Chinese) must use that exact
+      // rendering. A term listed without a translation - a paint name, a
+      // brand - must stay in the original English and never be translated.
+      const mapped: string[] = [];
+      const keepEnglish: string[] = [];
+      for (const { term, translation } of vocabulary) {
+        if (translation) {
+          mapped.push(`${term} => ${translation}`);
+        }
+        else {
+          keepEnglish.push(term);
+        }
+      }
+      const parts: string[] = [
         '<terminology>',
-        'These terms appear in the subtitles. When one of them - or a close ' +
-        'variant of one - is in a line, translate it exactly as given, and use ' +
-        'the same rendering every time it appears.',
-        ...vocabulary.map(({ term, translation }) => `${term} => ${translation}`),
-        '</terminology>'
-      ].join('\n') });
+        'These terms appear in the subtitles. Follow these rules for every one of them:',
+        '- If a Chinese translation is given (term => translation), use that exact translation.',
+        '- If only the English term is listed (no translation), keep it in the original English. Do not translate it.'
+      ];
+      if (mapped.length > 0) {
+        parts.push('', 'Terms with translations:', ...mapped);
+      }
+      if (keepEnglish.length > 0) {
+        parts.push('', 'Terms to keep in English:', ...keepEnglish);
+      }
+      parts.push('</terminology>');
+      systemParts.push({ text: parts.join('\n') });
     }
 
     const said: string[] = [];

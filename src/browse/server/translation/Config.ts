@@ -66,8 +66,10 @@ export function createTranslationServices(
       disableThinking: settings.getDisableThinking(),
       // The term translations from the transcription's vocabulary file: the
       // same list that steered what the model heard, offered to every call as
-      // what those terms must become in Chinese.
-      vocabulary: vocabulary?.getMappings() || []
+      // what those terms must become in Chinese. Pure-English terms (paint
+      // names, brands) are included with an empty translation to signal
+      // "keep in the original".
+      vocabulary: vocabulary?.getTranslationTerms() || []
     }),
     logger
   );

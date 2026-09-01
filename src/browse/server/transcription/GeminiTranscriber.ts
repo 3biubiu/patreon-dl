@@ -268,6 +268,42 @@ export default class GeminiTranscriber implements Transcriber {
     throw lastError || new TranscriptionError('Transcription failed');
   }
 
+  /**
+   * The deployed API turns away a `custom_vocabulary` sent together with word
+   * timestamps, although the documentation shows the two combined. The error
+   * is a plain 400, so it is matched on its wording and the request goes out
+   * again without the vocabulary rather than failing the whole video: the
+   * subtitles still get built, and the polishing pass keeps correcting terms
+   * against the vocabulary afterwards. If the API starts accepting the pair,
+   * the biasing simply comes back on its own.
+   */
+  #isVocabularyConflict(error: unknown): boolean {
+    return error instanceof TranscriptionError && error.status === 400 &&
+      /custom_vocabulary is incompatible/i.test(error.message);
+  }
+
+  #buildBody(model: string, file: UploadedFile, language: string | null | undefined, vocabulary: string[]) {
+    return {
+      model,
+      input: [ { type: 'audio', uri: file.uri, mime_type: file.mimeType } ],
+      generation_config: {
+        transcription_config: {
+          // Omitted rather than guessed at, which is what turns on the
+          // model's own detection and its handling of code-switching.
+          ...(language ? { language_codes: [ language ] } : {}),
+          ...(vocabulary.length > 0 ? { custom_vocabulary: vocabulary } : {}),
+          mode: {
+            // Not "smart": that would clean up filler words and formatting,
+            // but cannot be combined with timestamps, and without timestamps
+            // there is no subtitle to build.
+            type: 'verbatim',
+            timestamp_granularities: [ 'word' ]
+          }
+        }
+      }
+    };
+  }
+
   async #run(
     audioPath: string,
     language: string | null | undefined,
@@ -276,30 +312,30 @@ export default class GeminiTranscriber implements Transcriber {
     const { apiKey, model, baseUrl, vocabulary } = this.#settings();
     const file = await this.#upload(audioPath, baseUrl, apiKey, signal);
     try {
-      const body = {
-        model,
-        input: [ { type: 'audio', uri: file.uri, mime_type: file.mimeType } ],
-        generation_config: {
-          transcription_config: {
-            // Omitted rather than guessed at, which is what turns on the
-            // model's own detection and its handling of code-switching.
-            ...(language ? { language_codes: [ language ] } : {}),
-            ...(vocabulary.length > 0 ? { custom_vocabulary: vocabulary } : {}),
-            mode: {
-              // Not "smart": that would clean up filler words and formatting,
-              // but cannot be combined with timestamps, and without timestamps
-              // there is no subtitle to build.
-              type: 'verbatim',
-              timestamp_granularities: [ 'word' ]
-            }
-          }
-        }
-      };
       this.log('debug',
         `Transcribing "${path.basename(audioPath)}" with ${model}` +
         `${vocabulary.length > 0 ? ` and ${vocabulary.length} vocabulary terms` : ''}`
       );
-      const json = await this.#post(`${baseUrl}/v1beta/interactions`, apiKey, body, signal);
+      let json: any;
+      try {
+        json = await this.#post(
+          `${baseUrl}/v1beta/interactions`, apiKey,
+          this.#buildBody(model, file, language, vocabulary), signal
+        );
+      }
+      catch (error) {
+        if (vocabulary.length === 0 || !this.#isVocabularyConflict(error) || signal?.aborted) {
+          throw error;
+        }
+        this.log('warn',
+          'Gemini refused the vocabulary together with word timestamps; ' +
+          'retrying without it. The polishing pass can still correct the terms.'
+        );
+        json = await this.#post(
+          `${baseUrl}/v1beta/interactions`, apiKey,
+          this.#buildBody(model, file, language, []), signal
+        );
+      }
       const { text, words } = collectWords(json);
       if (words.length === 0) {
         throw new TranscriptionError(

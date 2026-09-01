@@ -1,0 +1,645 @@
+# Vallejo / AK 颜料英文名单（纯英文，无中文，可直接粘贴进术语表）
+# 来源：paintpad.app 官方色卡数据（Model Color 227 / Game Color 165 / AK 三代 241）
+# 说明：
+#   - 每个系列内部已去重；跨系列重名（如 Leather Brown、Beige Red）保留，方便按系列核对
+#   - 合计约 633 条；术语表总上限 1000 条，如全部并入 transcription-vocabulary.txt
+#     需注意与现有词条的总数，纯英文行不占用 200 条映射限额
+
+# ═════════════════════════ Vallejo Model Color ═════════════════════════
+Camouflage Middle Brown
+Camouflage Black Green
+Dark Rose
+Chestnut Brown
+Faded Red
+Light Pink
+Dark Purple
+Light Violet
+Black Violet
+Infantry Blue
+Light Blue Green
+Continental Blue
+Light Emerald
+Splinter Green
+Pacific Green
+Bright Green
+German Tank Crew
+Light Mud
+Old Wood
+Grey Brown
+Canvas
+Military Yellow
+Desert Tan
+Cream White
+Desert Brown
+BC Dark Brown
+Mustard Brown
+New Wood
+Dark Rust
+Medium Grey Blue
+Violet Grey
+Lavender Grey
+Sunset Red
+Brown Rose
+Beige Red
+German Orange
+German Yellow
+Oxford Blue
+Blue Green
+Royal Blue
+Royal Purple
+Blue Violet
+Violet Red
+Burnt Red
+Basic Skin Tone
+Luftwaffe Uniform WWII
+Scarlet
+Red Leather
+Iraqi Sand
+Off White
+German Camouflage Beige WWII
+German Camouflage Black Brown
+Luftwaffe Camouflage Green
+German Camouflage Orange Ochre
+German Camouflage Pale Brown
+German Camouflage Med Brown
+Lime Green
+Amaranth Red
+German Fieldgrey WWII
+German Camouflage Bright Green
+Salmon Rose
+London Grey
+Pale Sand
+Emerald
+Ultramarine
+Light Turquoise
+Andrea Blue
+Gloss White
+Cork Brown
+Deep Sky Blue
+Sunny Skin Tone
+Mahogany Brown
+Dark Sand
+Medium Olive
+Bright Orange
+Ochre Brown
+Golden Olive
+Ice Yellow
+Black Red
+Medium Flesh Tone
+Glossy Black
+Black Grey
+Grey Green
+Dark Blue Grey
+Dark Sea Green
+Basalt Grey
+Medium Sea Grey
+Leather Brown
+Chocolate Brown
+US Field Drab
+Tan Earth
+Beige Brown
+Brown Sand
+Gold Brown
+Green Brown
+Khaki Grey
+Yellow Green
+Middle Stone
+Silver Grey
+Stone Grey
+Pastel Green
+Green Grey
+US Olive Drab
+Olive Grey
+Olive Brown
+Refractive Green
+Intermediate Green
+Yellow Olive
+US Dark Green
+Camouflage Olive Green
+Gunship Green
+German Camouflage Extra Dark Green
+Bronze Green
+Dark Sea Blue
+Dark Prussian Blue
+French Mirage Blue
+Pastel Blue
+Azure
+Intermediate Blue
+Blue Grey Pale
+Pale Blue
+Pale Grey Blue
+Carmine Red
+Vermilion
+Orange Red
+Light Orange
+Tan Yellow
+Yellow Ochre
+Green Ochre
+Deep Yellow
+Sand Yellow
+Beige
+Ivory
+Cold White
+German Uniform
+English Uniform
+Uniform Green
+Japanese Uniform WWII
+Russian Uniform WWII
+Blue
+Red
+Dark Flesh
+Light Flesh
+Light Brown
+Dark Blue
+Saddle Brown
+Burnt Umber
+Light Green
+Grey Blue
+Old Rose
+Magenta
+Dark Red
+Dark Vermilion
+Golden Yellow
+Light Yellow
+Black
+White
+Lemon Yellow
+Flat Yellow
+Flat Flesh
+Clear Orange
+Flat Red
+Pink
+Purple
+Violet
+Sky Blue
+Flat Blue
+Medium Blue
+Field Blue
+Prussian Blue
+Turquoise
+Olive Green
+Flat Green
+Park Green Flat
+Deep Green
+Light Green Blue
+Light Sea Grey
+Green Sky
+Military Green
+Buff
+Desert Yellow
+Dark Yellow
+German Camouflage Dark Green
+Black Green
+Orange Brown
+Cavalry Brown
+Flat Earth
+Flat Brown
+Hull Red
+Deck Tan
+Medium Grey
+Khaki
+Sky Grey
+Light Grey
+Dark Sea Grey
+Neutral Grey
+White Grey
+Dark Grey
+German Grey
+Gunmetal Blue
+Brass
+Gunmetal Grey
+Natural Steel
+Oily Steel
+Old Gold
+Gold
+Silver
+Bronze
+Copper
+Wood Grain
+Natural Wood Grain
+Transparent Red
+Transparent Orange
+Transparent Green
+Transparent Yellow
+Transparent Blue
+Smoke
+Tan Glaze
+Verdigris Glaze
+White Glaze
+Brown Glaze
+Black Glaze
+Yellow Fluorescent
+Orange Fluorescent
+Magenta Fluorescent
+Blue Fluorescent
+Green Fluorescent
+
+# ═════════════════════════ Vallejo Game Color ═════════════════════════
+Dead White
+Arctic White
+Pale Flesh
+Elf Skin Tone
+Moon Yellow
+Sun Yellow
+Gold Yellow
+Orange Fire
+Hot Orange
+Bloody Red
+Gory Red
+Scarlet Red
+Squid Pink
+Warlord Purple
+Hexed Lichen
+Royal Purple
+Dark Blue
+Stormy Blue
+Night Blue
+Imperial Blue
+Magic Blue
+Ultramarine Blue
+Electric Blue
+Turquoise
+Foul Green
+Jade Green
+Scurvy Green
+Dark Green
+Sick Green
+Goblin Green
+Camouflage Green
+Scorpy Green
+Livery Green
+Bone White
+Dead Flesh
+Bronze Brown
+Bronze Flesh Tone
+Filthy Brown
+Scrofulous Brown
+Plague Brown
+Leather Brown
+Dwarf Skin
+Parasite Brown
+Beasty Brown
+Dark Fleshtone
+Charred Brown
+Ghost Grey
+Wolf Grey
+Sombre Grey
+Stone Wall Grey
+Cold Grey
+Neutral Grey
+Black
+Khaki
+Earth
+Desert Yellow
+Yellow Olive
+Terracotta
+Tan
+Cayman Green
+Smokey Ink
+Barbarian Skin
+Alien Purple
+Glacier Blue
+Verdigris
+Pale Yellow
+Elfic Flesh
+Cadmium Skin
+Skin Tone
+Rosy Flesh
+Off White
+Steel Grey
+Mutation Green
+Scarlet Blood
+Athena Skin
+Succubus Skin
+Toxic Yellow
+Sunset Orange
+Nocturnal Red
+Evil Red
+Deep Magenta
+Lustful Purple
+Grunge Brown
+Midnight Purple
+Elfic Blue
+Sunrise Blue
+Aquamarine
+Abyssal Turquoise
+Ghost Green
+Bile Green
+Angel Green
+Gorgon Brown
+Dirty Grey
+Warm Grey
+Charcoal
+Silver
+Chain Mail Silver
+Chainmail
+Gunmetal
+Polished Gold
+Glorious Gold
+Bright Bronze
+Brassy Brass
+Hammered Copper
+Tinny Tin
+Yellow
+Red
+Violet
+Blue
+Green
+Black Green
+Sepia
+Brown
+Skin Wash
+Black Ink
+Fluorescent Yellow
+Fluorescent Green
+Fluorescent Orange
+Fluorescent Red
+Fluorescent Magenta
+Fluorescent Violet
+Fluorescent Blue
+Fluorescent Cold Green
+Heavy Skin Tone
+Heavy Red
+Heavy Violet
+Heavy Blue
+Heavy Bluegrey
+Heavy Grey
+Heavy Green
+Heavy Black Green
+Heavy Warm Grey
+Heavy Khaki
+Heavy Ochre
+Heavy Gold Brown
+Heavy Orange
+Heavy Brown
+Heavy Siena
+Heavy Charcoal
+Sepia Wash
+Black Wash
+Pale Grey Wash
+Umber Wash
+Flesh Wash
+Green Wash
+Red Wash
+Blue Wash
+Umber
+Flesh
+Rotten White
+Rust
+Fresh Blood
+Dried Blood
+Vomit
+Verdigris Effect
+Dry Rust
+Thick Blood
+Demon Blood
+Frost
+Green Rust
+Bile
+Acid
+Corrosion
+Galvanic Corrosion
+Moss and Lichen
+
+# ═══════════════════ AK Interactive 3rd Generation Acrylics ═══════════════════
+Offwhite
+White Grey
+Ivory
+Greenish White
+Silver Grey
+Rock Grey
+Grimy Grey
+Warm Grey
+Medium Grey
+Blue Grey
+Sky Grey
+Pale Grey
+Medium Sea Grey
+Dark Sea Grey
+Grey Green
+Reddish Grey
+Neutral Grey
+Graphite
+English Grey
+Basalt Grey
+Dark Grey
+Lead Grey
+Ash Grey
+German Grey
+Tenebrous Grey
+Rubber Black
+Smoke Black
+Beige
+Buff
+Pale Sand
+Dark Sand
+Medium Sand
+Sand Yellow
+Ice Yellow
+Pale Yellow
+Purulent Yellow
+Sahara Yellow
+Golden Yellow
+Volcanic Yellow
+Dirty Yellow
+Yellow
+Radiant Yellow
+Lemon Yellow
+Laser Yellow
+Fluorescent Yellow
+Light Flesh
+Luminous Flesh
+Basic Skin Tone
+Radiant Flesh
+Medium Flesh Tone
+Sunny Skin Tone
+Dark Flesh
+Vampiric Flesh
+Decomposed Flesh
+Sickly Pink
+Salmon
+Old Rose
+Brown Rose
+Beige Red
+Laser Magenta
+Magenta
+Fluorescent Magenta
+Blue Violet
+Lilac
+Purple
+Violet Red
+Light Orange
+Medium Orange
+Burn Orange
+Fluorescent Orange
+Luminous Orange
+Dead Red
+Ruby
+Cadmium Red
+Amaranth Red
+Scarlet Red
+Blood Red
+Vermillion
+Carmine
+Matt Red
+Brick Red
+Bordeaux Red
+Dirty Red
+Wine Red
+Burnt Red
+Black Red
+Ocher Orange
+Light Brown
+Orange Brown
+Medium Rust
+Saddle Brown
+Light Rust
+Mahogany Brown
+Dark Rust
+Hull Red
+Dark Brown
+Leather Brown
+Burnt Umber
+Grim Brown
+Chocolate
+Deck Tan
+Light Earth
+Tan Yellow
+Golden Brown
+Ochre
+Cork
+Mud Brown
+Tan Earth
+Green Ochre
+Japanese Brown
+Middle Stone
+Grey-Brown
+Green-Brown
+British Khaki
+Luminous Green
+Fluorescent Green
+Pistachio
+Green-Grey
+Dark Green-Grey
+Green Sky
+Faded Green
+Frog Green
+Lime Green
+Interior Yellow Green
+Golden Olive
+Grass Green
+Light Green
+Mint Green
+Emerald
+Lizard Green
+Dark Green
+Olive Green
+Medium Olive Green
+Intermediate Green
+Gunship Green
+Brownish Green
+Alga Green
+Extra Dark Green
+German Field Grey
+Command Green
+Camouflage Green
+US Dark Green
+Reflective Green
+Russian Green
+Black Green
+Pale Blue
+Spectrum Blue
+Intermediate Blue
+Dark Blue-Grey
+Grey-Blue
+French Blue
+Anthracite Grey
+Blue-Green
+Aquatic Turquoise
+Turquoise
+Archaic Turquoise
+Ocean Blue
+Snow Blue
+Sky Blue
+Deep Sky Blue
+Ducat Blue
+Fluorescent Blue
+Ultramarine
+Imperial Blue
+Dark Blue
+Amethyst Blue
+Medium Blue
+Star Blue
+Light Prussian Blue
+Strong Dark Blue
+Oxford
+Dark Prussian Blue
+Dark Sea Blue
+Clear Red
+Clear Blue
+Clear Smoke
+Clear Green
+Clear Yellow
+Clear Orange
+Pastel Yellow
+Pastel Pink
+Pastel Violet
+Pastel Peach
+Pastel Green
+Pastel Blue
+Retarder
+Metal Medium
+Glaze Medium
+Matte Medium
+Gloss Medium
+Crackle Medium
+Gold
+Old Gold
+Rusty Gold
+Brass
+Rusty Brass
+Bronze
+Copper
+Burnt Tin
+Metallic Blue
+Astral Beryllium
+Cobalt Blue
+Anodized Violet
+Foundry Red
+Emerald Metallic Green
+Metallic Green
+Pearl
+Aluminium
+Dark Aluminium
+Silver
+Natural Steel
+Oily Steel
+Gun Metal
+White
+Black
+Deep Yellow
+Intense Pink
+Deep Violet
+Deep Purple
+Deep Orange
+Deep Red
+Deep Brown
+Deep Green
+Deep Blue
+Sepia
+Skin
+Sooty Black
+Carbon Black
+Penetrating Red
+Night Blue
+Titanium White
+Black Purple
+King Purple
+Dragon Blood
+Cold Green
+Greenskin Punch
+Slime Green
+Afro Shadow
+Russet Shadow
+Beast Brown
+Sun Red

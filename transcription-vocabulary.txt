@@ -1,0 +1,330 @@
+# 转写术语表（transcription vocabulary）
+# 行格式：
+#   纯英文行           -> 只做转写识别偏置（品牌、颜料名等专有名词）
+#   英文 => 中文       -> 转写偏置取左侧，同时锁定翻译用词
+# "#" 开头是注释。保存后立即生效，无需重启。
+# 数量上限：术语共 1000 条；带翻译的映射 200 条（本文件约 130 条，留有余量）。
+
+# ───────────────────────── 涂装技法 ─────────────────────────
+zenithal priming => 天顶喷涂
+drybrush => 干扫
+dry brushing => 干扫
+edge highlighting => 边缘高光
+layering => 叠层
+glaze => 罩染
+glazing => 罩染
+wash => 渍洗
+shading => 阴影
+highlight => 高光
+highlighting => 高光
+basecoat => 底色
+undercoat => 底漆
+primer => 底漆
+varnish => 保护漆
+matte varnish => 哑光保护漆
+gloss varnish => 亮光保护漆
+satin varnish => 缎面保护漆
+airbrush => 喷笔
+non-metallic metal => 非金属金属
+NMM => 非金属金属
+true metallic metal => 真实金属金属
+TMM => 真实金属金属
+object source lighting => 物体光源照明
+OSL => 物体光源照明
+blending => 混色过渡
+wet blending => 湿混
+feathering => 羽化过渡
+stippling => 点戳
+chipping => 掉漆
+sponge chipping => 海绵掉漆
+weathering => 旧化
+pin wash => 定位渍洗
+lining => 勾线
+recess shading => 凹陷阴影
+contrast paint => 对比漆
+speedpaint => 速涂漆
+freehand => 手绘
+decal => 水贴
+marbling => 大理石纹
+texture paint => 纹理漆
+technical paint => 技术漆
+basing => 底座制作
+flock => 草粉
+static grass => 静电草
+tuft => 草簇
+pigment => 色粉
+slapchop => 速涂底色法
+Green Stuff => 绿补土
+
+# ───────────────────── 涂装通用词汇 ─────────────────────
+wet palette => 湿调色盘
+palette => 调色盘
+thinning => 稀释
+thinner => 稀释剂
+flow improver => 流平剂
+retarder => 缓干剂
+brush stroke => 笔触
+brush tip => 笔尖
+layer => 图层
+coat => 涂层
+opacity => 不透明度
+transparency => 透明度
+consistency => 浓稠度
+value => 明度
+hue => 色相
+saturation => 饱和度
+tone => 色调
+mid tone => 中间调
+mid tones => 中间调
+volume => 体积感
+contrast => 对比度
+light placement => 光照位置
+shade cast => 投影
+cast shadow => 投影
+recess => 凹陷处
+recesses => 凹陷处
+texture => 纹理
+ambience => 氛围
+under painting => 底色
+base tone => 基础色调
+overlapping layers => 叠加图层
+homogeneous mix => 均匀混合
+miniature => 微缩模型
+
+# ─────────────── 常见颜料色名（经典艺术颜料） ───────────────
+Titanium White => 钛白
+Cadmium Red => 镉红
+Cadmium Yellow => 镉黄
+Alizarin Crimson => 茜素深红
+crimson => 深红
+magenta => 品红
+Quinacridone Magenta => 喹吖啶酮品红
+Quinacridone Red => 喹吖啶酮红
+Quinacridone Gold => 喹吖啶酮金
+Dioxazine Purple => 二恶嗪紫
+Ultramarine => 群青
+Ultramarine Blue => 群青蓝
+Prussian Blue => 普鲁士蓝
+Phthalo Blue => 酞菁蓝
+Phthalocyanine Blue => 酞菁蓝
+Cerulean Blue => 蔚蓝
+Cobalt Blue => 钴蓝
+Naples Yellow => 那不勒斯黄
+intense yellow => 鲜黄
+Yellow Ochre => 土黄
+ochre => 赭黄
+Raw Umber => 生褐
+Burnt Umber => 熟褐
+Raw Sienna => 生赭
+Burnt Sienna => 熟赭
+Van Dyke Brown => 凡代克棕
+Vandyke Brown => 凡代克棕
+Viridian => 翠绿
+Sap Green => 草绿
+emerald => 翡翠绿
+emerald green => 翡翠绿
+Olive Green => 橄榄绿
+Hooker's Green => 霍克绿
+Payne's Grey => 佩恩灰
+Payne's Gray => 佩恩灰
+Ivory Black => 象牙黑
+Mars Black => 马斯黑
+Lamp Black => 灯黑
+lilac => 丁香紫
+turquoise => 绿松石色
+teal => 蓝绿色
+primary blue => 原色蓝
+primary red => 原色红
+primary yellow => 原色黄
+flesh tone => 肤色
+skintone => 肤色
+
+# ─────────────── 品牌（字幕中保留英文原名，不映射） ───────────────
+Citadel
+Games Workshop
+Warhammer
+Vallejo
+Model Color
+Model Air
+Game Color
+Mecha Color
+Metal Color
+Surface Primer
+The Army Painter
+Army Painter
+Warpaints
+Quickshade
+Scale75
+AK Interactive
+Reaper
+Kimera Kolors
+Green Stuff World
+Privateer Press
+Formula P3
+liquitex
+milliput
+Craftworld
+
+# ─────────────── Citadel 颜料名（识别偏置，保留英文） ───────────────
+# 黑/白/灰
+Abaddon Black
+Chaos Black
+Skull White
+Corax White
+White Scar
+Grey Seer
+Ulthuan Grey
+Administratum Grey
+Dawnstone
+Eshin Grey
+Mechanicus Standard Grey
+Fenrisian Grey
+Russ Grey
+# 红/橙/黄
+Mephisto Red
+Evil Sunz Scarlet
+Khorne Red
+Wazdakka Red
+Wild Rider Red
+Troll Slayer Orange
+Fire Dragon Bright
+Flash Gitz Yellow
+Averland Sunset
+Yriel Yellow
+Dorn Yellow
+# 绿
+Caliban Green
+Warpstone Glow
+Castellan Green
+Sons of Horus Green
+Death Guard Green
+Kabalite Green
+Sybarite Green
+Straken Green
+Moot Green
+Gauss Blaster Green
+Biel-Tan Green
+# 蓝/紫/粉
+Macragge Blue
+Calgar Blue
+Alaitoc Blue
+Kantor Blue
+Teclis Blue
+Lothern Blue
+Hoeth Blue
+Temple Guard Blue
+Ahriman Blue
+Stegadon Scale Green
+Thousand Sons Blue
+Thunderhawk Blue
+Genestealer Purple
+Naggaroth Night
+Barak-Nar Burgundy
+Screamer Pink
+Fulgrim Pink
+Pink Horror
+Daemonette Hide
+# 骨白/棕色/肤色
+Screaming Skull
+Ushabti Bone
+Zandri Dust
+Karak Stone
+Baneblade Brown
+Mournfang Brown
+Rhinox Hide
+Dryad Bark
+Gorthor Brown
+Doombull Brown
+Tuskgor Fur
+Bugman's Glow
+Cadian Fleshtone
+Kislev Flesh
+Rakarth Flesh
+Pallid Wych Flesh
+# 金属
+Leadbelcher
+Iron Hands Steel
+Runefang Steel
+Stormhost Silver
+Retributor Armour
+Auric Armour Gold
+Liberator Gold
+Balthasar Gold
+Hashut Copper
+Warplock Bronze
+Brass Scorpion
+# 渍洗（Shade）
+Nuln Oil
+Agrax Earthshade
+Reikland Fleshshade
+Seraphim Sepia
+Drakenhof Nightshade
+Druchii Violet
+Carroburg Crimson
+Casandora Yellow
+Athonian Camoshade
+Coelia Greenshade
+# 对比漆（Contrast）
+Black Templar
+Apothecary White
+Basilicanum Grey
+Skeleton Horde
+Wyldwood
+Snakebite Leather
+Gore-grunta Fur
+Aggaros Dunes
+Ultramarines Blue
+Blood Angels Red
+Shyish Purple
+# 技术漆（Technical）与干扫（Dry）
+Ardcoat
+Lahmian Medium
+Nihilakh Oxide
+Typhus Corrosion
+Ryza Rust
+Blood for the Blood God
+Nurgle's Rot
+Stirland Mud
+Astrogranite
+Astrogranite Debris
+Martian Ironearth
+Martian Sunstone
+Armageddon Dust
+Armageddon Dunes
+Munitorum Varnish
+Terminatus Stone
+Necron Compound
+
+# ─────────────── Vallejo 颜料名（识别偏置，保留英文） ───────────────
+Sunny Skintone
+Basic Skintone
+Medium Fleshtone
+Dark Skintone
+Cavalry Brown
+English Uniform
+German Camo Black Green
+German Camo Medium Brown
+US Field Drab
+Russian Uniform WWII
+Iraqi Sand
+Beige Brown
+Red Leather
+Leather Brown
+Chocolate Brown
+German Grey
+Panzer Grey
+London Grey
+Neutral Grey
+Wolf Grey
+Cold Grey
+Basalt Grey
+Stonewall Grey
+Gunmetal Grey
+Oily Steel
+
+# ─────────────── Army Painter 颜料名（识别偏置，保留英文） ───────────────
+Plate Mail Metal
+Shining Silver
+Bright Gold
+Greedy Gold
+Weapon Bronze

@@ -399,16 +399,30 @@ export default class GeminiTranslator {
     }
     // `MAX_TOKENS` with text is a truncated array. Whatever parsed is kept and
     // the caller repairs the tail, rather than paying for the batch twice.
-    return this.#parse(answer, candidate?.finishReason === 'MAX_TOKENS');
+    return this.#parse(answer, candidate?.finishReason === 'MAX_TOKENS', lines);
   }
 
   /**
-   * Reads the answer into a map. `truncated` says the JSON was cut off, in
-   * which case the salvageable prefix is taken rather than the batch thrown
-   * away - the missing tail then costs one small repair call instead of a
-   * whole batch.
+   * Reads the answer into a map keyed by the indices that were asked for.
+   *
+   * The model reports each line's number itself, and an answer that numbered
+   * them differently - started at the wrong one, counted a context line it
+   * was told not to translate, merged two lines into one - used to attach
+   * translations to the wrong captions with nothing downstream any the wiser:
+   * the counts added up, and a subtitle showed the sentence after the one on
+   * screen. So one-item-per-line answers are matched by position - the order
+   * the lines were sent in - and the reported number is only a cross-check.
+   * An answer that cannot be matched that way, fewer items than lines or
+   * more, falls back to the numbers and keeps only the ones this call asked
+   * for: a missing line reaches the caller's repair pass, and an extra one -
+   * a context line translated against instructions - goes nowhere near a
+   * caption.
    */
-  #parse(answer: string, truncated: boolean): Map<number, string> {
+  #parse(
+    answer: string,
+    truncated: boolean,
+    lines: TranslatableLine[]
+  ): Map<number, string> {
     const cleaned = answer.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
     let items: unknown;
     try {
@@ -425,16 +439,62 @@ export default class GeminiTranslator {
     if (!Array.isArray(items)) {
       throw new TranslationError('Gemini returned something other than a list of translations');
     }
-    const translations = new Map<number, string>();
-    for (const item of items) {
+
+    /** The reported index and text of one item, however the model typed them. */
+    const read = (item: unknown): { index: number; text: string | null } => {
       if (!item || typeof item !== 'object') {
-        continue;
+        return { index: NaN, text: null };
       }
       const { i, t } = item as { i?: unknown; t?: unknown };
       const index = typeof i === 'number' ? i : Number.parseInt(String(i), 10);
-      if (Number.isFinite(index) && typeof t === 'string' && t.trim()) {
-        translations.set(index, t.trim());
+      return {
+        index: Number.isFinite(index) ? index : NaN,
+        text: typeof t === 'string' ? t : null
+      };
+    };
+
+    const translations = new Map<number, string>();
+
+    if (items.length === lines.length) {
+      // One item per line, so position is the authority. A model that
+      // renumbered the batch still kept the order; the cross-check says how
+      // often that happened without failing an otherwise fine answer.
+      let renumbered = 0;
+      for (let k = 0; k < items.length; k++) {
+        const { index, text } = read(items[k]);
+        if (text !== null && text.trim()) {
+          translations.set(lines[k].i, text.trim());
+          if (index !== lines[k].i) {
+            renumbered++;
+          }
+        }
       }
+      if (renumbered > 0) {
+        this.log('warn',
+          `The answer renumbered ${renumbered} of ${lines.length} line(s); ` +
+          'they were matched by position instead'
+        );
+      }
+      return translations;
+    }
+
+    // Not one item per line - truncated, merged, or carrying lines it was not
+    // asked for. The reported numbers are all there is to go by here, and only
+    // the ones this call asked for are kept.
+    const wanted = new Set(lines.map((line) => line.i));
+    for (const item of items) {
+      const { index, text } = read(item);
+      if (Number.isFinite(index) && wanted.has(index) &&
+          text !== null && text.trim() && !translations.has(index)) {
+        translations.set(index, text.trim());
+      }
+    }
+    const missing = lines.length - translations.size;
+    if (missing > 0) {
+      this.log('debug',
+        `The answer carried ${translations.size} of ${lines.length} line(s); ` +
+        `${missing} of them go to the repair pass`
+      );
     }
     return translations;
   }

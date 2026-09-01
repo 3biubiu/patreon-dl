@@ -5,6 +5,7 @@ import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, HistoryOutl
 import { type FormInstance } from "antd";
 import { type AuthUser, type LoginLogEntry, type Registration, type UserRole } from "../../types/Auth";
 import { DEFAULT_USER_QUOTA, type UserQuota } from "../../types/Quota";
+import { describeLoginRegion, LOGIN_REGION_SEPARATOR } from "../../types/LoginRegion";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { useDocument } from "../contexts/DocumentProvider";
@@ -25,6 +26,13 @@ type CampaignAccess = 'all' | 'selected';
  */
 type QuotaMode = 'unlimited' | 'limited';
 
+/**
+ * Where an account may sign in from - the same mode-and-value split as the
+ * creator restriction, for the same reason: an empty selection has to be able
+ * to mean "nowhere" rather than "not set yet".
+ */
+type LoginRegionAccess = 'anywhere' | 'selected';
+
 interface UserFormValues {
   username: string;
   password: string;
@@ -35,6 +43,8 @@ interface UserFormValues {
   postQuota: number;
   videoQuotaMode: QuotaMode;
   videoQuota: number;
+  loginRegionAccess: LoginRegionAccess;
+  loginRegions: string[];
 }
 
 const ROLE_OPTIONS = [
@@ -51,6 +61,29 @@ const QUOTA_MODE_OPTIONS = [
   { value: 'unlimited', label: 'Unlimited' },
   { value: 'limited', label: 'Limit to' }
 ];
+
+const LOGIN_REGION_ACCESS_OPTIONS = [
+  { value: 'anywhere', label: 'Anywhere' },
+  { value: 'selected', label: 'Only selected' }
+];
+
+/**
+ * How much of the sign-in log is read to build the list of places to choose
+ * from. The server keeps this many at most, so this is all of it.
+ */
+const LOGIN_REGION_FETCH_SIZE = 500;
+
+/**
+ * Every rule that would cover this place, from the country down.
+ *
+ * `中国/广东省/深圳` offers 中国, 中国/广东省 and 中国/广东省/深圳 - which is
+ * what makes one list able to say "anywhere in China" and "Shenzhen only"
+ * without asking the administrator to know how the rules are written.
+ */
+function loginRegionPrefixes(path: string): string[] {
+  const parts = path.split(LOGIN_REGION_SEPARATOR);
+  return parts.map((_, index) => parts.slice(0, index + 1).join(LOGIN_REGION_SEPARATOR));
+}
 
 /** The form's two fields for one limit, from the single value on the wire. */
 function quotaFields(limit: number | null, fallback: number) {
@@ -109,6 +142,8 @@ function Users() {
   const [ loginLog, setLoginLog ] = useState<LoginLogEntry[] | null>(null);
   const [ loginLogError, setLoginLogError ] = useState<string | null>(null);
   const [ loginLogLoading, setLoginLogLoading ] = useState(false);
+  /** The places to choose from, read out of the sign-in log. `null` until asked for. */
+  const [ knownRegions, setKnownRegions ] = useState<string[] | null>(null);
   const [ form ] = Form.useForm<UserFormValues>();
 
   useEffect(() => {
@@ -227,6 +262,57 @@ function Users() {
     return () => { cancelled = true; };
   }, [api]);
 
+  /**
+   * The places this server has actually seen anybody sign in from, which is
+   * what the region restriction is chosen out of. There is no list of every
+   * city in the world here on purpose: the rules are matched against whatever
+   * the location service answers, so the only names guaranteed to match are
+   * ones it has already given us.
+   *
+   * Asked for when the editor is opened rather than with the page, for the
+   * reason the sign-in panel is - see `refreshLoginLog`. Once, and then kept:
+   * reopening the form should not mean another round of lookups.
+   */
+  useEffect(() => {
+    if (!editing || knownRegions !== null) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const entries = await api.listLoginLog(LOGIN_REGION_FETCH_SIZE);
+        if (!cancelled) {
+          const paths = new Set<string>();
+          for (const entry of entries) {
+            if (entry.regionPath) {
+              for (const prefix of loginRegionPrefixes(entry.regionPath)) {
+                paths.add(prefix);
+              }
+            }
+          }
+          setKnownRegions([ ...paths ].sort());
+        }
+      }
+      catch {
+        // Not an error worth showing: the field still works, it just has
+        // nothing to suggest, and an administrator can type a place instead.
+        if (!cancelled) {
+          setKnownRegions([]);
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [api, editing, knownRegions]);
+
+  const loginRegionOptions = useMemo(
+    () => (knownRegions || []).map((path) => ({
+      value: path,
+      label: describeLoginRegion(path)
+    })),
+    [knownRegions]
+  );
+
   const campaignOptions = useMemo(
     () => (campaigns || []).map(({ id, name }) => ({ value: id, label: name })),
     [campaigns]
@@ -267,7 +353,10 @@ function Users() {
       postQuotaMode: posts.mode,
       postQuota: posts.value,
       videoQuotaMode: videos.mode,
-      videoQuota: videos.value
+      videoQuota: videos.value,
+      loginRegionAccess:
+        target === 'new' ? 'anywhere' : (target.loginRegions ? 'selected' : 'anywhere'),
+      loginRegions: target === 'new' ? [] : (target.loginRegions || [])
     });
   }, [form]);
 
@@ -288,6 +377,12 @@ function Users() {
         posts: values.postQuotaMode === 'unlimited' ? null : (values.postQuota ?? 0),
         videos: values.videoQuotaMode === 'unlimited' ? null : (values.videoQuota ?? 0)
       };
+    // And the same again for where the account may sign in from: an
+    // administrator is never pinned to a region, so a selection the form was
+    // showing is not carried along with a promotion.
+    const loginRegions =
+      values.role === 'admin' || values.loginRegionAccess === 'anywhere' ?
+        null : (values.loginRegions || []);
     try {
       if (editing === 'new') {
         await api.createUser({
@@ -295,7 +390,8 @@ function Users() {
           password: values.password,
           role: values.role,
           visibleCampaigns,
-          quota
+          quota,
+          loginRegions
         });
       }
       else {
@@ -305,7 +401,8 @@ function Users() {
           role: values.role,
           password: values.password || undefined,
           visibleCampaigns,
-          quota
+          quota,
+          loginRegions
         });
       }
       setEditing(null);
@@ -445,6 +542,26 @@ function Users() {
                               {`Videos ${describeLimit(videos)}`}
                             </Tag>
                           </Space>
+                        </Tooltip>
+                      );
+                    }
+                  },
+                  {
+                    title: 'Sign-in region',
+                    dataIndex: 'loginRegions',
+                    render: (loginRegions: string[] | null) => {
+                      if (!loginRegions) {
+                        return <Tag>Anywhere</Tag>;
+                      }
+                      if (loginRegions.length === 0) {
+                        return <Tag color="red">Nowhere</Tag>;
+                      }
+                      const names = loginRegions.map(describeLoginRegion);
+                      return (
+                        <Tooltip title={names.join(', ')}>
+                          <Tag color="blue">
+                            {names.length === 1 ? names[0] : `${names.length} regions`}
+                          </Tag>
                         </Tooltip>
                       );
                     }
@@ -634,6 +751,11 @@ function Users() {
             loading={campaigns === null}
           />
           <QuotaFields form={form} />
+          <LoginRegionFields
+            form={form}
+            options={loginRegionOptions}
+            loading={knownRegions === null}
+          />
         </Form>
       </Modal>
       <Modal
@@ -845,6 +967,91 @@ function QuotaField(props: {
         }
       </Space>
     </Form.Item>
+  );
+}
+
+/**
+ * Where the account may sign in from.
+ *
+ * A `tags` select rather than a plain multiple one: the options are the places
+ * this server has seen before, which is the useful list and never the complete
+ * one - somebody setting up an account for a colleague in a city nobody has
+ * signed in from yet has to be able to write it down.
+ *
+ * Its own component for the reason the other two permission blocks are: this
+ * watches the role and the mode, and re-rendering the user table for either
+ * would be paying for the whole page to answer a radio button.
+ */
+function LoginRegionFields(props: {
+  form: FormInstance<UserFormValues>;
+  options: { value: string; label: string; }[];
+  loading: boolean;
+}) {
+  const { form, options, loading } = props;
+  const role = Form.useWatch('role', form);
+  const access = Form.useWatch('loginRegionAccess', form);
+  const regions = Form.useWatch('loginRegions', form);
+
+  if (role === 'admin') {
+    return (
+      <Alert
+        className="mt-3"
+        type="info"
+        showIcon
+        title="Administrators can sign in from anywhere"
+        description={
+          'An administrator locked out by their own region list would have nobody ' +
+          'left to lift it. Make the account a user to restrict it.'
+        }
+      />
+    );
+  }
+
+  return (
+    <>
+      <Form.Item name="loginRegionAccess" label="Sign-in region">
+        <Radio.Group options={LOGIN_REGION_ACCESS_OPTIONS} optionType="button" />
+      </Form.Item>
+      {
+        access === 'selected' ? (
+          <>
+            <Form.Item
+              name="loginRegions"
+              extra={
+                'Checked at sign-in, against the same lookup the sign-in log uses. ' +
+                'A country covers every place in it, a province every city in it. ' +
+                'Type one that is not listed as 国家/省/市 - for example 中国/广东省/深圳. ' +
+                'A sign-in from a local address, or one the lookup cannot place, is let through.'
+              }
+            >
+              <Select
+                mode="tags"
+                allowClear
+                loading={loading}
+                options={options}
+                tokenSeparators={[ ',' ]}
+                showSearch={{ optionFilterProp: 'label' }}
+                placeholder="Choose or type the regions this user may sign in from"
+              />
+            </Form.Item>
+            {
+              regions && regions.length === 0 ? (
+                <Alert
+                  className="mb-3"
+                  type="warning"
+                  showIcon
+                  title="This user will not be able to sign in at all"
+                  description={
+                    'An empty list means no region, not every region. Switch to ' +
+                    '"Anywhere" to lift the restriction instead.'
+                  }
+                />
+              ) : null
+            }
+          </>
+        ) : null
+      }
+    </>
   );
 }
 

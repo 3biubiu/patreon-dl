@@ -4,6 +4,7 @@ import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
 import { type LoginLogEntry } from '../types/Auth.js';
 import { localPlace, lookupIPLocations, type IPLocation } from './IPLocation.js';
+import { loginRegionPath, type LoginRegionParts } from '../types/LoginRegion.js';
 
 /**
  * How many sign-ins are kept. Enough to still be useful a few days after
@@ -135,10 +136,14 @@ export default class LoginLogStore {
     await this.#resolveLocations(entries.map((entry) => entry.ip));
     return entries.map((entry) => {
       const local = localPlace(entry.ip);
-      const known = local ? { place: local, isp: null } : this.#data.locations[entry.ip];
+      const known = local ? null : this.#data.locations[entry.ip];
       return {
         ...entry,
-        location: known?.place || null,
+        location: local || known?.place || null,
+        // A local address has no region path: "局域网" is not somewhere an
+        // account can be pinned to, and offering it as a rule would be
+        // offering one that never matches.
+        regionPath: known?.parts ? loginRegionPath(known.parts) : null,
         isp: known?.isp || null
       };
     });
@@ -174,11 +179,39 @@ export default class LoginLogStore {
     return trail;
   }
 
+  /**
+   * Where one address is, in the parts the region restriction matches against,
+   * or `null` when it cannot be placed.
+   *
+   * The one method here that a sign-in waits on, and the reason it lives on
+   * the log store rather than beside the rule: the places this has already
+   * looked up are cached in this file, so an account signing in from an
+   * address the log has seen before is answered without touching the network
+   * at all. Only a genuinely new address costs a lookup.
+   *
+   * `null` covers every way of not knowing - a local address, a service that
+   * did not answer, one that answered without a country. The caller must treat
+   * all of them alike, and does: not knowing where somebody is has never been
+   * grounds for refusing them.
+   */
+  async locationParts(ip: string, timeoutMs?: number): Promise<LoginRegionParts | null> {
+    if (!ip || localPlace(ip)) {
+      return null;
+    }
+    await this.#resolveLocations([ ip ], timeoutMs);
+    const parts = this.#data.locations[ip]?.parts;
+    // An answer with no country in it places nothing, and returning it would
+    // be far worse than returning nothing: every rule would fail to match it
+    // and the caller would read that as "somewhere else" rather than as
+    // "nowhere known", turning a useless answer into a refusal.
+    return parts?.country ? parts : null;
+  }
+
   log(level: LogLevel, ...msg: any[]) {
     commonLog(this.#logger, level, this.name, ...msg);
   }
 
-  async #resolveLocations(ips: string[]) {
+  async #resolveLocations(ips: string[], timeoutMs?: number) {
     const unknown = [ ...new Set(
       ips.filter((ip) => {
         if (!ip || localPlace(ip)) {
@@ -186,15 +219,16 @@ export default class LoginLogStore {
         }
         const known = this.#data.locations[ip];
         // Entries cached before regions were stored are asked about again,
-        // once, so they can carry one - the anomaly rule needs it.
-        return !known || known.region === undefined;
+        // once, so they can carry one - the anomaly rule needs it. Same for
+        // the unjoined parts, which the region restriction needs.
+        return !known || known.region === undefined || known.parts === undefined;
       })
     ) ];
     if (unknown.length === 0) {
       return;
     }
     try {
-      const found = await lookupIPLocations(unknown);
+      const found = await lookupIPLocations(unknown, timeoutMs);
       if (found.size === 0) {
         return;
       }

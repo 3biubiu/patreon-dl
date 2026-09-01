@@ -6,7 +6,13 @@ import type HistoryStore from '../HistoryStore.js';
 import type QuotaStore from '../QuotaStore.js';
 import type LoginLogStore from '../LoginLogStore.js';
 import { MAX_LOGIN_LOG_ENTRIES } from '../LoginLogStore.js';
-import { normalizeIP } from '../IPLocation.js';
+import { localPlace, normalizeIP, LOGIN_LOOKUP_TIMEOUT_MS } from '../IPLocation.js';
+import {
+  describeLoginRegionParts,
+  matchesLoginRegions,
+  normalizeLoginRegions,
+  LOGIN_REGION_BLOCKED_CODE
+} from '../../types/LoginRegion.js';
 import { clearSession, issueSession, type AuthenticatedRequest } from '../AuthGuard.js';
 import { type AuthUser, type UserRole } from '../../types/Auth.js';
 import { quotaStatus } from '../QuotaGuard.js';
@@ -33,6 +39,13 @@ const ANOMALY_REGION_CHANGES = 3;
 
 /** What a banned account is told at the sign-in form - and nowhere else. */
 const BANNED_MESSAGE = '账户异常:检测到频繁异地登录,该账号已被封禁。请联系管理员解封。';
+
+/** What an account pinned to certain regions is told when it is elsewhere. */
+function regionBlockedMessage(place: string | null) {
+  return place ?
+    `登录地区受限:当前登录地区(${place})不在该账号的允许范围内。请联系管理员。` :
+    '登录地区受限:该账号未被允许从任何地区登录。请联系管理员。';
+}
 
 /**
  * The address the request came from.
@@ -74,6 +87,22 @@ function readVisibleCampaigns(body: unknown): string[] | null | undefined {
     return value as string[];
   }
   throw Error('"visibleCampaigns" must be an array of campaign ids, or null');
+}
+
+/**
+ * The sign-in region restriction as it arrived over the wire.
+ *
+ * The same three outcomes as the campaign restriction, meaning the same three
+ * things: `undefined` (not sent - leave it alone), `null` (anywhere) and an
+ * array (only these, an empty one included). The shape of each entry is
+ * checked by `normalizeLoginRegions`, which throws rather than trimming, so a
+ * malformed body cannot quietly widen where an account may sign in from.
+ */
+function readLoginRegions(body: unknown): string[] | null | undefined {
+  if (!body || typeof body !== 'object' || !('loginRegions' in body)) {
+    return undefined;
+  }
+  return normalizeLoginRegions((body as { loginRegions: unknown }).loginRegions);
 }
 
 /**
@@ -140,7 +169,7 @@ export default class AuthAPIRequestHandler extends Basehandler {
     this.#loginLogStore = loginLogStore;
   }
 
-  handleLoginRequest(req: Request, res: Response) {
+  async handleLoginRequest(req: Request, res: Response) {
     const { username, password } = (req.body || {}) as { username?: string; password?: string; };
     if (!username || !password) {
       // Nothing recorded: a request with no username names no account, so
@@ -167,6 +196,24 @@ export default class AuthAPIRequestHandler extends Basehandler {
       res.status(403).json({ error: BANNED_MESSAGE });
       return;
     }
+    // Checked after the password for the reason the ban is, and before the
+    // session is issued for a reason of its own: rotating the token below is
+    // what signs the account's other devices out, and a refused sign-in must
+    // not be able to do that. Somebody guessing a password from a blocked
+    // region would otherwise be logging the real user out on every attempt.
+    const refusal = await this.#regionRefusal(req, user);
+    if (refusal) {
+      this.log('warn',
+        `Refused sign-in for "${user.username}" from ${refusal.place || 'an unlisted region'} - ` +
+        `allowed: ${user.loginRegions?.join(', ') || 'none'}`
+      );
+      this.#recordLogin(req, user.username, user.id, false);
+      res.status(403).json({
+        error: regionBlockedMessage(refusal.place),
+        code: LOGIN_REGION_BLOCKED_CODE
+      });
+      return;
+    }
     // Rotating the token here is what signs the account's other devices out:
     // their cookies keep the token this replaces.
     issueSession(res, this.#store, user, this.#store.rotateSessionToken(user.id));
@@ -176,6 +223,75 @@ export default class AuthAPIRequestHandler extends Basehandler {
     // about the addresses in the log, and the sign-in path must never wait
     // on - or fail because of - a third party.
     void this.#detectRegionAnomaly(user);
+  }
+
+  /**
+   * Whether this sign-in should be refused for where it came from, and the
+   * place to say so with - or `null` to let it through.
+   *
+   * This is the one thing on the sign-in path that can wait on the network, so
+   * it is written to do so as rarely as possible and to never turn a problem
+   * of its own into a locked door:
+   *
+   * - An unrestricted account (`null`, the default and every administrator)
+   *   returns before anything is looked at.
+   * - An account allowed *nowhere* is refused without a lookup, because where
+   *   it is signing in from cannot change the answer.
+   * - A local address is allowed. It is also how an administrator gets back in
+   *   after pinning an account to the wrong place.
+   * - Anything already in the log's location cache is answered from the file.
+   *
+   * What is left is a genuinely new public address, which costs one lookup
+   * with a short timeout. If that lookup fails, times out, or comes back
+   * without a place, the sign-in is **allowed** and the failure is logged: a
+   * third party being unreachable must not be able to lock this server's users
+   * out. The trade is that the restriction can, in principle, be slipped by
+   * somebody who can stop the server reaching the location service - which the
+   * anomaly rule still catches after the fact.
+   */
+  async #regionRefusal(
+    req: Request,
+    user: AuthUser
+  ): Promise<{ place: string | null; } | null> {
+    const allowed = user.loginRegions;
+    if (user.role === 'admin' || allowed === null) {
+      return null;
+    }
+    if (allowed.length === 0) {
+      // Nowhere is allowed, so there is nothing a lookup could tell us.
+      return { place: null };
+    }
+    const ip = clientIP(req);
+    const local = localPlace(ip);
+    if (local) {
+      // Worth saying, because a reverse proxy without `trustProxy` set makes
+      // *every* request look like this - and the restriction would then be
+      // quietly doing nothing at all.
+      this.log('info',
+        `Sign-in region check skipped for "${user.username}" - ${ip} is ${local}. ` +
+        `If this server is behind a proxy, check "trustProxy" in WebServerConfig.`
+      );
+      return null;
+    }
+    let parts;
+    try {
+      parts = await this.#loginLogStore.locationParts(ip, LOGIN_LOOKUP_TIMEOUT_MS);
+    }
+    catch (error) {
+      this.log('error', `Sign-in region check failed for "${user.username}" - letting it through:`, error);
+      return null;
+    }
+    if (!parts) {
+      this.log('warn',
+        `Could not place ${ip} for "${user.username}" - letting the sign-in through ` +
+        `rather than refusing it over a location lookup.`
+      );
+      return null;
+    }
+    if (matchesLoginRegions(parts, allowed)) {
+      return null;
+    }
+    return { place: describeLoginRegionParts(parts) || null };
   }
 
   /**
@@ -359,7 +475,12 @@ export default class AuthAPIRequestHandler extends Basehandler {
     try {
       const visibleCampaigns = readVisibleCampaigns(req.body);
       const quota = readQuota(req.body);
-      res.json({ user: this.#store.createUser({ username, password, role, visibleCampaigns, quota }) });
+      const loginRegions = readLoginRegions(req.body);
+      res.json({
+        user: this.#store.createUser({
+          username, password, role, visibleCampaigns, quota, loginRegions
+        })
+      });
     }
     catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : 'Could not create user' });
@@ -372,7 +493,10 @@ export default class AuthAPIRequestHandler extends Basehandler {
     try {
       const visibleCampaigns = readVisibleCampaigns(req.body);
       const quota = readQuota(req.body);
-      const user = this.#store.updateUser(id, { password, role, visibleCampaigns, quota });
+      const loginRegions = readLoginRegions(req.body);
+      const user = this.#store.updateUser(id, {
+        password, role, visibleCampaigns, quota, loginRegions
+      });
       // Changing your own password does not sign you out: the session names a
       // user id, and that has not changed.
       res.json({ user });

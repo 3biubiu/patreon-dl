@@ -35,6 +35,19 @@ export interface AuthUser {
    */
   quota: UserQuota;
   /**
+   * The places this account may sign in from - see `LoginRegion`.
+   *
+   * `null` means anywhere, which is the default and what every account that
+   * existed before this carries. An empty array is the opposite and is
+   * deliberately reachable, exactly as it is for {@link AuthUser.visibleCampaigns}:
+   * it means nowhere, and an account pinned to nowhere cannot sign in.
+   *
+   * Always `null` for administrators. An administrator locked out by their own
+   * region list could not lift it - the same reasoning that keeps them out of
+   * the ban rule.
+   */
+  loginRegions: string[] | null;
+  /**
    * Locked out entirely - no session survives it and no sign-in gets past it.
    * Put on by the sign-in anomaly rule, taken off only by an administrator.
    * Never `true` for an administrator.
@@ -81,6 +94,11 @@ export interface CreateUserRequest {
    * (`DEFAULT_USER_QUOTA`); send a field as `null` to lift that limit.
    */
   quota?: Partial<UserQuota> | null;
+  /**
+   * Omit to start the account unrestricted; send `null` for the same thing
+   * explicitly, or a list of regions to pin it.
+   */
+  loginRegions?: string[] | null;
 }
 
 export interface UpdateUserRequest {
@@ -90,6 +108,8 @@ export interface UpdateUserRequest {
   visibleCampaigns?: string[] | null;
   /** Omit a field to leave it as it is; send `null` to lift that limit. */
   quota?: Partial<UserQuota> | null;
+  /** Omit to leave as it is; `null` to let the account sign in from anywhere. */
+  loginRegions?: string[] | null;
 }
 
 /**
@@ -112,5 +132,17 @@ export interface LoginLogEntry {
    * not be worked out, which is not the same as the sign-in being suspect.
    */
   location: string | null;
+  /**
+   * The same place written as a region rule - `中国/广东省/深圳` - or `null`
+   * when it could not be worked out.
+   *
+   * Carried alongside {@link LoginLogEntry.location} rather than derived from
+   * it, because that one drops a part repeated between the province and the
+   * city and so cannot be taken back apart. It is what lets the user form
+   * offer the places this server has actually seen, instead of asking an
+   * administrator to type a province name exactly as the location service
+   * happens to spell it.
+   */
+  regionPath: string | null;
   isp: string | null;
 }

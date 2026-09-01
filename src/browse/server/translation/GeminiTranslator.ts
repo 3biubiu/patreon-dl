@@ -489,6 +489,61 @@ export default class GeminiTranslator {
         translations.set(index, text.trim());
       }
     }
+
+    // Nothing matched: the answer was renumbered as well as miscounted -
+    // started at one, counted the context lines it was told to ignore, or
+    // merged a few. As it stands the whole batch would keep its English, so
+    // one last attempt lines the items up by position: an item offset and a
+    // numbering shift that together explain most of the reported numbers.
+    // Only a pairing most of the items agree on is trusted - a guess could
+    // pin a translation to the caption beside its own, which reads worse
+    // than the original.
+    if (translations.size === 0 && items.length > 0) {
+      const readable = items
+        .map(read)
+        .filter(({ index, text }) => Number.isFinite(index) && text !== null && text.trim());
+      let best: { shift: number; renumber: number; votes: number; overlap: number } | null = null;
+      for (let shift = 0; shift <= Math.max(0, readable.length - lines.length); shift++) {
+        const overlap = Math.min(lines.length, readable.length - shift);
+        if (overlap <= 0) {
+          break;
+        }
+        const votes = new Map<number, number>();
+        for (let k = 0; k < overlap; k++) {
+          const diff = lines[k].i - readable[shift + k].index;
+          votes.set(diff, (votes.get(diff) || 0) + 1);
+        }
+        for (const [renumber, count] of votes) {
+          if (count < 2) {
+            continue;
+          }
+          if (!best || count > best.votes ||
+              (count === best.votes && Math.abs(renumber) < Math.abs(best.renumber))) {
+            best = { shift, renumber, votes: count, overlap };
+          }
+        }
+      }
+      if (best && best.votes >= Math.ceil(best.overlap / 2)) {
+        for (let k = 0; k < best.overlap; k++) {
+          const text = readable[best.shift + k].text;
+          if (text) {
+            translations.set(lines[k].i, text.trim());
+          }
+        }
+        this.log('warn',
+          `The answer numbered its items so that none of the ${lines.length} line(s) ` +
+          'asked for matched; they were lined up by position instead ' +
+          `(a renumbering by ${best.renumber >= 0 ? '+' : ''}${best.renumber})`
+        );
+      }
+      else {
+        this.log('warn',
+          `The answer carried 0 of ${lines.length} line(s) and could not be lined up ` +
+          'by position either; the batch keeps its original text'
+        );
+      }
+    }
+
     const missing = lines.length - translations.size;
     if (missing > 0) {
       this.log('debug',

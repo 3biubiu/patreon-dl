@@ -72,6 +72,8 @@ const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hang
  * round-trip on nothing.
  */
 const BREAK_TAG = /^<\s*br\s*\/?\s*>/i;
+/** For splitting the full answer text - no anchor, matches anywhere. */
+const BREAK_TAG_GLOBAL = /<\s*br\s*\/?\s*>/gi;
 
 /** Length of the break tag at `at`, or 0 when there is not one. */
 function breakAt(text: string, at: number) {
@@ -415,7 +417,7 @@ function alignSentencesToWords(
  */
 function extractSentences(answer: string): string[] {
   return answer
-    .split(BREAK_TAG)
+    .split(BREAK_TAG_GLOBAL)
     .map((s) => s.replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 }

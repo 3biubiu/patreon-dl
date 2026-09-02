@@ -6,11 +6,13 @@
 # 把 video.mkv 换成 video.mp4 后, 必须同步更新 DB, 否则视频会 404。
 # 本脚本在 remux 成功且 DB 更新成功后才删除原 MKV, 全程原子安全。
 #
-# 处理策略 (对每个 DB 中登记的 .mkv 视频):
-#   1. 无损 remux (视频 H.264/yuv420p + 音频 AAC/MP3/无音轨):
-#      ffmpeg -c copy -movflags +faststart — 秒级完成, 无质量损失
-#   2. 其他编码 (HEVC/VP9/10bit/AC3/Opus...): 默认跳过并提示;
-#      加 --transcode 后按方案2转码 (libx264 -crf 20 + AAC)
+# 处理策略 (对每个 DB 中登记的 .mkv 视频, 自动 ffprobe 检测):
+#   1. 视频兼容 + 音频兼容 (H.264/yuv420p + AAC/MP3/无音轨):
+#      无损 remux — ffmpeg -c copy, 秒级完成, 无质量损失
+#   2. 视频兼容 + 音频不兼容 (如 H.264 + Opus/AC3):
+#      视频流无损 copy, 仅音频重编码为 AAC — 依然很快, 视频零损失
+#   3. 视频不兼容 (HEVC/VP9/10bit...): 默认跳过并提示;
+#      加 --transcode 后整体转码 (libx264 -crf 20 + AAC)
 #
 # 每步动作:
 #   remux/转码到 *.mp4.tmp → 校验非空 → 改名为 *.mp4
@@ -51,8 +53,9 @@ usage() {
 用法: $(basename "$0") [-n] [--transcode] [--keep] <目录> [更多目录...]
 
 将数据库中登记的 .mkv 视频转为浏览器兼容的 .mp4:
-  兼容编码 (H.264+AAC/MP3) → 无损 remux, 秒级完成;
-  其他编码 → 默认跳过, 加 --transcode 转码为 H.264+AAC。
+  视频音频均兼容 → 无损 remux, 秒级完成;
+  仅音频不兼容 (Opus/AC3 等) → 视频无损 copy + 音频转 AAC;
+  视频不兼容 → 默认跳过, 加 --transcode 整体转码。
   成功后自动更新数据库并删除原 .mkv (--keep 可保留)。
 
 <目录>: 博主下载目录 (只处理该博主) 或 dataDir 根目录 (处理全部)
@@ -118,11 +121,15 @@ probe_streams() {
   [[ -n "$V_CODEC" ]]
 }
 
-# 编码可直接 copy 进 MP4 且浏览器 (含 Safari/iOS) 能播?
-# 视频: H.264 + 8bit yuv420p; 音频: AAC / MP3 / 无音轨
-can_remux() {
+# 视频流可直接 copy 进 MP4 且浏览器 (含 Safari/iOS) 能播?
+# H.264 + 8bit yuv420p
+video_ok() {
   [[ "$V_CODEC" == "h264" ]] || return 1
-  [[ "$V_PIXFMT" == "yuv420p" || "$V_PIXFMT" == "yuvj420p" ]] || return 1
+  [[ "$V_PIXFMT" == "yuv420p" || "$V_PIXFMT" == "yuvj420p" ]]
+}
+
+# 音频流可直接 copy 进 MP4? (AAC / MP3 / 无音轨; Opus/AC3 等浏览器兼容性差)
+audio_ok() {
   [[ -z "$A_CODEC" || "$A_CODEC" == "aac" || "$A_CODEC" == "mp3" ]]
 }
 
@@ -186,18 +193,21 @@ in_scope() {
 
 TOTAL=0 REMUXED=0 TRANSCODED=0 SKIPPED=0
 
-# 执行 ffmpeg 转换 (remux 或转码), 参数由调用方组装
-# 用法: run_ffmpeg <输入> <输出tmp> <是否转码>
+# 执行 ffmpeg 转换; 模式: remux(全copy) / audio(视频copy+音频转AAC) / transcode(全转码)
 run_ffmpeg() {
   local in=$1 out=$2 mode=$3
   local -a args=( -hide_banner -loglevel error -y -i "$in" -map 0:v:0 )
   [[ -n "$A_CODEC" ]] && args+=( -map 0:a:0 )
-  if [[ "$mode" == "remux" ]]; then
-    args+=( -c copy )
-  else
-    args+=( -c:v libx264 -crf 20 -preset medium -pix_fmt yuv420p )
-    [[ -n "$A_CODEC" ]] && args+=( -c:a aac -b:a 192k )
-  fi
+  case "$mode" in
+    remux)
+      args+=( -c copy ) ;;
+    audio)
+      # 视频无损 copy, 仅音频重编码为 AAC (快, 视频零损失)
+      args+=( -c:v copy -c:a aac -b:a 192k ) ;;
+    transcode)
+      args+=( -c:v libx264 -crf 20 -preset medium -pix_fmt yuv420p )
+      [[ -n "$A_CODEC" ]] && args+=( -c:a aac -b:a 192k ) ;;
+  esac
   args+=( -movflags +faststart -f mp4 "$out" )
   rm -f -- "$out"
   "$FFMPEG" "${args[@]}" 2>/dev/null && [[ -s "$out" ]]
@@ -229,13 +239,16 @@ process_video() {
   fi
 
   local mode=""
-  if can_remux; then
+  if video_ok && audio_ok; then
     mode="remux"
+  elif video_ok; then
+    # 视频兼容但音频不兼容 (Opus/AC3 等): 视频无损 copy, 仅音频转 AAC
+    mode="audio"
   elif [[ $TRANSCODE -eq 1 ]]; then
     mode="transcode"
   else
     SKIPPED=$((SKIPPED+1))
-    echo "[skip]  $media_id (编码 $(codec_desc) 浏览器不兼容, 加 --transcode 转码)" >&2
+    echo "[skip]  $media_id (视频编码 $(codec_desc) 浏览器不兼容, 加 --transcode 转码)" >&2
     return
   fi
 
@@ -269,6 +282,9 @@ process_video() {
   if [[ "$mode" == "remux" ]]; then
     REMUXED=$((REMUXED+1))
     echo "${pfx}[remux] $media_id: $mkv_rel -> $mp4_rel (无损)${sub_note}"
+  elif [[ "$mode" == "audio" ]]; then
+    REMUXED=$((REMUXED+1))
+    echo "${pfx}[audio] $media_id: $mkv_rel -> $mp4_rel (视频无损, 音频 $A_CODEC -> AAC)${sub_note}"
   else
     TRANSCODED=$((TRANSCODED+1))
     echo "${pfx}[xcode] $media_id: $mkv_rel -> $mp4_rel (转码 $(codec_desc) -> H.264/AAC)${sub_note}"

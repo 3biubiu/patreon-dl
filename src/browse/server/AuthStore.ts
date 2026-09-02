@@ -10,6 +10,7 @@ import {
   type QuotaKind,
   type UserQuota
 } from '../types/Quota.js';
+import { normalizeLoginRegions } from '../types/LoginRegion.js';
 
 /**
  * A user as stored on disk. The hash and its salt never leave this module -
@@ -147,6 +148,28 @@ function normalizeQuota(
   };
 }
 
+/**
+ * The stored form of a sign-in region restriction.
+ *
+ * Administrators are never restricted, for the reason they are never limited
+ * or narrowed: they can edit their own permissions, so a region list on an
+ * administrator is not a restriction, it is a way to lock the one account that
+ * could undo it out of the server.
+ *
+ * Everything else about the shape - `null` for anywhere, an empty array for
+ * nowhere, the depth and the ceiling - is decided by `normalizeLoginRegions`
+ * beside the rule itself.
+ */
+function normalizeLoginRegionsFor(
+  loginRegions: string[] | null | undefined,
+  role: UserRole
+): string[] | null {
+  if (role === 'admin') {
+    return null;
+  }
+  return normalizeLoginRegions(loginRegions ?? null);
+}
+
 function hashPassword(password: string, salt: string) {
   return crypto.scryptSync(password, salt, SCRYPT_KEY_LENGTH).toString('base64');
 }
@@ -194,6 +217,11 @@ export default class AuthStore {
         // is what they carry on doing until someone sets one - only accounts
         // made from here on start on `DEFAULT_USER_QUOTA`.
         user.quota = normalizeQuota(user.quota, user.role, UNLIMITED_QUOTA);
+        // Accounts written before the region restriction existed have no list
+        // on file. They have been signing in from anywhere up to this point,
+        // and a migration that silently pinned them to a region would lock out
+        // whoever happened to be travelling that week.
+        user.loginRegions = normalizeLoginRegionsFor(user.loginRegions, user.role);
         // Accounts written before bans existed are not banned; a reason with
         // no ban behind it is stale and dropped.
         user.banned = user.banned === true && user.role !== 'admin';
@@ -222,6 +250,7 @@ export default class AuthStore {
           createdAt: new Date().toISOString(),
           visibleCampaigns: null,
           quota: { ...UNLIMITED_QUOTA },
+          loginRegions: null,
           banned: false,
           banReason: null,
           salt,
@@ -353,6 +382,7 @@ export default class AuthStore {
     role: UserRole;
     visibleCampaigns?: string[] | null;
     quota?: Partial<UserQuota> | null;
+    loginRegions?: string[] | null;
   }): AuthUser {
     const username = params.username.trim();
     if (!username) {
@@ -372,6 +402,10 @@ export default class AuthStore {
       // A new account is limited unless it is told otherwise - the opposite of
       // what the accounts already on file kept.
       quota: normalizeQuota(params.quota, params.role, DEFAULT_USER_QUOTA),
+      // A new account may sign in from anywhere unless it is told otherwise.
+      // Unlike the daily allowance, there is no sensible default region to
+      // start it on - only whoever is creating it knows where it will be used.
+      loginRegions: normalizeLoginRegionsFor(params.loginRegions, params.role),
       banned: false,
       banReason: null,
       salt,
@@ -387,6 +421,7 @@ export default class AuthStore {
     role?: UserRole;
     visibleCampaigns?: string[] | null;
     quota?: Partial<UserQuota> | null;
+    loginRegions?: string[] | null;
   }): AuthUser {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
@@ -421,6 +456,14 @@ export default class AuthStore {
     // about to stop being enforced, rather than leaving it to be silently
     // reapplied if they are demoted again.
     user.quota = normalizeQuota(params.quota, user.role, user.quota);
+    // Re-normalized against the role that now applies, for the same reason as
+    // the two above: promoting someone drops a region list that is about to
+    // stop being enforced, rather than leaving it in the file to come back to
+    // life if they are ever demoted again.
+    user.loginRegions = normalizeLoginRegionsFor(
+      params.loginRegions !== undefined ? params.loginRegions : user.loginRegions,
+      user.role
+    );
     if (params.password !== undefined) {
       this.#assertPassword(params.password);
       user.salt = crypto.randomBytes(SALT_BYTES).toString('base64');
@@ -516,6 +559,7 @@ export default class AuthStore {
       createdAt: new Date().toISOString(),
       visibleCampaigns: null,
       quota: { ...DEFAULT_USER_QUOTA },
+      loginRegions: null,
       banned: false,
       banReason: null,
       salt: registration.salt,
@@ -576,13 +620,16 @@ export default class AuthStore {
   }
 
   #toAuthUser(user: StoredUser): AuthUser {
-    const { id, username, role, createdAt, visibleCampaigns, quota, banned, banReason } = user;
+    const {
+      id, username, role, createdAt, visibleCampaigns, quota, loginRegions, banned, banReason
+    } = user;
     // A copy, so a caller cannot reach into the store and edit a permission
     // in place - the array would otherwise be the live one.
     return {
       id, username, role, createdAt,
       visibleCampaigns: visibleCampaigns ? [ ...visibleCampaigns ] : null,
       quota: { ...quota },
+      loginRegions: loginRegions ? [ ...loginRegions ] : null,
       banned,
       banReason
     };

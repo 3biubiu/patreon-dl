@@ -1,15 +1,23 @@
 /**
- * Where an address is, for the sign-in log.
+ * Where an address is, for the sign-in log and for the region restriction.
  *
  * Looked up over the network rather than shipped as a database: an offline
  * GeoIP file would be tens of megabytes to carry and stale the day after it is
  * built, for a feature that fills in ten rows on one administrator's page.
  *
- * Nothing here is ever called while somebody is signing in. A login must not
- * wait on - or fail because of - a third party's service, so the address is
- * recorded immediately and the place is worked out later, when the log is
- * read.
+ * This used to be reached only when the log was read, never while somebody was
+ * signing in. Restricting an account to certain regions changes that: the
+ * server cannot decide whether to let someone in without knowing where they
+ * are, so a sign-in by an account that carries a restriction now waits here.
+ *
+ * What has *not* changed is that a sign-in must never fail because of a third
+ * party. The wait is short (`LOGIN_LOOKUP_TIMEOUT_MS`), it is skipped entirely
+ * for an unrestricted account and for any address already in the log's cache,
+ * and a lookup that fails lets the sign-in through - see the caller in
+ * `AuthAPIRequestHandler`.
  */
+
+import { type LoginRegionParts } from '../types/LoginRegion.js';
 
 /**
  * Only the fields that are actually shown, because the service bills a
@@ -25,6 +33,16 @@ const LOOKUP_ENDPOINT =
  */
 const LOOKUP_TIMEOUT_MS = 5000;
 
+/**
+ * The same, for a lookup that a sign-in is waiting on.
+ *
+ * Half the other one, because the person waiting on this is at a login form
+ * rather than reading a table, and a slow answer here costs them the wait
+ * whether or not it ever arrives. Overshooting it is not a refusal: the caller
+ * treats a timeout as "no place this time" and lets the sign-in through.
+ */
+export const LOGIN_LOOKUP_TIMEOUT_MS = 2500;
+
 /** What the service accepts in one batch. */
 const MAX_BATCH = 100;
 
@@ -38,6 +56,15 @@ export interface IPLocation {
    * log store treats as "ask again".
    */
   region?: string | null;
+  /**
+   * The same place unjoined, which is what the region restriction matches
+   * against - a rule naming a province has to be told apart from one naming a
+   * city, and a single joined string cannot say which is which.
+   *
+   * Absent on entries cached before this existed, which the log store treats
+   * as "ask again" exactly as it does for {@link IPLocation.region}.
+   */
+  parts?: LoginRegionParts | null;
   isp: string | null;
 }
 
@@ -115,7 +142,10 @@ export function localPlace(ip: string): string | null {
  * Throws if the service cannot be reached at all, which the caller is expected
  * to treat as "no places this time" rather than as a failure of the log.
  */
-export async function lookupIPLocations(ips: string[]): Promise<Map<string, IPLocation>> {
+export async function lookupIPLocations(
+  ips: string[],
+  timeoutMs = LOOKUP_TIMEOUT_MS
+): Promise<Map<string, IPLocation>> {
   const found = new Map<string, IPLocation>();
   const targets = [ ...new Set(ips.filter((ip) => ip && !localPlace(ip))) ].slice(0, MAX_BATCH);
   if (targets.length === 0) {
@@ -125,7 +155,7 @@ export async function lookupIPLocations(ips: string[]): Promise<Map<string, IPLo
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(targets),
-    signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS)
+    signal: AbortSignal.timeout(timeoutMs)
   });
   if (!response.ok) {
     throw Error(`Location service answered ${response.status}`);
@@ -138,6 +168,14 @@ export async function lookupIPLocations(ips: string[]): Promise<Map<string, IPLo
     if (row?.status !== 'success' || !row.query) {
       continue;
     }
+    // Kept apart as well as joined: the region restriction has to tell a rule
+    // naming a province from one naming a city, and the joined form below
+    // drops a repeated part, so it cannot be taken back apart afterwards.
+    const parts: LoginRegionParts = {
+      country: (row.country || '').trim() || null,
+      province: (row.regionName || '').trim() || null,
+      city: (row.city || '').trim() || null
+    };
     const place = [ row.country, row.regionName, row.city ]
       .map((part) => (part || '').trim())
       .filter((part) => !!part)
@@ -153,6 +191,7 @@ export async function lookupIPLocations(ips: string[]): Promise<Map<string, IPLo
     found.set(row.query, {
       place: place || null,
       region: region || null,
+      parts,
       isp: (row.isp || '').trim() || null
     });
   }

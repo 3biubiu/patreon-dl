@@ -69,9 +69,19 @@ class _Router {
     });
 
     // Reachable while signed out - otherwise there would be no way in.
-    this.#router.post('/api/auth/login', (req, res) =>
-      this.#handlers.auth.handleLoginRequest(req, res)
-    );
+    //
+    // The only route here that is asynchronous: an account restricted to
+    // certain regions cannot be answered until the server knows where the
+    // request came from. Anything that escapes the handler is answered rather
+    // than left to hang - a sign-in that never comes back is worse than one
+    // that fails.
+    this.#router.post('/api/auth/login', (req, res) => {
+      this.#handlers.auth.handleLoginRequest(req, res).catch(() => {
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Could not sign in' });
+        }
+      });
+    });
 
     // Reachable while signed out for the same reason the sign-in is: this is
     // the way to ask for an account when you have none. It creates an

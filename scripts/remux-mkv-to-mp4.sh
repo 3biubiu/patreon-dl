@@ -16,7 +16,14 @@
 #
 # 每步动作:
 #   remux/转码到 *.mp4.tmp → 校验非空 → 改名为 *.mp4
-#   → 更新 DB (download_path + mime_type) → 删除原 .mkv (除非 --keep)
+#   → 更新 DB (download_path + mime_type, 并校验确实更新了 1 行)
+#   → 删除原 .mkv (除非 --keep)
+#
+# 自愈: DB 指向 .mkv 但文件已是 .mp4 (如此前转换后又被下载任务回写),
+#       或 mkv/mp4 并存 — 直接把 DB 修正为 .mp4, 重跑本脚本即可修复。
+#
+# 警告: 不要在下载任务运行期间执行本脚本! 下载器的 saveMedia 可能把
+#       已转换记录回写成 .mkv, 造成 DB 与文件不一致 (播放 404)。
 #
 # 用法:
 #   ./remux-mkv-to-mp4.sh [选项] <目录> [更多目录...]
@@ -191,7 +198,22 @@ in_scope() {
 
 # ------------------------------------------------------- 处理单个视频 ----
 
-TOTAL=0 REMUXED=0 TRANSCODED=0 SKIPPED=0
+TOTAL=0 REMUXED=0 TRANSCODED=0 REPAIRED=0 SKIPPED=0
+
+# 更新 media 表的 download_path/mime_type。
+# 关键: UPDATE 匹配 0 行时 sqlite3 退出码仍是 0, 必须用 changes() 校验
+# 确实更新了 1 行, 否则会静默失败 (文件已删、DB 未改 → 播放 404)。
+db_update_path() {
+  local media_id=$1 new_rel=$2 out
+  out=$("$SQLITE" "$DB_FILE" ".timeout 30000" \
+    "UPDATE media
+     SET download_path = '$(sql_escape "$new_rel")',
+         mime_type = 'video/mp4'
+     WHERE media_id = '$(sql_escape "$media_id")';
+     SELECT changes();") || return 1
+  out=${out%$'\r'}
+  [[ "$out" == "1" ]]
+}
 
 # 执行 ffmpeg 转换; 模式: remux(全copy) / audio(视频copy+音频转AAC) / transcode(全转码)
 run_ffmpeg() {
@@ -223,13 +245,45 @@ process_video() {
   [[ $DRY_RUN -eq 1 ]] && pfx="[dry-run] "
 
   if ! is_usable_file "$mkv_abs"; then
+    # 自愈: mkv 不存在但同名 mp4 存在 → 此前已转换过, 只是 DB 未更新
+    # (典型成因: 转换后下载任务的 saveMedia 又把路径回写成了 .mkv)
+    if is_usable_file "$mp4_abs"; then
+      if [[ $DRY_RUN -eq 1 ]]; then
+        REPAIRED=$((REPAIRED+1))
+        echo "${pfx}[repair] $media_id: 文件已是 .mp4 但 DB 仍指向 .mkv → 将更新数据库: $mp4_rel"
+        return
+      fi
+      if db_update_path "$media_id" "$mp4_rel"; then
+        REPAIRED=$((REPAIRED+1))
+        echo "[repair] $media_id: 数据库已修复 → $mp4_rel"
+      else
+        SKIPPED=$((SKIPPED+1))
+        echo "[skip]  $media_id (数据库修复失败: $mp4_rel)" >&2
+      fi
+      return
+    fi
     SKIPPED=$((SKIPPED+1))
     echo "[skip]  $media_id (MKV 文件不存在或为空: $mkv_rel)" >&2
     return
   fi
   if [[ -e "$mp4_abs" ]]; then
-    SKIPPED=$((SKIPPED+1))
-    echo "[skip]  $media_id (目标已存在, 请人工检查: $mp4_rel)" >&2
+    # mkv 与 mp4 同时存在 (如转换后下载任务又重新下载了 mkv):
+    # 让 DB 指向可播放的 .mp4, 两个文件都保留
+    if is_usable_file "$mp4_abs"; then
+      if [[ $DRY_RUN -eq 1 ]]; then
+        REPAIRED=$((REPAIRED+1))
+        echo "${pfx}[repair] $media_id: mkv/mp4 并存, DB 指向 .mkv → 将改指 .mp4: $mp4_rel"
+      elif db_update_path "$media_id" "$mp4_rel"; then
+        REPAIRED=$((REPAIRED+1))
+        echo "[repair] $media_id: mkv/mp4 并存, 数据库已改指 .mp4 (mkv 保留, 可自行删除)"
+      else
+        SKIPPED=$((SKIPPED+1))
+        echo "[skip]  $media_id (mkv/mp4 并存但数据库更新失败)" >&2
+      fi
+    else
+      SKIPPED=$((SKIPPED+1))
+      echo "[skip]  $media_id (目标 .mp4 存在但为空文件, 请人工检查: $mp4_rel)" >&2
+    fi
     return
   fi
   if ! probe_streams "$mkv_abs"; then
@@ -263,12 +317,8 @@ process_video() {
       return
     fi
     mv -f -- "$tmp_abs" "$mp4_abs"
-    # DB 更新成功才删原文件
-    if ! "$SQLITE" "$DB_FILE" ".timeout 30000" \
-      "UPDATE media
-       SET download_path = '$(sql_escape "$mp4_rel")',
-           mime_type = 'video/mp4'
-       WHERE media_id = '$(sql_escape "$media_id")';"; then
+    # DB 更新成功 (且确实更新了 1 行) 才删原文件
+    if ! db_update_path "$media_id" "$mp4_rel"; then
       SKIPPED=$((SKIPPED+1))
       echo "[skip]  $media_id (更新数据库失败, 已保留原文件)" >&2
       rm -f -- "$mp4_abs"
@@ -316,7 +366,7 @@ scope_desc="全部"
 [[ ${#PREFIXES[@]} -gt 0 ]] && scope_desc="${PREFIXES[*]}"
 echo "----" >&2
 echo "范围: $scope_desc (dataDir: $DATA_DIR)" >&2
-echo "共检查 $TOTAL 个 MKV: remux $REMUXED, 转码 $TRANSCODED, 跳过 $SKIPPED" >&2
+echo "共检查 $TOTAL 个 MKV: remux $REMUXED, 转码 $TRANSCODED, 修复 $REPAIRED, 跳过 $SKIPPED" >&2
 [[ $KEEP -eq 1 ]] && echo "(--keep: 原文件已保留)" >&2
 [[ $DRY_RUN -eq 1 ]] && echo "(dry-run 模式, 未做任何修改)" >&2
 

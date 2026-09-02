@@ -64,11 +64,15 @@ const PCM_PART_FORMAT: AudioFormat = {
  * Past a few hundred terms that dies inside ffmpeg - some builds report
  * `Cannot allocate memory` while initializing the filters, others overflow
  * the stack - and a long video whose detection settings produce many short
- * intervals reaches those counts easily. Batches are therefore cut at a
- * hundred terms, well under every failure reported, and joined afterwards;
- * the join is lossless, so the spliced timeline is the same either way.
+ * intervals reaches those counts easily.
+ *
+ * Thirty-two rather than a hundred: builds vary widely in what they survive
+ * (one server in the field failed inside this range while another ran four
+ * thousand terms), and the batch count only costs re-decoding the source
+ * per extra batch, so the safe margin is worth more than the pass count.
+ * The join is lossless, so the spliced timeline is the same either way.
  */
-const MAX_PIECES_PER_GRAPH = 100;
+const MAX_PIECES_PER_GRAPH = 32;
 
 /**
  * The resolution a spliced clip's cut points are rounded to, in seconds.

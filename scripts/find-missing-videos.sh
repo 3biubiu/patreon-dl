@@ -205,7 +205,6 @@ resolve_posts_dirs() {
 
 # ---------------------------------------------------------------- 主流程 ----
 
-declare -a ALL_DIRS=()
 for d in "${USER_DIRS[@]}"; do
   if [[ ! -d "$d" ]]; then
     echo "警告: 目录不存在, 已跳过: $d" >&2

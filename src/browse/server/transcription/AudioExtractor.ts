@@ -45,6 +45,32 @@ export const MP3_FORMAT: AudioFormat = {
 };
 
 /**
+ * What a clip too long for a single filtergraph is spliced through. WAV at
+ * the splice rate carries every sample it was handed, so a batch re-read is
+ * bit for bit the audio it wrote and joining batches costs nothing.
+ */
+const PCM_PART_FORMAT: AudioFormat = {
+  codec: 'pcm_s16le',
+  ext: '.wav',
+  mimeType: 'audio/wav',
+  bitrateKbps: 256
+};
+
+/**
+ * How many pieces may go into one `aselect` expression.
+ *
+ * ffmpeg evaluates an expression by walking a tree, and `a + b + c + ...`
+ * is one branch per term, so a clip's piece count is the recursion depth.
+ * Past a few hundred terms that dies inside ffmpeg - some builds report
+ * `Cannot allocate memory` while initializing the filters, others overflow
+ * the stack - and a long video whose detection settings produce many short
+ * intervals reaches those counts easily. Batches are therefore cut at a
+ * hundred terms, well under every failure reported, and joined afterwards;
+ * the join is lossless, so the spliced timeline is the same either way.
+ */
+const MAX_PIECES_PER_GRAPH = 100;
+
+/**
  * The resolution a spliced clip's cut points are rounded to, in seconds.
  *
  * Ten milliseconds is far finer than the third of a second of padding either
@@ -239,6 +265,10 @@ export default class AudioExtractor {
    * it invents captions to fill. What comes back is on the spliced file's own
    * timeline, and the caller has to map it back.
    *
+   * A clip with more pieces than one expression survives - see
+   * `MAX_PIECES_PER_GRAPH` - is spliced in batches and joined, which leaves
+   * that timeline exactly where a single pass would have put it.
+   *
    * The codec is the provider's choice rather than this file's, because not
    * every one of them accepts Opus - see `AudioFormat`.
    */
@@ -253,6 +283,52 @@ export default class AudioExtractor {
       throw Error('A clip needs at least one piece of audio');
     }
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    if (pieces.length <= MAX_PIECES_PER_GRAPH) {
+      await this.#splice(videoPath, pieces, outPath, format, signal);
+    }
+    else {
+      this.log('debug',
+        `Splicing ${pieces.length} pieces in ` +
+        `${Math.ceil(pieces.length / MAX_PIECES_PER_GRAPH)} batches`
+      );
+      const parts: string[] = [];
+      try {
+        for (let from = 0; from < pieces.length; from += MAX_PIECES_PER_GRAPH) {
+          const part = `${outPath}.part${parts.length}${PCM_PART_FORMAT.ext}`;
+          parts.push(part);
+          await this.#splice(
+            videoPath,
+            pieces.slice(from, from + MAX_PIECES_PER_GRAPH),
+            part,
+            PCM_PART_FORMAT,
+            signal
+          );
+        }
+        await this.#joinParts(parts, outPath, format, signal);
+      }
+      finally {
+        for (const part of parts) {
+          fs.rmSync(part, { force: true });
+        }
+      }
+    }
+    if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
+      const first = pieces[0].start;
+      const last = pieces[pieces.length - 1].end;
+      throw Error(`ffmpeg produced no audio for ${first.toFixed(1)}s-${last.toFixed(1)}s`);
+    }
+  }
+
+  /**
+   * One ffmpeg pass: the given pieces, and nothing else, into `outPath`.
+   */
+  async #splice(
+    videoPath: string,
+    pieces: TimeRange[],
+    outPath: string,
+    format: AudioFormat,
+    signal?: AbortSignal
+  ) {
     // Written to a file rather than passed as an argument: a sparse hour can
     // run to hundreds of pieces, which is past the command-line length
     // Windows allows.
@@ -282,11 +358,29 @@ export default class AudioExtractor {
     finally {
       fs.rmSync(scriptPath, { force: true });
     }
-    if (!fs.existsSync(outPath) || fs.statSync(outPath).size === 0) {
-      const first = pieces[0].start;
-      const last = pieces[pieces.length - 1].end;
-      throw Error(`ffmpeg produced no audio for ${first.toFixed(1)}s-${last.toFixed(1)}s`);
+  }
+
+  /**
+   * Encodes the batch files, joined end to end, into one clip.
+   *
+   * The batches already are the clip, sample for sample, so this pass
+   * neither decodes the video again nor moves a boundary: it chains the
+   * parts and compresses the result once.
+   */
+  #joinParts(parts: string[], outPath: string, format: AudioFormat, signal?: AbortSignal) {
+    const args = [ '-v', 'error', '-y' ];
+    for (const part of parts) {
+      args.push('-i', part);
     }
+    const links = parts.map((_, index) => `[${index}:a]`).join('');
+    args.push(
+      '-filter_complex', `${links}concat=n=${parts.length}:v=0:a=1[spliced]`,
+      '-map', '[spliced]',
+      '-c:a', format.codec,
+      '-b:a', `${format.bitrateKbps}k`,
+      outPath
+    );
+    return this.#run(this.#ffmpegPath, args, signal);
   }
 
   /**

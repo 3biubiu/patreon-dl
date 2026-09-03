@@ -6,10 +6,9 @@ import type HistoryStore from '../HistoryStore.js';
 import type QuotaStore from '../QuotaStore.js';
 import type LoginLogStore from '../LoginLogStore.js';
 import { MAX_LOGIN_LOG_ENTRIES } from '../LoginLogStore.js';
-import { localPlace, normalizeIP, LOGIN_LOOKUP_TIMEOUT_MS } from '../IPLocation.js';
+import type LoginRegionGuard from '../LoginRegionGuard.js';
+import { clientIP } from '../LoginRegionGuard.js';
 import {
-  describeLoginRegionParts,
-  matchesLoginRegions,
   normalizeLoginRegions,
   LOGIN_REGION_BLOCKED_CODE
 } from '../../types/LoginRegion.js';
@@ -48,15 +47,15 @@ function regionBlockedMessage(place: string | null) {
 }
 
 /**
- * The address the request came from.
+ * What somebody is told when the address itself could not be placed.
  *
- * `req.ip` is only the real client once Express has been told how many proxies
- * sit in front of it - see `trustProxy` in `WebServerConfig`. Without that
- * this would be the reverse proxy's own address, on every single row.
+ * Kept apart from the message above because it is a different thing to be
+ * told: the first says where you are and that it is not allowed, this one says
+ * the server could not find out and would rather refuse than guess. It is also
+ * the one that is worth retrying, and says so.
  */
-function clientIP(req: Request): string {
-  return normalizeIP(req.ip) || 'unknown';
-}
+const REGION_UNPLACEABLE_MESSAGE =
+  '登录地区受限:暂时无法确认本次登录的所在地区,出于安全考虑已拒绝登录。请稍后重试,若持续如此请联系管理员。';
 
 function clientUserAgent(req: Request): string | null {
   const ua = req.get('user-agent');
@@ -154,12 +153,19 @@ export default class AuthAPIRequestHandler extends Basehandler {
   #historyStore: HistoryStore;
   #quotaStore: QuotaStore;
   #loginLogStore: LoginLogStore;
+  /**
+   * Shared with the router, which runs the same check on every request a
+   * session makes. One object rather than two so that an address allowed at
+   * the sign-in form is not looked up a second time on the page that follows.
+   */
+  #regionGuard: LoginRegionGuard;
 
   constructor(
     store: AuthStore,
     historyStore: HistoryStore,
     quotaStore: QuotaStore,
     loginLogStore: LoginLogStore,
+    regionGuard: LoginRegionGuard,
     logger?: Logger | null
   ) {
     super(logger);
@@ -167,6 +173,7 @@ export default class AuthAPIRequestHandler extends Basehandler {
     this.#historyStore = historyStore;
     this.#quotaStore = quotaStore;
     this.#loginLogStore = loginLogStore;
+    this.#regionGuard = regionGuard;
   }
 
   async handleLoginRequest(req: Request, res: Response) {
@@ -201,15 +208,18 @@ export default class AuthAPIRequestHandler extends Basehandler {
     // what signs the account's other devices out, and a refused sign-in must
     // not be able to do that. Somebody guessing a password from a blocked
     // region would otherwise be logging the real user out on every attempt.
-    const refusal = await this.#regionRefusal(req, user);
-    if (refusal) {
+    const verdict = await this.#regionGuard.check(clientIP(req), user);
+    if (!verdict.allowed) {
+      const from = verdict.place ||
+        (verdict.unplaceable ? 'an address that could not be placed' : 'an unlisted region');
       this.log('warn',
-        `Refused sign-in for "${user.username}" from ${refusal.place || 'an unlisted region'} - ` +
+        `Refused sign-in for "${user.username}" from ${from} - ` +
         `allowed: ${user.loginRegions?.join(', ') || 'none'}`
       );
       this.#recordLogin(req, user.username, user.id, false);
       res.status(403).json({
-        error: regionBlockedMessage(refusal.place),
+        error: verdict.unplaceable ?
+          REGION_UNPLACEABLE_MESSAGE : regionBlockedMessage(verdict.place),
         code: LOGIN_REGION_BLOCKED_CODE
       });
       return;
@@ -223,75 +233,6 @@ export default class AuthAPIRequestHandler extends Basehandler {
     // about the addresses in the log, and the sign-in path must never wait
     // on - or fail because of - a third party.
     void this.#detectRegionAnomaly(user);
-  }
-
-  /**
-   * Whether this sign-in should be refused for where it came from, and the
-   * place to say so with - or `null` to let it through.
-   *
-   * This is the one thing on the sign-in path that can wait on the network, so
-   * it is written to do so as rarely as possible and to never turn a problem
-   * of its own into a locked door:
-   *
-   * - An unrestricted account (`null`, the default and every administrator)
-   *   returns before anything is looked at.
-   * - An account allowed *nowhere* is refused without a lookup, because where
-   *   it is signing in from cannot change the answer.
-   * - A local address is allowed. It is also how an administrator gets back in
-   *   after pinning an account to the wrong place.
-   * - Anything already in the log's location cache is answered from the file.
-   *
-   * What is left is a genuinely new public address, which costs one lookup
-   * with a short timeout. If that lookup fails, times out, or comes back
-   * without a place, the sign-in is **allowed** and the failure is logged: a
-   * third party being unreachable must not be able to lock this server's users
-   * out. The trade is that the restriction can, in principle, be slipped by
-   * somebody who can stop the server reaching the location service - which the
-   * anomaly rule still catches after the fact.
-   */
-  async #regionRefusal(
-    req: Request,
-    user: AuthUser
-  ): Promise<{ place: string | null; } | null> {
-    const allowed = user.loginRegions;
-    if (user.role === 'admin' || allowed === null) {
-      return null;
-    }
-    if (allowed.length === 0) {
-      // Nowhere is allowed, so there is nothing a lookup could tell us.
-      return { place: null };
-    }
-    const ip = clientIP(req);
-    const local = localPlace(ip);
-    if (local) {
-      // Worth saying, because a reverse proxy without `trustProxy` set makes
-      // *every* request look like this - and the restriction would then be
-      // quietly doing nothing at all.
-      this.log('info',
-        `Sign-in region check skipped for "${user.username}" - ${ip} is ${local}. ` +
-        `If this server is behind a proxy, check "trustProxy" in WebServerConfig.`
-      );
-      return null;
-    }
-    let parts;
-    try {
-      parts = await this.#loginLogStore.locationParts(ip, LOGIN_LOOKUP_TIMEOUT_MS);
-    }
-    catch (error) {
-      this.log('error', `Sign-in region check failed for "${user.username}" - letting it through:`, error);
-      return null;
-    }
-    if (!parts) {
-      this.log('warn',
-        `Could not place ${ip} for "${user.username}" - letting the sign-in through ` +
-        `rather than refusing it over a location lookup.`
-      );
-      return null;
-    }
-    if (matchesLoginRegions(parts, allowed)) {
-      return null;
-    }
-    return { place: describeLoginRegionParts(parts) || null };
   }
 
   /**

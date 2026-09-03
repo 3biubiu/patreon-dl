@@ -10,7 +10,13 @@ import SettingsAPIRequestHandler from './handler/SettingsAPIRequestHandler.js';
 import MediaAPIRequestHandler from './handler/MediaAPIRequestHandler.js';
 import AuthAPIRequestHandler from './handler/AuthAPIRequestHandler.js';
 import type AuthStore from './AuthStore.js';
-import { getSessionUser, refreshSessionIfStale, type AuthenticatedRequest } from './AuthGuard.js';
+import {
+  clearSession,
+  getSessionUser,
+  refreshSessionIfStale,
+  type AuthenticatedRequest
+} from './AuthGuard.js';
+import LoginRegionGuard, { clientIP } from './LoginRegionGuard.js';
 import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHandler.js';
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
@@ -44,13 +50,21 @@ class _Router {
   #handlers: RequestHandlers;
   #authStore: AuthStore;
   #quotaStore: QuotaStore;
+  #regionGuard: LoginRegionGuard;
   #db: DBInstance;
   #router: Router;
 
-  constructor(handlers: RequestHandlers, authStore: AuthStore, quotaStore: QuotaStore, db: DBInstance) {
+  constructor(
+    handlers: RequestHandlers,
+    authStore: AuthStore,
+    quotaStore: QuotaStore,
+    regionGuard: LoginRegionGuard,
+    db: DBInstance
+  ) {
     this.#handlers = handlers;
     this.#authStore = authStore;
     this.#quotaStore = quotaStore;
+    this.#regionGuard = regionGuard;
     this.#db = db;
     this.#router = express.Router();
     this.initializeRoutes();
@@ -59,13 +73,55 @@ class _Router {
   initializeRoutes() {
     // Resolve the session once, up front, so everything downstream - the
     // campaign permissions included - can simply read `req.authUser`.
+    //
+    // The region restriction is applied here rather than only at the sign-in
+    // form, because a rule checked once at the door is not a rule: a cookie is
+    // good for a week, so a session opened before the restriction was put on -
+    // or carried somewhere it does not allow - would otherwise go on working
+    // regardless of it.
+    //
+    // A session that fails the check is *signed out* rather than answered with
+    // a 403 on every route. It costs nothing, since the cookie is worthless to
+    // them now anyway, and it puts them at the login form, which is the one
+    // place equipped to tell them why they cannot get in.
     this.#router.use((req, res, next) => {
       const user = getSessionUser(req, this.#authStore);
-      if (user) {
+      if (!user) {
+        next();
+        return;
+      }
+      const admit = () => {
         (req as AuthenticatedRequest).authUser = user;
         refreshSessionIfStale(req, res, this.#authStore, user);
+      };
+      // Every unrestricted account and every administrator leaves here, having
+      // cost this middleware a comparison. Only an account that is actually
+      // pinned to somewhere goes on to the asynchronous path below, and even
+      // then it is answered from the guard's memo after the first request.
+      if (!this.#regionGuard.applies(user)) {
+        admit();
+        next();
+        return;
       }
-      next();
+      this.#regionGuard.check(clientIP(req), user)
+        .then((verdict) => {
+          if (verdict.allowed) {
+            admit();
+            return;
+          }
+          this.#regionGuard.log('warn',
+            `Signed out "${user.username}" mid-session - ${clientIP(req)} is ` +
+            `${verdict.place || (verdict.unplaceable ? 'an address that could not be placed' : 'not an allowed region')}.`
+          );
+          clearSession(res);
+        })
+        .catch((error: unknown) => {
+          // The guard answers rather than throws, so this is the check itself
+          // having gone wrong. It is still not a reason to admit somebody.
+          this.#regionGuard.log('error', 'Sign-in region check failed - signing the session out:', error);
+          clearSession(res);
+        })
+        .finally(() => next());
     });
 
     // Reachable while signed out - otherwise there would be no way in.
@@ -439,13 +495,18 @@ export function getRouter(
     dataDir, transcription.index, transcription.queue, translationConfig, logger,
     transcription.vocabulary
   );
+  // One guard, shared by the sign-in handler and by the check the router runs
+  // on every request, so that an address placed for one is placed for both.
+  const regionGuard = new LoginRegionGuard(loginLogStore, logger);
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
     media: new MediaRequestHandler(db, dataDir, quotaStore, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
-    auth: new AuthAPIRequestHandler(authStore, historyStore, quotaStore, loginLogStore, logger),
+    auth: new AuthAPIRequestHandler(
+      authStore, historyStore, quotaStore, loginLogStore, regionGuard, logger
+    ),
     history: new HistoryAPIRequestHandler(db, historyStore, logger),
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,
@@ -457,5 +518,5 @@ export function getRouter(
       transcription.index, translation.queue, translation.settings,
       logger
     )
-  }, authStore, quotaStore, db).router;
+  }, authStore, quotaStore, regionGuard, db).router;
 }

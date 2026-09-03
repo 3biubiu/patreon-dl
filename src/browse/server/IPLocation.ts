@@ -10,11 +10,14 @@
  * server cannot decide whether to let someone in without knowing where they
  * are, so a sign-in by an account that carries a restriction now waits here.
  *
- * What has *not* changed is that a sign-in must never fail because of a third
- * party. The wait is short (`LOGIN_LOOKUP_TIMEOUT_MS`), it is skipped entirely
- * for an unrestricted account and for any address already in the log's cache,
- * and a lookup that fails lets the sign-in through - see the caller in
- * `AuthAPIRequestHandler`.
+ * The wait is short (`LOGIN_LOOKUP_TIMEOUT_MS`) and it is skipped entirely for
+ * an unrestricted account and for any address already in the log's cache, so
+ * in practice only a genuinely new address ever pays for one.
+ *
+ * A lookup that fails does **not** let the sign-in through. It used to, and
+ * that was the whole of the restriction's value: anybody arriving while this
+ * service was unreachable was simply allowed in. The reasoning for the
+ * reversal, and what keeps it from being a lockout, is on `LoginRegionGuard`.
  */
 
 import { type LoginRegionParts } from '../types/LoginRegion.js';
@@ -38,10 +41,28 @@ const LOOKUP_TIMEOUT_MS = 5000;
  *
  * Half the other one, because the person waiting on this is at a login form
  * rather than reading a table, and a slow answer here costs them the wait
- * whether or not it ever arrives. Overshooting it is not a refusal: the caller
- * treats a timeout as "no place this time" and lets the sign-in through.
+ * whether or not it ever arrives.
+ *
+ * Overshooting it *is* a refusal now, which is why it is a per-attempt budget
+ * rather than the whole of one - see {@link LOGIN_LOOKUP_ATTEMPTS}.
  */
 export const LOGIN_LOOKUP_TIMEOUT_MS = 2500;
+
+/**
+ * How many times a lookup a permission check is waiting on is tried before it
+ * is given up on.
+ *
+ * Two, and no more. This service is plain HTTP on a free tier and drops the
+ * occasional request; with a refusal riding on the answer, one dropped request
+ * would be somebody turned away from their own account. A second attempt costs
+ * nothing to anyone who does not need it, and the worst case stays inside the
+ * few seconds a person will wait at a login form.
+ *
+ * It is deliberately not more than two. Beyond that the wait becomes the
+ * problem, and a service that has failed twice in five seconds is down rather
+ * than busy.
+ */
+export const LOGIN_LOOKUP_ATTEMPTS = 2;
 
 /** What the service accepts in one batch. */
 const MAX_BATCH = 100;

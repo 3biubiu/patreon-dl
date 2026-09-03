@@ -3,7 +3,12 @@ import path from 'path';
 import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
 import { type LoginLogEntry } from '../types/Auth.js';
-import { localPlace, lookupIPLocations, type IPLocation } from './IPLocation.js';
+import {
+  localPlace,
+  lookupIPLocations,
+  LOGIN_LOOKUP_ATTEMPTS,
+  type IPLocation
+} from './IPLocation.js';
 import { loginRegionPath, type LoginRegionParts } from '../types/LoginRegion.js';
 
 /**
@@ -107,6 +112,18 @@ export default class LoginLogStore {
     if (this.#data.entries.length > MAX_LOGIN_LOG_ENTRIES) {
       this.#data.entries.length = MAX_LOGIN_LOG_ENTRIES;
     }
+    // Here, and nowhere else, because this is the only thing that drops an
+    // entry and so the only thing that can leave a place belonging to nobody.
+    //
+    // It used to run at the end of every lookup instead, which was wrong in a
+    // way that quietly disabled the region restriction: the sign-in path looks
+    // an address up *before* recording the sign-in, so the address was not yet
+    // in `entries` and the place that had just been fetched for it was deleted
+    // again before the caller could read it. The caller saw "cannot be placed"
+    // and let the sign-in through. Every address the log had not seen before
+    // got in that way, once - which for somebody rotating hosting addresses is
+    // every time.
+    this.#pruneLocations();
     this.#save();
   }
 
@@ -189,16 +206,17 @@ export default class LoginLogStore {
    * address the log has seen before is answered without touching the network
    * at all. Only a genuinely new address costs a lookup.
    *
-   * `null` covers every way of not knowing - a local address, a service that
-   * did not answer, one that answered without a country. The caller must treat
-   * all of them alike, and does: not knowing where somebody is has never been
-   * grounds for refusing them.
+   * `null` is "nowhere known" - a local address, or an answer with no country
+   * in it. A service that could not be reached at all is a *throw* rather than
+   * a `null`, which is the one distinction the caller needs: it refuses either
+   * way now, but the two say very different things in the log, and an operator
+   * chasing a lockout should not have to guess which one they are looking at.
    */
   async locationParts(ip: string, timeoutMs?: number): Promise<LoginRegionParts | null> {
     if (!ip || localPlace(ip)) {
       return null;
     }
-    await this.#resolveLocations([ ip ], timeoutMs);
+    await this.#resolveLocations([ ip ], timeoutMs, true);
     const parts = this.#data.locations[ip]?.parts;
     // An answer with no country in it places nothing, and returning it would
     // be far worse than returning nothing: every rule would fail to match it
@@ -211,7 +229,17 @@ export default class LoginLogStore {
     commonLog(this.#logger, level, this.name, ...msg);
   }
 
-  async #resolveLocations(ips: string[], timeoutMs?: number) {
+  /**
+   * Fills in the places for these addresses, from the cache where there is one
+   * and from the service where there is not.
+   *
+   * `strict` is what a permission check asks for and what a log does not. The
+   * log wants whatever it can get and shows blanks for the rest, so a failure
+   * here is a warning and nothing more. A permission check cannot work with a
+   * blank, so for it the service is tried twice and a failure is thrown on to
+   * the caller, which refuses - see `LoginRegionGuard`.
+   */
+  async #resolveLocations(ips: string[], timeoutMs?: number, strict = false) {
     const unknown = [ ...new Set(
       ips.filter((ip) => {
         if (!ip || localPlace(ip)) {
@@ -227,21 +255,35 @@ export default class LoginLogStore {
     if (unknown.length === 0) {
       return;
     }
-    try {
-      const found = await lookupIPLocations(unknown, timeoutMs);
-      if (found.size === 0) {
+    // One attempt for the log. Two for a permission check, because the second
+    // one is free of charge to everybody except the person waiting at the
+    // login form, and it is the difference between a blip at the service and
+    // somebody being turned away.
+    const attempts = strict ? LOGIN_LOOKUP_ATTEMPTS : 1;
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        const found = await lookupIPLocations(unknown, timeoutMs);
+        // The service answered and placed none of them. That is an answer, not
+        // a failure, and asking again would get the same one.
+        if (found.size === 0) {
+          return;
+        }
+        for (const [ ip, location ] of found) {
+          this.#data.locations[ip] = location;
+        }
+        this.#save();
         return;
       }
-      for (const [ ip, location ] of found) {
-        this.#data.locations[ip] = location;
+      catch (error) {
+        lastError = error;
+        this.log('warn',
+          `Could not look up sign-in locations (attempt ${attempt} of ${attempts}):`, error
+        );
       }
-      this.#pruneLocations();
-      this.#save();
     }
-    catch (error) {
-      // Worth saying once, and no more than that: the caller asked for a log,
-      // and it has one - just without the places this time.
-      this.log('warn', 'Could not look up sign-in locations:', error);
+    if (strict) {
+      throw lastError instanceof Error ? lastError : Error(String(lastError));
     }
   }
 

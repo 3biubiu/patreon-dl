@@ -14,6 +14,7 @@ import QuotaStore from './QuotaStore.js';
 import LoginLogStore from './LoginLogStore.js';
 import { type TranscriptionConfig } from './transcription/Config.js';
 import { type TranslationConfig } from './translation/Config.js';
+import { type PdfTranslationConfig } from './pdf/Config.js';
 
 export const DEFAULT_WEB_SERVER_PORT = 3000;
 
@@ -56,6 +57,12 @@ export interface WebServerConfig {
    * off and transcription is unaffected.
    */
   translation?: TranslationConfig | null;
+  /**
+   * Google Translate for the PDF reader. Its own engine and its own settings:
+   * nothing here reaches `translation` above, and vice versa. Left out, the
+   * defaults apply - a local proxy and Chinese.
+   */
+  pdfTranslation?: PdfTranslationConfig | null;
   logger?: Logger | null;
 }
 
@@ -129,7 +136,8 @@ export class WebServer {
       this.#config.pathToFFmpeg,
       this.#config.transcription,
       this.#config.logger,
-      this.#config.translation
+      this.#config.translation,
+      this.#config.pdfTranslation
     );
 
     // Before anything reads `req.ip`: without this, every request behind a

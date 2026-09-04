@@ -18,6 +18,8 @@ import {
 } from './AuthGuard.js';
 import LoginRegionGuard, { clientIP } from './LoginRegionGuard.js';
 import { resolveDownloadTicket, type DownloadTicketRequest } from './DownloadTicket.js';
+import PdfTranslationRequestHandler from './handler/PdfTranslationRequestHandler.js';
+import { createPdfTranslationServices, type PdfTranslationConfig } from './pdf/Config.js';
 import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHandler.js';
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
@@ -45,6 +47,7 @@ interface RequestHandlers {
   transcription: TranscriptionAPIRequestHandler;
   translation: TranslationAPIRequestHandler;
   history: HistoryAPIRequestHandler;
+  pdfTranslation: PdfTranslationRequestHandler;
 }
 
 class _Router {
@@ -470,6 +473,26 @@ class _Router {
       (res) => { res.status(404).send('Media not found'); }
     );
 
+    // The PDF reader's own translation - Google Translate, free, and nothing
+    // to do with the Gemini routes above. Open to anyone who may see the file:
+    // there is no key being spent, only a page being read.
+    this.#router.get('/api/pdf-translation/availability', (req, res) =>
+      this.#handlers.pdfTranslation.handleAvailabilityRequest(req, res)
+    );
+
+    this.#router.post(
+      '/api/media/:id/pdf-translation',
+      inScope(byMediaParam),
+      (req, res) => {
+        this.#handlers.pdfTranslation.handleTranslateRequest(req, res, req.params.id)
+          .catch(() => {
+            if (!res.headersSent) {
+              res.status(500).json({ error: 'Could not translate this page' });
+            }
+          });
+      }
+    );
+
     // The one sanctioned way past `MediaAccessGuard`: an administrator who can
     // also produce the download code gets a short-lived ticket for one file.
     this.#router.post('/api/media/:id/download-ticket', requireAdmin, (req, res) =>
@@ -506,7 +529,8 @@ export function getRouter(
   pathToFFmpeg?: string | null,
   transcriptionConfig?: TranscriptionConfig | null,
   logger?: Logger | null,
-  translationConfig?: TranslationConfig | null
+  translationConfig?: TranslationConfig | null,
+  pdfTranslationConfig?: PdfTranslationConfig | null
 ) {
   const transcription = createTranscriptionServices(dataDir, transcriptionConfig, pathToFFmpeg, logger);
   // After transcription, and given its index and queue: a translation reads
@@ -515,6 +539,11 @@ export function getRouter(
     dataDir, transcription.index, transcription.queue, translationConfig, logger,
     transcription.vocabulary
   );
+  // One guard, shared by the sign-in handler and by the check the router runs
+  // on every request, so that an address placed for one is placed for both.
+  // Google Translate for the PDF reader, built apart from the Gemini side
+  // above and sharing nothing with it.
+  const pdfTranslation = createPdfTranslationServices(dataDir, pdfTranslationConfig, logger);
   // One guard, shared by the sign-in handler and by the check the router runs
   // on every request, so that an address placed for one is placed for both.
   const regionGuard = new LoginRegionGuard(loginLogStore, logger);
@@ -528,6 +557,9 @@ export function getRouter(
       authStore, historyStore, quotaStore, loginLogStore, regionGuard, logger
     ),
     history: new HistoryAPIRequestHandler(db, historyStore, logger),
+    pdfTranslation: new PdfTranslationRequestHandler(
+      pdfTranslation.translator, pdfTranslation.store, logger
+    ),
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,
       transcription.index, transcription.queue, transcription.vad, transcription.settings,

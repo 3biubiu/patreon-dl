@@ -10,6 +10,7 @@ import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogE
 import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionProvider, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
+import { type PdfTranslationResponse } from '../../types/PdfTranslation';
 import {
   type FavoriteListItem,
   type RecordWatchedVideoRequest,
@@ -612,6 +613,23 @@ class API {
       body: JSON.stringify(params)
     }));
     return data.settings as TranscriptionSettings;
+  }
+
+  /**
+   * Translates the text of one PDF page. Google Translate on the server side,
+   * cached there by the text itself - nothing to do with the AI translation
+   * that subtitles go through.
+   */
+  async translatePdfPage(mediaId: string, blocks: string[], to?: string): Promise<PdfTranslationResponse> {
+    const data = await readJSON(await apiFetch(
+      `/api/media/${mediaId}/pdf-translation`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocks, to })
+      }
+    ));
+    return data as unknown as PdfTranslationResponse;
   }
 
   /**

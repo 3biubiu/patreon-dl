@@ -1,19 +1,22 @@
 import "../assets/styles/PdfViewer.scss";
 import "react-pdf/dist/Page/TextLayer.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Input, Modal, Space, Spin } from "antd";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Input, Modal, Space, Spin, Tooltip } from "antd";
 import {
   LeftOutlined,
   RightOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
   ColumnWidthOutlined,
-  DownloadOutlined
+  DownloadOutlined,
+  TranslationOutlined,
+  ProfileOutlined
 } from "@ant-design/icons";
 import { Document, Page, pdfjs } from "react-pdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
+import { extractPageBlocks, type PdfTextBlock } from "../utils/PdfText";
 
 // Bundled rather than pulled from a CDN: this is an offline browsing tool and
 // has to work with no network at all.
@@ -58,6 +61,86 @@ const WIDTH_STORAGE_KEY = 'patreon-dl.pdfViewerWidthPercent';
  * canvases in memory.
  */
 const DEFAULT_PRELOAD_PAGES = 3;
+
+/**
+ * The two ways a translation is shown, remembered separately because they are
+ * not alternatives: the overlay is for reading the page as if it were in your
+ * own language, the panel is for reading the translation as prose beside the
+ * original. Either, both, or neither.
+ */
+const IMMERSIVE_STORAGE_KEY = 'patreon-dl.pdfViewerImmersive';
+const PANEL_STORAGE_KEY = 'patreon-dl.pdfViewerTranslationPanel';
+
+/** Below this the overlay text is not worth reading; better to let it clip. */
+const MIN_OVERLAY_SCALE = 0.45;
+
+function readStoredFlag(key: string) {
+  try {
+    return window.localStorage.getItem(key) === '1';
+  }
+  catch (_error) {
+    return false;
+  }
+}
+
+function storeFlag(key: string, value: boolean) {
+  try {
+    window.localStorage.setItem(key, value ? '1' : '0');
+  }
+  catch (_error) { /* empty */ }
+}
+
+/**
+ * The rendered page, as react-pdf hands it back. Only what is needed to place
+ * an overlay on it: `originalWidth` is the page at scale 1, which is the space
+ * `extractPageBlocks` measures in.
+ */
+interface LoadedPage {
+  originalWidth: number;
+  getViewport: (params: { scale: number }) => { transform: number[]; scale: number };
+  getTextContent: () => Promise<{ items: unknown[]; styles?: Record<string, { ascent?: number }> }>;
+}
+
+interface PageTranslation {
+  blocks: PdfTextBlock[];
+  /** One per block, in step with it. `null` where Google gave nothing back. */
+  translations: (string | null)[];
+}
+
+/**
+ * Translated text laid over the original, shrunk to fit the box it replaces.
+ *
+ * Chinese is usually shorter than the English it came from but not always, and
+ * a box on a PDF page cannot grow - so the fit is done with a transform rather
+ * than by re-flowing: the text is measured once, scaled down if it overruns,
+ * and never re-wrapped, which makes the result exact instead of iterative.
+ */
+function FitText(props: { text: string; fontSize: number; deps: unknown }) {
+  const { text, fontSize, deps } = props;
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const box = el?.parentElement;
+    if (!el || !box) {
+      return;
+    }
+    el.style.transform = '';
+    const overrun = Math.max(
+      box.clientHeight > 0 ? el.scrollHeight / box.clientHeight : 1,
+      box.clientWidth > 0 ? el.scrollWidth / box.clientWidth : 1
+    );
+    if (overrun > 1) {
+      el.style.transform = `scale(${Math.max(MIN_OVERLAY_SCALE, 1 / overrun)})`;
+    }
+  }, [ text, fontSize, deps ]);
+
+  return (
+    <span ref={ref} className="pdf-viewer__overlay-text" style={{ fontSize }}>
+      {text}
+    </span>
+  );
+}
 
 const clampWidthPercent = (percent: number) =>
   Math.min(MAX_WIDTH_PERCENT, Math.max(MIN_WIDTH_PERCENT, Math.round(percent)));
@@ -127,8 +210,19 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const [ code, setCode ] = useState('');
   const [ requestingTicket, setRequestingTicket ] = useState(false);
   const [ codeError, setCodeError ] = useState<string | null>(null);
+  const [ immersive, setImmersive ] = useState(() => readStoredFlag(IMMERSIVE_STORAGE_KEY));
+  const [ panelOpen, setPanelOpen ] = useState(() => readStoredFlag(PANEL_STORAGE_KEY));
+  const [ pageTranslation, setPageTranslation ] = useState<PageTranslation | null>(null);
+  const [ translating, setTranslating ] = useState(false);
+  const [ translationError, setTranslationError ] = useState<string | null>(null);
+  const [ hoveredBlockId, setHoveredBlockId ] = useState<string | null>(null);
+  const [ loadedPage, setLoadedPage ] = useState<LoadedPage | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  // Kept for the life of one open document: turning back a page must not ask
+  // the server again, and the server's own store is a network round trip away.
+  const translationCache = useRef(new Map<number, PageTranslation>());
   const canDownload = user?.role === 'admin';
+  const translationWanted = immersive || panelOpen;
 
   // A callback ref, because the element only exists while the modal is open.
   // `ResizeObserver` reports the content box, so what comes back is the room
@@ -156,7 +250,65 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setAskingForCode(false);
     setCode('');
     setCodeError(null);
+    translationCache.current.clear();
+    setPageTranslation(null);
+    setTranslationError(null);
+    setLoadedPage(null);
   }, [target?.url]);
+
+  // The page whose text is being read is the visible one; the preloaded ones
+  // are drawn but not translated. Cleared on a page turn so an overlay from
+  // the page just left cannot be shown over the new one for a frame.
+  useEffect(() => {
+    setLoadedPage(null);
+    setHoveredBlockId(null);
+    setPageTranslation(translationCache.current.get(page) || null);
+    setTranslationError(null);
+  }, [page]);
+
+  useEffect(() => {
+    if (!target || !translationWanted || !loadedPage || pageTranslation) {
+      return;
+    }
+    const abortController = new AbortController();
+    setTranslating(true);
+    setTranslationError(null);
+    void (async () => {
+      try {
+        const blocks = await extractPageBlocks(loadedPage, page);
+        if (abortController.signal.aborted) {
+          return;
+        }
+        // A scanned page has no text layer to translate. Recorded as an empty
+        // result all the same, so it is not asked for again on every render.
+        const result: PageTranslation = blocks.length === 0 ?
+          { blocks, translations: [] } :
+          {
+            blocks,
+            translations: (await api.translatePdfPage(
+              target.mediaId, blocks.map((block) => block.text)
+            )).translations
+          };
+        if (abortController.signal.aborted) {
+          return;
+        }
+        translationCache.current.set(page, result);
+        setPageTranslation(result);
+      }
+      catch (error) {
+        if (!abortController.signal.aborted) {
+          setTranslationError(error instanceof Error ? error.message : 'Could not translate this page');
+        }
+      }
+      finally {
+        if (!abortController.signal.aborted) {
+          setTranslating(false);
+        }
+      }
+    })();
+
+    return () => abortController.abort();
+  }, [api, target, page, translationWanted, loadedPage, pageTranslation]);
 
   /**
    * Turns the code into a ticket, then navigates to the file with it.
@@ -305,6 +457,32 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           disabled={widthPercent >= MAX_WIDTH_PERCENT}
           onClick={() => changeWidth(WIDTH_STEP)}
         />
+        <Tooltip title="Overlay the translation on the page">
+          <Button
+            type={immersive ? 'primary' : 'text'}
+            size="small"
+            icon={<TranslationOutlined />}
+            aria-label="Immersive translation"
+            aria-pressed={immersive}
+            onClick={() => setImmersive((on) => {
+              storeFlag(IMMERSIVE_STORAGE_KEY, !on);
+              return !on;
+            })}
+          />
+        </Tooltip>
+        <Tooltip title="Show the translation beside the page">
+          <Button
+            type={panelOpen ? 'primary' : 'text'}
+            size="small"
+            icon={<ProfileOutlined />}
+            aria-label="Translation panel"
+            aria-pressed={panelOpen}
+            onClick={() => setPanelOpen((on) => {
+              storeFlag(PANEL_STORAGE_KEY, !on);
+              return !on;
+            })}
+          />
+        </Tooltip>
         {
           // Hiding this from everyone else is only tidiness - the route that
           // hands out the ticket is what actually refuses them.
@@ -324,6 +502,92 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       </Space>
     </div>
   );
+
+  // Blocks are measured at scale 1; the page is drawn at whatever the current
+  // width works out to. Recomputed rather than cached, because that width
+  // changes every time the dialog is resized.
+  const overlayScale = pageWidth && loadedPage?.originalWidth ?
+    pageWidth / loadedPage.originalWidth : 0;
+
+  const overlay = overlayScale > 0 && pageTranslation && (immersive || hoveredBlockId) ? (
+    <div className="pdf-viewer__layer">
+      {
+        pageTranslation.blocks.map((block, index) => {
+          const translated = pageTranslation.translations[index];
+          const highlighted = hoveredBlockId === block.id;
+          // Without a translation there is nothing to lay over the original,
+          // so the block is only ever a highlight.
+          if (!highlighted && !(immersive && translated)) {
+            return null;
+          }
+          return (
+            <div
+              key={block.id}
+              className={
+                'pdf-viewer__block' +
+                (immersive && translated ? ' pdf-viewer__block--covered' : '') +
+                (highlighted ? ' pdf-viewer__block--highlighted' : '')
+              }
+              style={{
+                left: block.x * overlayScale,
+                top: block.y * overlayScale,
+                width: block.w * overlayScale,
+                height: block.h * overlayScale
+              }}
+            >
+              {
+                immersive && translated ? (
+                  <FitText
+                    text={translated}
+                    fontSize={block.fontSize * overlayScale}
+                    deps={overlayScale}
+                  />
+                ) : null
+              }
+            </div>
+          );
+        })
+      }
+    </div>
+  ) : null;
+
+  const panel = panelOpen ? (
+    <aside className="pdf-viewer__panel">
+      <div className="pdf-viewer__panel-head">
+        <span>Translation</span>
+        {translating ? <Spin size="small" /> : null}
+      </div>
+      {
+        translationError ? (
+          <Alert type="error" showIcon title={translationError} className="m-2" />
+        ) : null
+      }
+      {
+        pageTranslation && pageTranslation.blocks.length === 0 && !translating ? (
+          <p className="pdf-viewer__panel-empty">
+            No text on this page - a scanned page has nothing to translate.
+          </p>
+        ) : null
+      }
+      <ol className="pdf-viewer__panel-list">
+        {
+          pageTranslation?.blocks.map((block, index) => (
+            <li
+              key={block.id}
+              className={
+                `pdf-viewer__panel-item${hoveredBlockId === block.id ? ' pdf-viewer__panel-item--active' : ''}`
+              }
+              // Pointing at the translation points at where it came from.
+              onMouseEnter={() => setHoveredBlockId(block.id)}
+              onMouseLeave={() => setHoveredBlockId((current) => current === block.id ? null : current)}
+            >
+              {pageTranslation.translations[index] || block.text}
+            </li>
+          ))
+        }
+      </ol>
+    </aside>
+  ) : null;
 
   const codePrompt = (
     <Modal
@@ -388,40 +652,49 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         aria-label="Drag to resize"
         onPointerDown={(e) => startResize(e, 1)}
       />
-      <div className="pdf-viewer__body" ref={setContainerRef}>
-        {
-          target ? (
-            <Document
-              file={target.url}
-              options={PDF_OPTIONS}
-              loading={<Spin size="large" />}
-              error={<div className="pdf-viewer__error">Could not open this PDF.</div>}
-              onLoadError={() => setFailed(true)}
-              onLoadSuccess={handleLoadSuccess}
-            >
-              {
-                !failed && pageWidth ? mountedPages.map((pageNumber) => (
-                  <div
-                    key={pageNumber}
-                    className="pdf-viewer__page"
-                    // The preloaded ones are drawn all the same: a canvas
-                    // renders whether or not anything is looking at it.
-                    hidden={pageNumber !== page}
-                  >
-                    <Page
-                      pageNumber={pageNumber}
-                      width={pageWidth}
-                      // Annotations can carry links off to anywhere; the text
-                      // layer is kept so the page stays selectable.
-                      renderAnnotationLayer={false}
-                      loading={pageNumber === page ? <Spin /> : <></>}
-                    />
-                  </div>
-                )) : null
-              }
-            </Document>
-          ) : null
-        }
+      <div className="pdf-viewer__body">
+        <div className="pdf-viewer__stage" ref={setContainerRef}>
+          {
+            target ? (
+              <Document
+                file={target.url}
+                options={PDF_OPTIONS}
+                loading={<Spin size="large" />}
+                error={<div className="pdf-viewer__error">Could not open this PDF.</div>}
+                onLoadError={() => setFailed(true)}
+                onLoadSuccess={handleLoadSuccess}
+              >
+                {
+                  !failed && pageWidth ? mountedPages.map((pageNumber) => (
+                    <div
+                      key={pageNumber}
+                      className="pdf-viewer__page"
+                      // The preloaded ones are drawn all the same: a canvas
+                      // renders whether or not anything is looking at it.
+                      hidden={pageNumber !== page}
+                    >
+                      <Page
+                        pageNumber={pageNumber}
+                        width={pageWidth}
+                        // Annotations can carry links off to anywhere; the text
+                        // layer is kept so the page stays selectable.
+                        renderAnnotationLayer={false}
+                        loading={pageNumber === page ? <Spin /> : <></>}
+                        onLoadSuccess={
+                          pageNumber === page ?
+                            (loaded) => setLoadedPage(loaded as unknown as LoadedPage)
+                            : undefined
+                        }
+                      />
+                      {pageNumber === page ? overlay : null}
+                    </div>
+                  )) : null
+                }
+              </Document>
+            ) : null
+          }
+        </div>
+        {panel}
       </div>
     </Modal>
     {codePrompt}

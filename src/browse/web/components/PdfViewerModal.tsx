@@ -75,11 +75,33 @@ const PANEL_STORAGE_KEY = 'patreon-dl.pdfViewerTranslationPanel';
 const MIN_OVERLAY_SCALE = 0.45;
 
 /**
- * How long the width has to hold still before the page is redrawn at it. Long
- * enough that a drag redraws once at the end rather than continuously, short
- * enough that letting go feels like it sharpened immediately.
+ * A ceiling on the width a page is rasterised at, in CSS pixels.
+ *
+ * The canvas is only ever drawn once, so this is what decides how much memory
+ * a page costs: this many pixels across, times the aspect ratio, times the
+ * device pixel ratio below, times four bytes. Past this width the text is
+ * already larger than anyone reads at, so the extra pixels would buy nothing.
  */
-const RENDER_SETTLE_MS = 150;
+const MAX_RENDER_WIDTH = 1400;
+
+/**
+ * And a ceiling on the device pixel ratio, for the same reason. A phone at 3x
+ * would otherwise draw nine times the pixels of a desktop for a page that is
+ * physically smaller.
+ */
+const MAX_DEVICE_PIXEL_RATIO = 2;
+
+/**
+ * The widest the page area can ever get: the dialog at its widest setting, and
+ * the stage is always narrower than the dialog it sits in - so a page drawn to
+ * this is never asked to be shown larger than it was drawn.
+ */
+function getMaxStageWidth() {
+  return Math.min(
+    MAX_RENDER_WIDTH,
+    Math.max(240, Math.floor((window.innerWidth || MAX_RENDER_WIDTH) * MAX_WIDTH_PERCENT / 100))
+  );
+}
 
 function readStoredFlag(key: string) {
   try {
@@ -408,51 +430,51 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const fitWidth = containerWidth > 0 ? Math.max(240, Math.floor(containerWidth)) : 0;
 
   /**
-   * The width the canvas was actually rasterised at, which lags the width the
-   * page is being shown at.
+   * The width the canvas is rasterised at, which is *not* the width it is
+   * shown at.
    *
-   * A canvas is a bitmap: re-rendering it is pdf.js redrawing every glyph, and
-   * doing that on every pixel of a drag is what made resizing expensive. So the
-   * drawn page is scaled like an image while the size is still moving - the
-   * cheap, immediate thing - and redrawn once at the end, which is what keeps
-   * the text sharp. Between the two, only the moment of settling costs
-   * anything, and a scaled-up bitmap is soft for a fraction of a second rather
-   * than the whole drag.
+   * A canvas is a bitmap, and redrawing one is pdf.js drawing every glyph
+   * again - far too slow to do while a resize is in flight. So the page is
+   * drawn once, at the widest the stage can ever be, and every width after
+   * that is a CSS scale of that bitmap. Because the drawn width is the maximum,
+   * the scale is always downwards, and scaling a bitmap down is supersampling:
+   * the more it shrinks the cleaner it gets. Nothing is ever drawn twice for a
+   * resize, and nothing is ever scaled up and soft.
+   *
+   * It only ever grows - a viewport that gets wider raises the ceiling; one
+   * that gets narrower leaves a bitmap that is simply more than is needed.
    */
-  const [ renderWidth, setRenderWidth ] = useState(0);
+  const [ renderWidth, setRenderWidth ] = useState(getMaxStageWidth);
 
   useEffect(() => {
-    if (fitWidth === 0 || fitWidth === renderWidth) {
-      return;
-    }
-    // Nothing to scale from yet: the first size is drawn at once.
-    if (renderWidth === 0) {
-      setRenderWidth(fitWidth);
-      return;
-    }
-    const timer = setTimeout(() => setRenderWidth(fitWidth), RENDER_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [fitWidth, renderWidth]);
+    const raise = () => setRenderWidth(
+      (current) => Math.max(current, getMaxStageWidth(), fitWidth)
+    );
+    raise();
+    window.addEventListener('resize', raise);
+    return () => window.removeEventListener('resize', raise);
+  }, [fitWidth]);
 
-  const pageWidth = renderWidth > 0 ? renderWidth : undefined;
-  const displayScale = renderWidth > 0 && fitWidth > 0 ? fitWidth / renderWidth : 1;
+  const pageWidth = renderWidth;
+  // Never above 1: see above. Until the stage has been measured there is
+  // nothing to scale to yet, so the page waits rather than flashing full size.
+  const displayScale = fitWidth > 0 ? Math.min(1, fitWidth / renderWidth) : 0;
 
   // The page being read, followed by the ones drawn ahead of it. Keyed by page
   // number when rendered, so turning a page keeps the ones already drawn
   // mounted and only the page that has fallen out of the window is discarded.
   //
-  // Nothing is preloaded mid-drag: every page mounted here is redrawn on each
-  // width the resize passes through, and the ones nobody is looking at can
-  // wait until the pointer is up.
+  // Unaffected by a resize: the pages are drawn at a fixed width and scaled, so
+  // there is no work here for a drag to interrupt.
   const mountedPages = useMemo(() => {
     const last = numPages > 0 ?
-      Math.min(numPages, page + (resizing ? 0 : Math.max(0, preloadPages))) : page;
+      Math.min(numPages, page + Math.max(0, preloadPages)) : page;
     const result: number[] = [];
     for (let p = page; p <= last; p++) {
       result.push(p);
     }
     return result;
-  }, [page, numPages, preloadPages, resizing]);
+  }, [page, numPages, preloadPages]);
 
   const toolbar = (
     <div className="pdf-viewer__toolbar">
@@ -710,7 +732,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                 onLoadSuccess={handleLoadSuccess}
               >
                 {
-                  !failed && pageWidth ? mountedPages.map((pageNumber) => {
+                  !failed && displayScale > 0 ? mountedPages.map((pageNumber) => {
                     const loaded = loadedPages.get(pageNumber);
                     const aspect = loaded && loaded.originalWidth > 0 ?
                       loaded.originalHeight / loaded.originalWidth : null;
@@ -721,11 +743,11 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                         // The preloaded ones are drawn all the same: a canvas
                         // renders whether or not anything is looking at it.
                         hidden={pageNumber !== page}
-                        // While the drawn width lags the shown one, the box has
-                        // to be the size the scaled page occupies - a transform
-                        // does not change layout, and without this the page
-                        // would overhang the tray until it was redrawn.
-                        style={displayScale === 1 ? undefined : {
+                        // The drawn page is wider than it is shown, and a
+                        // transform does not change layout - so the box has to
+                        // be told the size the scaled page actually occupies,
+                        // or it would reserve the full drawn width.
+                        style={{
                           width: Math.round(pageWidth * displayScale),
                           height: aspect ?
                             Math.round(pageWidth * aspect * displayScale) : undefined
@@ -733,7 +755,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                       >
                         <div
                           className="pdf-viewer__page-scale"
-                          style={displayScale === 1 ? undefined : {
+                          style={{
                             width: pageWidth,
                             transform: `scale(${displayScale})`
                           }}
@@ -741,6 +763,11 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                           <Page
                             pageNumber={pageNumber}
                             width={pageWidth}
+                            // Capped: the page is drawn once, so this is what
+                            // decides what it costs in memory.
+                            devicePixelRatio={
+                              Math.min(window.devicePixelRatio || 1, MAX_DEVICE_PIXEL_RATIO)
+                            }
                             // Annotations can carry links off to anywhere; the
                             // text layer is kept so the page stays selectable.
                             renderAnnotationLayer={false}

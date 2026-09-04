@@ -17,6 +17,7 @@ import {
   type AuthenticatedRequest
 } from './AuthGuard.js';
 import LoginRegionGuard, { clientIP } from './LoginRegionGuard.js';
+import { resolveDownloadTicket, type DownloadTicketRequest } from './DownloadTicket.js';
 import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHandler.js';
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
@@ -154,11 +155,24 @@ class _Router {
       this.#handlers.auth.handleSessionRequest(req, res)
     );
 
+    // A download ticket, resolved before the sign-in gate because the client
+    // it is meant for - a download manager the administrator handed the URL
+    // to - has no session cookie to be let through on. See `DownloadTicket`.
+    this.#router.use((req, _res, next) => {
+      const userId = resolveDownloadTicket(req, this.#authStore.secret);
+      if (userId) {
+        (req as DownloadTicketRequest).downloadTicketUserId = userId;
+      }
+      next();
+    });
+
     // Everything that serves data sits behind the sign-in. The catch-all that
     // serves index.html deliberately does not, so the login page can load.
     this.#router.use((req, res, next) => {
       const isProtected = req.path.startsWith('/api/') || req.path.startsWith('/media/');
-      if (isProtected && !(req as AuthenticatedRequest).authUser) {
+      const admitted = (req as AuthenticatedRequest).authUser ||
+        (req as DownloadTicketRequest).downloadTicketUserId;
+      if (isProtected && !admitted) {
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
@@ -456,6 +470,12 @@ class _Router {
       (res) => { res.status(404).send('Media not found'); }
     );
 
+    // The one sanctioned way past `MediaAccessGuard`: an administrator who can
+    // also produce the download code gets a short-lived ticket for one file.
+    this.#router.post('/api/media/:id/download-ticket', requireAdmin, (req, res) =>
+      this.#handlers.media.handleDownloadTicketRequest(req, res, req.params.id)
+    );
+
     // The handler applies `checkMediaAccess` itself - it has the logger, and a
     // refusal is worth a line naming the headers that caused it.
     this.#router.get('/media/:id', mediaInScope, (req, res) =>
@@ -501,7 +521,7 @@ export function getRouter(
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
-    media: new MediaRequestHandler(db, dataDir, quotaStore, logger),
+    media: new MediaRequestHandler(db, dataDir, quotaStore, authStore, logger),
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
     auth: new AuthAPIRequestHandler(

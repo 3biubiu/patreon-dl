@@ -10,6 +10,14 @@ import { checkMediaAccess, isMediaElementRequest } from '../MediaAccessGuard.js'
 import type QuotaStore from '../QuotaStore.js';
 import { consumeQuota } from '../QuotaGuard.js';
 import mime from 'mime-types';
+import type AuthStore from '../AuthStore.js';
+import { type AuthenticatedRequest } from '../AuthGuard.js';
+import {
+  checkDownloadCode,
+  issueDownloadTicket,
+  type DownloadTicketRequest
+} from '../DownloadTicket.js';
+import { clientIP } from '../LoginRegionGuard.js';
 
 const VIDEO_EXTENSIONS = [
   '.mp4', '.m4v', '.mkv', '.webm', '.mov', '.avi', '.flv', '.wmv', '.mpg', '.mpeg', '.ts', '.m2ts', '.ogv'
@@ -66,17 +74,74 @@ export default class MediaRequestHandler extends Basehandler {
   #db: DBInstance;
   #dataDir: string;
   #quotaStore: QuotaStore;
+  #authStore: AuthStore;
 
   constructor(
     db: DBInstance,
     dataDir: string,
     quotaStore: QuotaStore,
+    authStore: AuthStore,
     logger?: Logger | null
   ) {
     super(logger);
     this.#db = db;
     this.#dataDir = dataDir;
     this.#quotaStore = quotaStore;
+    // Only for the secret the download tickets are signed with. Who the
+    // requester is has already been resolved onto the request by the router.
+    this.#authStore = authStore;
+  }
+
+  /**
+   * Hands out a ticket for one file, to an administrator who can also produce
+   * the download code.
+   *
+   * Issued and verified in the same place as the media itself is served, so
+   * that the one way past `MediaAccessGuard` is readable in a single file
+   * alongside the guard it stands down.
+   */
+  handleDownloadTicketRequest(req: Request, res: Response, id: string) {
+    const user = (req as AuthenticatedRequest).authUser;
+    // The route is already behind `requireAdmin`; this is here so that moving
+    // the route cannot quietly move the permission with it.
+    if (user?.role !== 'admin') {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const { code } = (req.body || {}) as { code?: unknown };
+    if (!checkDownloadCode(code)) {
+      // Worth a line at info: a wrong code means someone with an
+      // administrator's session did not know the second half of it.
+      this.log('info',
+        `Refused a download ticket for "${id}" to user "${user.username}" ` +
+        `(${clientIP(req)}) - wrong download code`
+      );
+      res.status(403).json({ error: 'Incorrect download code' });
+      return;
+    }
+    // Videos are not handed out, and an administrator is no exception - the
+    // rule is about the file, not about who is asking. Refused here so it is
+    // said plainly, as well as at the media route, which would otherwise
+    // answer a ticket for one with a bare 403.
+    //
+    // Whether the file is there at all is that route's question, not this
+    // one's: an id that resolves to nothing still gets a ticket, and is
+    // answered with the same 404 anything else would get. That is also what
+    // keeps a linked attachment - which has no media row to look up - working
+    // without a special case, and it is never a video in any event.
+    const downloaded = this.#db.getMediaByID(id);
+    if (downloaded?.path && looksLikeVideo(downloaded.path, downloaded.mimeType)) {
+      this.log('info',
+        `Refused a download ticket for video "${id}" to user "${user.username}" (${clientIP(req)})`
+      );
+      res.status(403).json({ error: 'Videos cannot be downloaded' });
+      return;
+    }
+    const { token, expiresAt } = issueDownloadTicket(this.#authStore.secret, id, user.id);
+    this.log('info',
+      `Issued a download ticket for "${id}" to user "${user.username}" (${clientIP(req)})`
+    );
+    res.json({ token, expiresAt });
   }
 
   /**
@@ -102,10 +167,13 @@ export default class MediaRequestHandler extends Basehandler {
   }
 
   handleMediaRequest(req: Request, res: Response, id: string) {
+    // Verified by the router, which needs the answer to let a ticket-bearing
+    // request past the sign-in gate at all.
+    const ticketUserId = (req as DownloadTicketRequest).downloadTicketUserId;
     // The gate that keeps a media URL from working anywhere but inside the
     // page that served it. It lives here rather than in the route so that a
     // refusal can be logged with the headers behind it.
-    const denied = checkMediaAccess(req);
+    const denied = ticketUserId ? null : checkMediaAccess(req);
     if (denied) {
       this.log('debug',
         `Refused media request for "${id}" - ${denied} (${this.#describeFetchMetadata(req)})`
@@ -115,7 +183,9 @@ export default class MediaRequestHandler extends Basehandler {
     }
     const { t: isRequestingThumbnail } = req.query;
     const { lapid } = req.query; // Linked attachment parent post Id
-    const isDownloadRequest = req.query.dl === '1' && !isRequestingThumbnail;
+    // A ticket is only ever asked for in order to download, so it says so on
+    // its own - there is no reading of one that does not mean "save this file".
+    const isDownloadRequest = (req.query.dl === '1' || !!ticketUserId) && !isRequestingThumbnail;
     let downloaded: Downloaded | null | undefined = null;
     if (lapid) {
       const post = this.#db.getContent(lapid as string, 'post');
@@ -159,6 +229,9 @@ export default class MediaRequestHandler extends Basehandler {
     // a video. Nothing in the app hands a video out that way, which is what
     // made an appended "dl=1" the one bypass worth having: it turned every
     // media URL into a download endpoint for anyone who thought to add it.
+    // Never a video, ticket or no ticket. A ticket stands the fetch-metadata
+    // guard down; it does not make a video downloadable, and one issued for
+    // a video is refused here as well as at the point it is asked for.
     const isExcusedDownload = isDownloadRequest && !isVideo;
     // A video or audio file is there to be played. Asking for one outside a
     // player - a tab navigation, a download manager, an extension replaying
@@ -191,6 +264,15 @@ export default class MediaRequestHandler extends Basehandler {
     // The filename always comes from the file on disk - never from the request.
     if (isDownloadRequest) {
       res.setHeader('Content-Disposition', contentDisposition(path.basename(mediaFilePath)));
+    }
+    // The audit line for the one door in the wall. Logged per request rather
+    // than per file, because a download manager's parallel connections are
+    // several requests against one ticket and the count is worth seeing.
+    if (ticketUserId) {
+      this.log('info',
+        `Serving "${mediaFilePath}" against a download ticket issued to user id ` +
+        `"${ticketUserId}" (${clientIP(req)})`
+      );
     }
     const mimeType = isThumbnail ?
       resolveMimeType(mediaFilePath, downloaded.thumbnail?.mimeType) :

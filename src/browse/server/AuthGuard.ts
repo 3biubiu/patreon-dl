@@ -22,7 +22,12 @@ export interface AuthenticatedRequest extends Request {
   authUser?: AuthUser;
 }
 
-function sign(secret: string, payload: string) {
+/**
+ * Shared with the download tickets in `DownloadTicket.ts`, which are signed
+ * with the same account secret. Those payloads are prefixed with what they
+ * are, so that a signature made for one can never be read as the other.
+ */
+export function sign(secret: string, payload: string) {
   return crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 }
 

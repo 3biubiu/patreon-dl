@@ -147,7 +147,7 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
       thumbnailURL,
       badge: isPDF ? 'PDF' : undefined
     },
-    pdf: isPDF ? { url: mediaURL, filename: mi.filename || mi.id } : undefined,
+    pdf: isPDF ? { url: mediaURL, mediaId: mi.id, filename: mi.filename || mi.id } : undefined,
     video: isVideo ? {
       id: mi.id,
       src: mediaURL,

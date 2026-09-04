@@ -614,6 +614,23 @@ class API {
     return data.settings as TranscriptionSettings;
   }
 
+  /**
+   * A short-lived pass for downloading one media file, which is the only way
+   * past the guard that otherwise keeps media URLs working inside the page
+   * only. Administrators only, and the download code is checked on the server.
+   */
+  async createDownloadTicket(mediaId: string, code: string): Promise<{ token: string; expiresAt: number }> {
+    const data = await readJSON(await apiFetch(
+      `/api/media/${mediaId}/download-ticket`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code })
+      }
+    ));
+    return { token: data.token as string, expiresAt: data.expiresAt as number };
+  }
+
   async startTranscription(mediaId: string): Promise<TranscriptionRecord> {
     const data = await readJSON(await apiFetch(
       `/api/media/${mediaId}/transcribe`, { method: 'POST' }

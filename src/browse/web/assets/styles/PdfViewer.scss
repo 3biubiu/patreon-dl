@@ -107,6 +107,13 @@
     overflow: hidden;
   }
 
+  // One per mounted page - the current one and the ones drawn ahead of it.
+  // The hidden ones must take no room at all, so the flex layout of the body
+  // cannot override the attribute.
+  &__page[hidden] {
+    display: none !important;
+  }
+
   .react-pdf__Page {
     max-width: 100%;
   }

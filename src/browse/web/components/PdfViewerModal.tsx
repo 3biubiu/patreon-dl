@@ -1,16 +1,19 @@
 import "../assets/styles/PdfViewer.scss";
 import "react-pdf/dist/Page/TextLayer.css";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Modal, Space, Spin } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Input, Modal, Space, Spin } from "antd";
 import {
   LeftOutlined,
   RightOutlined,
   ZoomInOutlined,
   ZoomOutOutlined,
-  ColumnWidthOutlined
+  ColumnWidthOutlined,
+  DownloadOutlined
 } from "@ant-design/icons";
 import { Document, Page, pdfjs } from "react-pdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { useAPI } from "../contexts/APIProvider";
+import { useAuth } from "../contexts/AuthProvider";
 
 // Bundled rather than pulled from a CDN: this is an offline browsing tool and
 // has to work with no network at all.
@@ -45,6 +48,17 @@ const FALLBACK_WIDTH_PERCENT = 92;
 
 const WIDTH_STORAGE_KEY = 'patreon-dl.pdfViewerWidthPercent';
 
+/**
+ * How many pages ahead of the one being read are drawn in advance.
+ *
+ * They are mounted, hidden, at the same width as the visible page, so pdf.js
+ * has already rasterised them by the time the reader asks for one - turning a
+ * page becomes showing a canvas that exists rather than rendering one. Three
+ * covers reading at a normal pace without holding a whole document's worth of
+ * canvases in memory.
+ */
+const DEFAULT_PRELOAD_PAGES = 3;
+
 const clampWidthPercent = (percent: number) =>
   Math.min(MAX_WIDTH_PERCENT, Math.max(MIN_WIDTH_PERCENT, Math.round(percent)));
 
@@ -77,13 +91,18 @@ function storeWidthPercent(percent: number) {
 }
 
 export interface PdfViewerTarget {
+  /** What the reader loads. Carries `lapid` for a linked attachment. */
   url: string;
+  /** Named separately from the URL: it is what a download ticket is asked for. */
+  mediaId: string;
   filename: string;
 }
 
 interface PdfViewerModalProps {
   target: PdfViewerTarget | null;
   onClose: () => void;
+  /** Pages drawn ahead of the current one. See {@link DEFAULT_PRELOAD_PAGES}. */
+  preloadPages?: number;
 }
 
 /**
@@ -95,14 +114,21 @@ interface PdfViewerModalProps {
  * is ours and offers only what we want it to.
  */
 function PdfViewerModal(props: PdfViewerModalProps) {
-  const { target, onClose } = props;
+  const { target, onClose, preloadPages = DEFAULT_PRELOAD_PAGES } = props;
+  const { api } = useAPI();
+  const { user } = useAuth();
   const [ numPages, setNumPages ] = useState(0);
   const [ page, setPage ] = useState(1);
   const [ widthPercent, setWidthPercent ] = useState(readStoredWidthPercent);
   const [ containerWidth, setContainerWidth ] = useState(0);
   const [ resizing, setResizing ] = useState(false);
   const [ failed, setFailed ] = useState(false);
+  const [ askingForCode, setAskingForCode ] = useState(false);
+  const [ code, setCode ] = useState('');
+  const [ requestingTicket, setRequestingTicket ] = useState(false);
+  const [ codeError, setCodeError ] = useState<string | null>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  const canDownload = user?.role === 'admin';
 
   // A callback ref, because the element only exists while the modal is open.
   // `ResizeObserver` reports the content box, so what comes back is the room
@@ -127,7 +153,43 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setNumPages(0);
     setPage(1);
     setFailed(false);
+    setAskingForCode(false);
+    setCode('');
+    setCodeError(null);
   }, [target?.url]);
+
+  /**
+   * Turns the code into a ticket, then navigates to the file with it.
+   *
+   * A plain navigation rather than a `fetch` or an `<a download>`: the answer
+   * is a `Content-Disposition` attachment, so the browser saves it and leaves
+   * the reader open behind it - and the file is never pulled into memory on
+   * its way to disk.
+   */
+  const startDownload = useCallback(() => {
+    if (!target) {
+      return;
+    }
+    setRequestingTicket(true);
+    setCodeError(null);
+    void (async () => {
+      try {
+        const { token } = await api.createDownloadTicket(target.mediaId, code);
+        const url = new URL(target.url, window.location.origin);
+        url.searchParams.set('dl', '1');
+        url.searchParams.set('dlt', token);
+        window.location.href = url.toString();
+        setAskingForCode(false);
+        setCode('');
+      }
+      catch (error) {
+        setCodeError(error instanceof Error ? error.message : 'Could not start the download');
+      }
+      finally {
+        setRequestingTicket(false);
+      }
+    })();
+  }, [api, code, target]);
 
   const handleLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -178,6 +240,23 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   // last column of the page under the edge of the tray.
   const pageWidth = containerWidth > 0 ? Math.max(240, Math.floor(containerWidth)) : undefined;
 
+  // The page being read, followed by the ones drawn ahead of it. Keyed by page
+  // number when rendered, so turning a page keeps the ones already drawn
+  // mounted and only the page that has fallen out of the window is discarded.
+  //
+  // Nothing is preloaded mid-drag: every page mounted here is redrawn on each
+  // width the resize passes through, and the ones nobody is looking at can
+  // wait until the pointer is up.
+  const mountedPages = useMemo(() => {
+    const last = numPages > 0 ?
+      Math.min(numPages, page + (resizing ? 0 : Math.max(0, preloadPages))) : page;
+    const result: number[] = [];
+    for (let p = page; p <= last; p++) {
+      result.push(p);
+    }
+    return result;
+  }, [page, numPages, preloadPages, resizing]);
+
   const toolbar = (
     <div className="pdf-viewer__toolbar">
       <span className="pdf-viewer__filename" title={target?.filename}>
@@ -226,11 +305,66 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           disabled={widthPercent >= MAX_WIDTH_PERCENT}
           onClick={() => changeWidth(WIDTH_STEP)}
         />
+        {
+          // Hiding this from everyone else is only tidiness - the route that
+          // hands out the ticket is what actually refuses them.
+          canDownload ? (
+            <Button
+              type="text"
+              size="small"
+              icon={<DownloadOutlined />}
+              aria-label="Download"
+              onClick={() => {
+                setCodeError(null);
+                setAskingForCode(true);
+              }}
+            />
+          ) : null
+        }
       </Space>
     </div>
   );
 
+  const codePrompt = (
+    <Modal
+      open={askingForCode}
+      title="Download code"
+      okText="Download"
+      centered
+      width={360}
+      confirmLoading={requestingTicket}
+      okButtonProps={{ disabled: !code }}
+      onOk={startDownload}
+      onCancel={() => {
+        setAskingForCode(false);
+        setCode('');
+        setCodeError(null);
+      }}
+    >
+      <p className="text-body-secondary">
+        {target?.filename}
+      </p>
+      <Input.Password
+        value={code}
+        autoFocus
+        inputMode="numeric"
+        placeholder="Enter the download code"
+        onChange={(e) => {
+          setCode(e.target.value);
+          setCodeError(null);
+        }}
+        onPressEnter={() => { if (code && !requestingTicket) { startDownload(); } }}
+      />
+      {
+        codeError ? (
+          <Alert className="mt-3" type="error" showIcon title={codeError} />
+        ) : null
+      }
+    </Modal>
+  );
+
   return (
+    <>
     <Modal
       open={!!target}
       onCancel={onClose}
@@ -266,22 +400,32 @@ function PdfViewerModal(props: PdfViewerModalProps) {
               onLoadSuccess={handleLoadSuccess}
             >
               {
-                !failed && pageWidth ? (
-                  <Page
-                    pageNumber={page}
-                    width={pageWidth}
-                    // Annotations can carry links off to anywhere; the text
-                    // layer is kept so the page stays selectable.
-                    renderAnnotationLayer={false}
-                    loading={<Spin />}
-                  />
-                ) : null
+                !failed && pageWidth ? mountedPages.map((pageNumber) => (
+                  <div
+                    key={pageNumber}
+                    className="pdf-viewer__page"
+                    // The preloaded ones are drawn all the same: a canvas
+                    // renders whether or not anything is looking at it.
+                    hidden={pageNumber !== page}
+                  >
+                    <Page
+                      pageNumber={pageNumber}
+                      width={pageWidth}
+                      // Annotations can carry links off to anywhere; the text
+                      // layer is kept so the page stays selectable.
+                      renderAnnotationLayer={false}
+                      loading={pageNumber === page ? <Spin /> : <></>}
+                    />
+                  </div>
+                )) : null
               }
             </Document>
           ) : null
         }
       </div>
     </Modal>
+    {codePrompt}
+    </>
   );
 }
 

@@ -43,12 +43,12 @@ function PostCard(props: PostCardProps) {
    */
   const pdfsById = useMemo(() => {
     const result = new Map<string, PdfViewerTarget>();
-    const add = (id: string, filename: string | null, mimeType?: string | null) => {
+    const add = (id: string, filename: string | null, mimeType?: string | null, query = '') => {
       const name = filename || id;
       if (mimeType?.toLowerCase() !== 'application/pdf' && getFileExtension(name) !== 'pdf') {
         return;
       }
-      result.set(id, { url: `/media/${id}`, filename: name });
+      result.set(id, { url: `/media/${id}${query}`, mediaId: id, filename: name });
     };
     for (const att of post.attachments) {
       if (att.downloaded?.path) {
@@ -61,7 +61,11 @@ function PostCard(props: PostCardProps) {
         add(
           linked.mediaId,
           downloadable.filename || path.parse(downloadable.downloaded.path).base,
-          downloadable.downloaded.mimeType
+          downloadable.downloaded.mimeType,
+          // An attachment borrowed from another post has no media row of its
+          // own: it is stored on the post that links to it, which is the post
+          // the server names in "lapid" when it rewrites the link.
+          `?lapid=${encodeURIComponent(post.id)}`
         );
       }
     }

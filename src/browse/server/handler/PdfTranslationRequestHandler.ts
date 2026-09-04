@@ -78,6 +78,7 @@ export default class PdfTranslationRequestHandler extends Basehandler {
         }
       }
     });
+    let failedCount = 0;
     const cachedCount = blocks.length - [ ...missing.values() ].reduce((n, at) => n + at.length, 0);
 
     if (missing.size > 0) {
@@ -105,23 +106,37 @@ export default class PdfTranslationRequestHandler extends Basehandler {
         });
         return;
       }
+      // Nothing at all got through: that is worth an error, because the page
+      // is unreadable and the reason - a refused proxy, most likely - is
+      // something only the message can convey.
+      if (fetched.failed === texts.length) {
+        this.log('warn', `Could not translate a page of "${mediaId}": ${fetched.error}`);
+        res.status(502).json({ error: fetched.error || 'Translation failed' });
+        return;
+      }
       texts.forEach((text, i) => {
-        const translated = fetched[i];
+        const translated = fetched.translations[i];
         if (translated === null) {
           return;
         }
+        // Stored as it comes, so a page that half failed is half free the
+        // next time it is asked for.
         this.#store.set(mediaId, target, text, translated);
         for (const index of missing.get(text) || []) {
           translations[index] = translated;
         }
       });
+      failedCount = fetched.failed;
     }
 
     this.log('debug',
       `Translated a page of "${mediaId}" into ${target} ` +
-      `(${blocks.length} blocks, ${cachedCount} from the store)`
+      `(${blocks.length} blocks, ${cachedCount} from the store` +
+      `${failedCount > 0 ? `, ${failedCount} failed` : ''})`
     );
-    const body: PdfTranslationResponse = { translations, cached: cachedCount, to: target };
+    const body: PdfTranslationResponse = {
+      translations, cached: cachedCount, failed: failedCount, to: target
+    };
     res.json(body);
   }
 }

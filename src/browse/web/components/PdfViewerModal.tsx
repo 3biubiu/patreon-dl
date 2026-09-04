@@ -135,6 +135,8 @@ interface PageTranslation {
   blocks: PdfTextBlock[];
   /** One per block, in step with it. `null` where Google gave nothing back. */
   translations: (string | null)[];
+  /** Blocks that came back with nothing; the original is shown for those. */
+  failed: number;
 }
 
 /**
@@ -315,17 +317,16 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         }
         // A scanned page has no text layer to translate. Recorded as an empty
         // result all the same, so it is not asked for again on every render.
-        const result: PageTranslation = blocks.length === 0 ?
-          { blocks, translations: [] } :
-          {
-            blocks,
-            translations: (await api.translatePdfPage(
-              target.mediaId,
-              blocks.map((block) => block.text),
-              undefined,
-              abortController.signal
-            )).translations
-          };
+        let result: PageTranslation = { blocks, translations: [], failed: 0 };
+        if (blocks.length > 0) {
+          const response = await api.translatePdfPage(
+            target.mediaId,
+            blocks.map((block) => block.text),
+            undefined,
+            abortController.signal
+          );
+          result = { blocks, translations: response.translations, failed: response.failed };
+        }
         if (abortController.signal.aborted) {
           return;
         }
@@ -627,6 +628,14 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       {
         translationError ? (
           <Alert type="error" showIcon title={translationError} className="m-2" />
+        ) : null
+      }
+      {
+        pageTranslation && pageTranslation.failed > 0 ? (
+          <p className="pdf-viewer__panel-empty">
+            {pageTranslation.failed} of {pageTranslation.blocks.length} blocks could not be
+            translated - the original is shown for those.
+          </p>
         ) : null
       }
       {

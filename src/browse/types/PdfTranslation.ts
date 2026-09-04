@@ -24,6 +24,11 @@ export interface PdfTranslationResponse {
   translations: (string | null)[];
   /** How many came from the store rather than from Google. For the log line. */
   cached: number;
+  /**
+   * Blocks Google gave nothing back for. The page is still served - the reader
+   * shows the original for those - but it is worth saying how many.
+   */
+  failed: number;
   to: string;
 }
 

@@ -157,15 +157,15 @@ function PostCard(props: PostCardProps) {
     }[]>((result, att) => {
       if (att.downloaded?.path) {
         const title = att.filename || path.parse(att.downloaded.path).base;
-        const pdf = pdfsById.get(att.id);
         result.push({
           id: att.id,
           title,
-          // A PDF is opened for reading, so the plain media URL - what the
-          // reader loads, and what a middle-click or "open in new tab" should
-          // land on. Everything else is still a download.
-          url: pdf ? pdf.url : `/media/${att.id}?dl=1`,
-          pdf
+          // Still the download URL, PDF or not: a plain click on one of these
+          // opens the reader instead, but the href is what a middle-click, a
+          // ctrl-click or "save link as" follows - and an attachment is a file
+          // to keep, not only one to read.
+          url: `/media/${att.id}?dl=1`,
+          pdf: pdfsById.get(att.id)
         });
       }
       return result;

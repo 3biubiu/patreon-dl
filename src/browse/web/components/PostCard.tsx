@@ -3,12 +3,13 @@ import { type Downloadable, type Post } from "../../../entities";
 import { Badge, Card, Stack } from "react-bootstrap";
 import MediaGrid from "./MediaGrid";
 import path from "path";
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import MediaImage from "./MediaImage";
 import Lightbox from "./Lightbox";
 import FadeContent from "./FadeContent";
-import { getCampaignBaseUrl, getContentUrl, getFileIcon } from "../utils/Misc";
+import PdfViewerModal, { type PdfViewerTarget } from "./PdfViewerModal";
+import { getCampaignBaseUrl, getContentUrl, getFileExtension, getFileIcon } from "../utils/Misc";
 import Icon from "./Icon";
 import FavoriteButton from "./FavoriteButton";
 
@@ -31,6 +32,41 @@ function PostCard(props: PostCardProps) {
   // Set when arriving from the media gallery, so the file that was clicked
   // there can be pointed out on this page.
   const highlightMediaId = searchParams.get('media');
+  const [pdfTarget, setPdfTarget] = useState<PdfViewerTarget | null>(null);
+
+  /**
+   * Every PDF this post can link to, by media id: its own attachments plus the
+   * ones linked from other posts, which the server rewrites to `/media/...`
+   * in the body. Read by both the attachment list and the body click handler,
+   * so a PDF opens in the same reader the media gallery uses wherever it is
+   * clicked, rather than being handed to the browser as a download.
+   */
+  const pdfsById = useMemo(() => {
+    const result = new Map<string, PdfViewerTarget>();
+    const add = (id: string, filename: string | null, mimeType?: string | null) => {
+      const name = filename || id;
+      if (mimeType?.toLowerCase() !== 'application/pdf' && getFileExtension(name) !== 'pdf') {
+        return;
+      }
+      result.set(id, { url: `/media/${id}`, filename: name });
+    };
+    for (const att of post.attachments) {
+      if (att.downloaded?.path) {
+        add(att.id, att.filename || path.parse(att.downloaded.path).base, att.downloaded.mimeType);
+      }
+    }
+    for (const linked of post.linkedAttachments || []) {
+      const downloadable = linked.downloadable;
+      if (downloadable?.downloaded?.path) {
+        add(
+          linked.mediaId,
+          downloadable.filename || path.parse(downloadable.downloaded.path).base,
+          downloadable.downloaded.mimeType
+        );
+      }
+    }
+    return result;
+  }, [post]);
 
   // Post content is injected as raw HTML, so links rewritten by the server to
   // point at locally-stored content are plain anchors and would otherwise
@@ -44,7 +80,18 @@ function PostCard(props: PostCardProps) {
     // Site-relative page links only. Media endpoints must stay real requests
     // so the browser can stream or download them, and protocol-relative URLs
     // ("//host/path") point off-site despite starting with a slash.
-    if (!href.startsWith('/') || href.startsWith('//') || href.startsWith('/media/')) {
+    if (!href.startsWith('/') || href.startsWith('//')) {
+      return;
+    }
+    if (href.startsWith('/media/')) {
+      // ...except a PDF, which is read in the page like it is in the gallery.
+      const target = pdfsById.get(
+        new URL(href, window.location.origin).pathname.slice('/media/'.length)
+      );
+      if (target) {
+        e.preventDefault();
+        setPdfTarget(target);
+      }
       return;
     }
     if (anchor?.target && anchor.target !== '_self') {
@@ -52,7 +99,7 @@ function PostCard(props: PostCardProps) {
     }
     e.preventDefault();
     void navigate(href);
-  }, [navigate]);
+  }, [navigate, pdfsById]);
 
   useEffect(() => {
     if (!highlightMediaId) {
@@ -105,13 +152,20 @@ function PostCard(props: PostCardProps) {
   }, [post, showsExternalEmbed]);
 
   const attachments = useMemo(() => {
-    const links = post.attachments.reduce<{id: string; title: string; url: string}[]>((result, att) => {
+    const links = post.attachments.reduce<{
+      id: string; title: string; url: string; pdf?: PdfViewerTarget
+    }[]>((result, att) => {
       if (att.downloaded?.path) {
         const title = att.filename || path.parse(att.downloaded.path).base;
+        const pdf = pdfsById.get(att.id);
         result.push({
           id: att.id,
           title,
-          url: `/media/${att.id}?dl=1`
+          // A PDF is opened for reading, so the plain media URL - what the
+          // reader loads, and what a middle-click or "open in new tab" should
+          // land on. Everything else is still a download.
+          url: pdf ? pdf.url : `/media/${att.id}?dl=1`,
+          pdf
         });
       }
       return result;
@@ -122,14 +176,27 @@ function PostCard(props: PostCardProps) {
           <p className="post-card__attachments-heading">Attachments:</p>
           <ul className="post-card__attachment-list">
             {
-              links.map(({id, title, url}) => (
+              links.map(({id, title, url, pdf}) => (
                 <li
                   key={id}
                   data-media-id={id}
                   className={`post-card__attachment ${id === highlightMediaId ? 'post-card__attachment--highlighted' : ''}`}
                 >
                   <Icon name={getFileIcon(title)} outlined className="post-card__attachment-icon" />
-                  <a href={url}>{title}</a>
+                  <a
+                    href={url}
+                    onClick={pdf ? (e) => {
+                      // Modified clicks are left to the browser, so the file
+                      // can still be opened in a tab of its own.
+                      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+                        return;
+                      }
+                      e.preventDefault();
+                      setPdfTarget(pdf);
+                    } : undefined}
+                  >
+                    {title}
+                  </a>
                 </li>
               ))
             }
@@ -137,7 +204,7 @@ function PostCard(props: PostCardProps) {
         </div>
       )
     }
-  }, [post, highlightMediaId]);
+  }, [post, highlightMediaId, pdfsById]);
 
   // Videos and embeds often have no downloaded poster of their own, because
   // Patreon only supplies one when the post has a cover image. Reuse the post's
@@ -328,10 +395,21 @@ function PostCard(props: PostCardProps) {
     </Card>
   );
 
+  // Rendered alongside the card either way: a post can carry a PDF with
+  // nothing else to put in a gallery.
+  const pdfViewer = (
+    <PdfViewerModal target={pdfTarget} onClose={() => setPdfTarget(null)} />
+  );
+
   if (!hasGallery) {
-    return contents;
+    return (
+      <>
+        {contents}
+        {pdfViewer}
+      </>
+    );
   }
-  
+
   return (
     // The post body can carry lightbox tiles of its own, so the key covers the
     // content as well as the attachments.
@@ -340,6 +418,7 @@ function PostCard(props: PostCardProps) {
       videojs
     >
       {contents}
+      {pdfViewer}
     </Lightbox>
   )
 }

@@ -29,23 +29,94 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    // Tall pages and zoomed-in ones scroll inside the dialog rather than
-    // pushing it past the viewport.
+    // Tall pages scroll inside the dialog rather than pushing it past the
+    // viewport. Sideways they never do: the page is drawn to the width this
+    // box has, so there is nothing to scroll to.
     max-height: 78vh;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
+    // Reserved up front, so the page is not re-rendered a second time at a
+    // narrower width the moment a long document brings the scrollbar in.
+    scrollbar-gutter: stable;
     padding: 1rem;
     background-color: var(--bs-tertiary-bg);
     border-radius: var(--bs-border-radius);
     scrollbar-width: thin;
   }
 
-  &__error {
-    padding: 3rem 1rem;
-    color: var(--bs-secondary-color);
+  // Grabbable strips down either side of the dialog. Placed against the
+  // content box rather than the body, so they run its full height.
+  &__resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 10px;
+    cursor: ew-resize;
+    touch-action: none;
+    // Above the body, below the close button in the corner.
+    z-index: 1;
+
+    &::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      left: 3px;
+      width: 4px;
+      height: 2.5rem;
+      border-radius: 2px;
+      background-color: var(--bs-secondary-color);
+      opacity: 0;
+      transition: opacity 0.15s ease-in-out;
+    }
+
+    &:hover::after {
+      opacity: 0.5;
+    }
+
+    &--left {
+      left: 0;
+    }
+
+    &--right {
+      right: 0;
+    }
+  }
+
+  &--resizing {
+    // A drag that leaves the handle should not select the page text it
+    // crosses, and the pointer should keep saying what it is doing.
+    cursor: ew-resize;
+    user-select: none;
+
+    .pdf-viewer__resize-handle::after {
+      opacity: 0.5;
+    }
+  }
+
+  .ant-modal-body {
+    // The handles live in here but are placed against the content box, so
+    // they run the full height of the dialog rather than the body's.
+    position: static;
+  }
+
+  .ant-modal-content {
+    position: relative;
+    // The dialog is only ever as wide as the viewport allows, and everything
+    // in it is laid out to that width.
+    overflow: hidden;
+  }
+
+  .react-pdf__Page {
+    max-width: 100%;
   }
 
   .react-pdf__Page__canvas {
     // Keeps the page readable against the tray behind it.
     box-shadow: 0 2px 12px rgb(0 0 0 / 25%);
+    // A belt-and-braces guard for the moment between a resize and the page
+    // being re-rendered at the new width.
+    max-width: 100%;
+    height: auto !important;
   }
 }

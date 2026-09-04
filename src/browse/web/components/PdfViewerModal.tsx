@@ -314,6 +314,9 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     observerRef.current?.disconnect();
     observerRef.current = null;
     if (!node) {
+      // The stage has gone with the dialog. Its last width belonged to it, and
+      // the pages must wait to be measured against whatever replaces it.
+      setContainerWidth(0);
       return;
     }
     const observer = new ResizeObserver((entries) => {
@@ -829,6 +832,12 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       // so the dialog itself can never push the page sideways either.
       width={`min(${widthPercent}vw, calc(100vw - 2rem))`}
       rootClassName={`pdf-viewer ${resizing ? 'pdf-viewer--resizing' : ''}`}
+      // Closing throws the reader away rather than hiding it. Left mounted,
+      // the stage keeps an observer on a box that is display:none and the
+      // document keeps a worker that has been torn down under it - and the
+      // next open inherits both. Reopening costs a re-read of the file, which
+      // is a few byte ranges out of the browser cache.
+      destroyOnHidden
       title={toolbar}
     >
       <div
@@ -848,6 +857,9 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           {
             target ? (
               <Document
+                // Keyed so that opening the reader again is a new load rather
+                // than a component being reused across a close.
+                key={target.url}
                 file={target.url}
                 options={PDF_OPTIONS}
                 loading={<Spin size="large" />}

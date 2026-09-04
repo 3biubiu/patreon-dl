@@ -48,7 +48,7 @@ function PostCard(props: PostCardProps) {
       if (mimeType?.toLowerCase() !== 'application/pdf' && getFileExtension(name) !== 'pdf') {
         return;
       }
-      result.set(id, { url: `/media/${id}${query}`, mediaId: id, filename: name });
+      result.set(id, { url: `/media/${id}${query}`, mediaId: id, filename: name, postId: post.id });
     };
     for (const att of post.attachments) {
       if (att.downloaded?.path) {

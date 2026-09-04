@@ -13,6 +13,23 @@ export interface WatchedVideo {
   watchedAt: string;
 }
 
+/**
+ * A PDF the user has read, and the page they had got to.
+ *
+ * The reading equivalent of {@link WatchedVideo}: what it exists for is to
+ * open the file where it was left rather than at page one. `numPages` is kept
+ * so a stored page can be sanity-checked against a file that has since been
+ * replaced by a shorter one.
+ */
+export interface ReadPdf {
+  mediaId: string;
+  /** The post the PDF was opened from, when it was opened from one. */
+  postId: string | null;
+  page: number;
+  numPages: number | null;
+  readAt: string;
+}
+
 export interface ViewedPost {
   postId: string;
   viewedAt: string;
@@ -46,6 +63,14 @@ export interface WatchedVideoListItem extends WatchedVideo {
   campaignName: string | null;
 }
 
+export interface ReadPdfListItem extends ReadPdf {
+  /** The post or product the file belongs to, when it is still there. */
+  contentId: string | null;
+  contentType: 'post' | 'product' | null;
+  title: string | null;
+  campaignName: string | null;
+}
+
 export interface ViewedPostListItem extends ViewedPost {
   title: string | null;
   campaignName: string | null;
@@ -63,5 +88,11 @@ export interface FavoriteListItem extends Favorite {
 export interface RecordWatchedVideoRequest {
   position: number;
   duration?: number | null;
+  postId?: string | null;
+}
+
+export interface RecordReadPdfRequest {
+  page: number;
+  numPages?: number | null;
   postId?: string | null;
 }

@@ -18,6 +18,8 @@ import {
 } from '../../types/PdfTranslation';
 import {
   type FavoriteListItem,
+  type ReadPdf,
+  type ReadPdfListItem,
   type RecordWatchedVideoRequest,
   type ViewedPostListItem,
   type WatchedVideo,
@@ -655,6 +657,28 @@ class API {
       }
     ));
     return data as unknown as PdfTranslationResponse;
+  }
+
+  /** Where this reader left a PDF, or `null` for one never opened. */
+  async getReadPdf(mediaId: string): Promise<ReadPdf | null> {
+    const data = await readJSON(await apiFetch(`/api/history/pdfs/${mediaId}`));
+    return (data.pdf as ReadPdf | null) ?? null;
+  }
+
+  async recordReadPdf(
+    mediaId: string, page: number, numPages?: number | null, postId?: string | null
+  ): Promise<void> {
+    await readJSON(await apiFetch(`/api/history/pdfs/${mediaId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page, numPages, postId })
+    }));
+  }
+
+  async listReadPdfs(userId?: string): Promise<ReadPdfListItem[]> {
+    const query = userId ? `?user_id=${encodeURIComponent(userId)}` : '';
+    const data = await readJSON(await apiFetch(`/api/history/pdfs${query}`));
+    return data.pdfs as ReadPdfListItem[];
   }
 
   async getPdfTranslationSettings(): Promise<PdfTranslationSettings> {

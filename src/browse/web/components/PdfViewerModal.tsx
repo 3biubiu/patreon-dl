@@ -105,6 +105,14 @@ const PANEL_STORAGE_KEY = 'patreon-dl.pdfViewerTranslationPanel';
  */
 const BLOCKS_PER_REQUEST = 12;
 
+/**
+ * How long the reader has to stay on a page before it is remembered.
+ *
+ * Paging through to find something should not leave a trail of positions - the
+ * one worth keeping is the page still on screen when the flipping stops.
+ */
+const RECORD_PAGE_AFTER_MS = 1200;
+
 /** Below this the overlay text is not worth reading; better to let it clip. */
 const MIN_OVERLAY_SCALE = 0.45;
 
@@ -255,6 +263,14 @@ export interface PdfViewerTarget {
   /** Named separately from the URL: it is what a download ticket is asked for. */
   mediaId: string;
   filename: string;
+  /**
+   * The post it was opened from, when it was opened from one.
+   *
+   * Recorded with the reading position for the same reason the video history
+   * records it: an attachment linked from another post has no row of its own
+   * tying it to a creator, and the post is the only thing that names it.
+   */
+  postId?: string | null;
 }
 
 interface PdfViewerModalProps {
@@ -303,6 +319,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const translationCache = useRef(new Map<number, PageTranslation>());
   /** The page a request is already out for, so it is not asked for twice. */
   const requestedKey = useRef<string | null>(null);
+  /** The file whose stored page has been applied, so it is applied once. */
+  const resumedFile = useRef<string | null>(null);
   const canDownload = user?.role === 'admin';
   const translationWanted = immersive || panelOpen;
 
@@ -337,6 +355,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setCodeError(null);
     translationCache.current.clear();
     requestedKey.current = null;
+    resumedFile.current = null;
     setPageTranslation(null);
     setTranslationError(null);
     setLoadedPages(new Map());
@@ -483,6 +502,47 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       }
     })();
   }, [api, code, target]);
+
+  // Opens the file where it was left. Once per file, and only once the page
+  // count is known - a stored page from a file that has since been replaced by
+  // a shorter one must not open past the end of it.
+  useEffect(() => {
+    if (!target || numPages === 0 || resumedFile.current === target.mediaId) {
+      return;
+    }
+    resumedFile.current = target.mediaId;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stored = await api.getReadPdf(target.mediaId);
+        if (cancelled || !stored) {
+          return;
+        }
+        const resumeAt = Math.min(Math.max(1, stored.page), numPages);
+        if (resumeAt > 1) {
+          setPage(resumeAt);
+        }
+      }
+      catch (_error) {
+        // Opening at page one is a perfectly good outcome; a history that
+        // could not be read is not worth telling the reader about.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [api, target, numPages]);
+
+  // And remembers where they got to. Debounced, so paging through a document
+  // writes one entry rather than one per page.
+  useEffect(() => {
+    if (!target || numPages === 0) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      void api.recordReadPdf(target.mediaId, page, numPages, target.postId)
+        .catch(() => undefined);
+    }, RECORD_PAGE_AFTER_MS);
+    return () => clearTimeout(timer);
+  }, [api, target, page, numPages]);
 
   const handleLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages);

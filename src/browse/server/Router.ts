@@ -265,6 +265,19 @@ class _Router {
       this.#handlers.history.handleRecordVideoRequest(req, res, req.params.id)
     );
 
+    // The same three for PDFs, so the reader can open a file where it was left.
+    this.#router.get('/api/history/pdfs', (req, res) =>
+      this.#handlers.history.handleListPdfsRequest(req, res)
+    );
+
+    this.#router.get('/api/history/pdfs/:id', inScope(byMediaParam), (req, res) =>
+      this.#handlers.history.handleGetPdfRequest(req, res, req.params.id)
+    );
+
+    this.#router.put('/api/history/pdfs/:id', inScope(byMediaParam), (req, res) =>
+      this.#handlers.history.handleRecordPdfRequest(req, res, req.params.id)
+    );
+
     this.#router.put('/api/history/posts/:id', inScope(byContentParam('post')), (req, res) =>
       this.#handlers.history.handleRecordPostRequest(req, res, req.params.id)
     );

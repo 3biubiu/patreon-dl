@@ -8,6 +8,8 @@ import { canSeeCampaign } from '../CampaignAccessGuard.js';
 import {
   MAX_FAVORITES,
   type FavoriteListItem,
+  type ReadPdf,
+  type ReadPdfListItem,
   type ViewedPostListItem,
   type WatchedVideo,
   type WatchedVideoListItem
@@ -27,6 +29,14 @@ function readSeconds(value: unknown): number | null {
 
 function readOptionalId(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
+}
+
+/** A page number the browser sent. Whole, and at least one. */
+function readPage(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    return null;
+  }
+  return value;
 }
 
 export default class HistoryAPIRequestHandler extends Basehandler {
@@ -119,6 +129,86 @@ export default class HistoryAPIRequestHandler extends Basehandler {
       position,
       duration: readSeconds(body.duration),
       watchedAt: new Date().toISOString()
+    });
+    res.json({ ok: true });
+  }
+
+  handleListPdfsRequest(req: Request, res: Response) {
+    const userId = this.#targetUserId(req, res);
+    if (!userId) {
+      return;
+    }
+    const pdfs: ReadPdfListItem[] = this.#store.listPdfs(userId)
+      // History outlives a permission change, so what may be seen now is
+      // decided now rather than when the entry was written.
+      .filter((pdf) => canSeeCampaign(req, pdf.campaignId))
+      .map(({ mediaId, postId, page, numPages, readAt }) => {
+        // A linked attachment has no row of its own tying it to a post, so the
+        // post it was opened from is the only thing that names it.
+        const owner = postId ?
+          { contentId: postId, contentType: 'post' as const } :
+          this.#db.getContentMediaOwner(mediaId);
+        const summary = owner ?
+          this.#db.getContentSummary(owner.contentId, owner.contentType) : null;
+        return {
+          mediaId,
+          postId,
+          page,
+          numPages,
+          readAt,
+          contentId: owner?.contentId || null,
+          contentType: owner?.contentType || null,
+          title: summary?.title || null,
+          campaignName: summary?.campaignName || null
+        };
+      });
+    res.json({ pdfs });
+  }
+
+  /**
+   * Where this reader left one PDF. Answered with `null` rather than a 404 for
+   * a file never opened - the reader asks on every open, and "page one" is not
+   * an error.
+   */
+  handleGetPdfRequest(req: Request, res: Response, mediaId: string) {
+    const userId = this.#userId(req, res);
+    if (!userId) {
+      return;
+    }
+    const stored = this.#store.getPdf(userId, mediaId);
+    if (!stored || !canSeeCampaign(req, stored.campaignId)) {
+      res.json({ pdf: null });
+      return;
+    }
+    const { postId, page, numPages, readAt } = stored;
+    res.json({ pdf: { mediaId, postId, page, numPages, readAt } satisfies ReadPdf });
+  }
+
+  handleRecordPdfRequest(req: Request, res: Response, mediaId: string) {
+    const userId = this.#userId(req, res);
+    if (!userId) {
+      return;
+    }
+    const body = (req.body || {}) as Record<string, unknown>;
+    const page = readPage(body.page);
+    if (page === null) {
+      res.status(400).json({ error: '"page" must be a page number' });
+      return;
+    }
+    const postId = readOptionalId(body.postId);
+    // Resolved here rather than taken from the request: which creator a file
+    // belongs to decides who may later be told about it, and that is not the
+    // browser's to assert.
+    const campaignId = postId ?
+      this.#db.getCampaignIdForContent(postId, 'post') :
+      this.#db.getCampaignIdForMedia(mediaId);
+    this.#store.recordPdf(userId, {
+      mediaId,
+      campaignId,
+      postId,
+      page,
+      numPages: readPage(body.numPages),
+      readAt: new Date().toISOString()
     });
     res.json({ ok: true });
   }

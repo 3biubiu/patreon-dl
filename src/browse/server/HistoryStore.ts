@@ -26,6 +26,16 @@ interface StoredVideo {
   watchedAt: string;
 }
 
+/** The reading equivalent of {@link StoredVideo}. */
+interface StoredPdf {
+  mediaId: string;
+  campaignId: string | null;
+  postId: string | null;
+  page: number;
+  numPages: number | null;
+  readAt: string;
+}
+
 interface StoredPost {
   postId: string;
   campaignId: string | null;
@@ -47,6 +57,8 @@ interface UserHistory {
   posts: StoredPost[];
   /** Written before favorites existed, so this can be absent on load. */
   favorites?: StoredFavorite[];
+  /** Written before PDFs were remembered, so this can be absent too. */
+  pdfs?: StoredPdf[];
 }
 
 interface HistoryFile {
@@ -55,7 +67,7 @@ interface HistoryFile {
 }
 
 function emptyUserHistory(): UserHistory {
-  return { videos: [], posts: [], favorites: [] };
+  return { videos: [], posts: [], favorites: [], pdfs: [] };
 }
 
 /**
@@ -116,6 +128,30 @@ export default class HistoryStore {
    */
   getVideo(userId: string, mediaId: string): StoredVideo | null {
     return this.listVideos(userId).find((video) => video.mediaId === mediaId) || null;
+  }
+
+  /** Most recently read first. */
+  listPdfs(userId: string): StoredPdf[] {
+    return this.#data.users[userId]?.pdfs || [];
+  }
+
+  /**
+   * Where one PDF was left, or `null` when it is not among the entries kept -
+   * the same answer as never having opened it, which is what makes a file that
+   * has aged out open at page one again.
+   */
+  getPdf(userId: string, mediaId: string): StoredPdf | null {
+    return this.listPdfs(userId).find((pdf) => pdf.mediaId === mediaId) || null;
+  }
+
+  recordPdf(userId: string, entry: StoredPdf) {
+    const history = this.#userHistory(userId);
+    history.pdfs = HistoryStore.#promote(
+      history.pdfs || [],
+      entry,
+      (pdf) => pdf.mediaId === entry.mediaId
+    );
+    this.#save();
   }
 
   /** Most recently viewed first. */

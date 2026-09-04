@@ -73,6 +73,16 @@ const DEFAULT_PRELOAD_PAGES = 3;
 const IMMERSIVE_STORAGE_KEY = 'patreon-dl.pdfViewerImmersive';
 const PANEL_STORAGE_KEY = 'patreon-dl.pdfViewerTranslationPanel';
 
+/**
+ * Blocks per request to the server.
+ *
+ * Small on purpose. A whole page in one request is a request that can run for
+ * tens of seconds, and anything in front of this server - a reverse proxy, a
+ * tunnel - has its own idea of how long it will wait before answering with its
+ * own error page. A dozen blocks is a second or two, which nothing gives up on.
+ */
+const BLOCKS_PER_REQUEST = 12;
+
 /** Below this the overlay text is not worth reading; better to let it clip. */
 const MIN_OVERLAY_SCALE = 0.45;
 
@@ -259,6 +269,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   // Kept for the life of one open document: turning back a page must not ask
   // the server again, and the server's own store is a network round trip away.
   const translationCache = useRef(new Map<number, PageTranslation>());
+  /** The page a request is already out for, so it is not asked for twice. */
+  const requestedKey = useRef<string | null>(null);
   const canDownload = user?.role === 'admin';
   const translationWanted = immersive || panelOpen;
 
@@ -289,6 +301,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setCode('');
     setCodeError(null);
     translationCache.current.clear();
+    requestedKey.current = null;
     setPageTranslation(null);
     setTranslationError(null);
     setLoadedPages(new Map());
@@ -306,12 +319,20 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const loadedPage = loadedPages.get(page) || null;
 
   useEffect(() => {
-    if (!target || !translationWanted || !loadedPage || pageTranslation) {
+    if (!target || !translationWanted || !loadedPage) {
       return;
     }
+    const key = `${target.mediaId}:${page}`;
+    // Guarded by a ref rather than by the state this sets, so that filling the
+    // page in batch by batch does not re-run the effect and abort itself.
+    if (translationCache.current.has(page) || requestedKey.current === key) {
+      return;
+    }
+    requestedKey.current = key;
     const abortController = new AbortController();
     setTranslating(true);
     setTranslationError(null);
+
     void (async () => {
       try {
         const blocks = await extractPageBlocks(loadedPage, page);
@@ -320,21 +341,38 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         }
         // A scanned page has no text layer to translate. Recorded as an empty
         // result all the same, so it is not asked for again on every render.
-        let result: PageTranslation = { blocks, translations: [], failed: 0 };
-        if (blocks.length > 0) {
+        let result: PageTranslation = { blocks, translations: blocks.map(() => null), failed: 0 };
+        if (blocks.length === 0) {
+          translationCache.current.set(page, result);
+          setPageTranslation(result);
+          return;
+        }
+        // Asked for a handful of blocks at a time rather than a page at a
+        // time. A whole page can take long enough for a reverse proxy to give
+        // up on the request and answer with its own error page instead - and
+        // a short request cannot. The translation also appears as it arrives
+        // rather than all at the end, which is the better way round anyway.
+        for (let start = 0; start < blocks.length; start += BLOCKS_PER_REQUEST) {
+          const slice = blocks.slice(start, start + BLOCKS_PER_REQUEST);
           const response = await api.translatePdfPage(
             target.mediaId,
-            blocks.map((block) => block.text),
+            slice.map((block) => block.text),
             undefined,
             abortController.signal
           );
-          result = { blocks, translations: response.translations, failed: response.failed };
+          if (abortController.signal.aborted) {
+            return;
+          }
+          const translations = [ ...result.translations ];
+          response.translations.forEach((text, index) => {
+            translations[start + index] = text;
+          });
+          result = { blocks, translations, failed: result.failed + response.failed };
+          // Kept as it goes, so turning the page away and back keeps whatever
+          // had arrived by then.
+          translationCache.current.set(page, result);
+          setPageTranslation(result);
         }
-        if (abortController.signal.aborted) {
-          return;
-        }
-        translationCache.current.set(page, result);
-        setPageTranslation(result);
       }
       catch (error) {
         if (!abortController.signal.aborted) {
@@ -348,8 +386,14 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       }
     })();
 
-    return () => abortController.abort();
-  }, [api, target, page, translationWanted, loadedPage, pageTranslation]);
+    return () => {
+      abortController.abort();
+      // Nothing was finished, so the next render is free to ask again.
+      if (requestedKey.current === key && !translationCache.current.has(page)) {
+        requestedKey.current = null;
+      }
+    };
+  }, [api, target, page, translationWanted, loadedPage]);
 
   /**
    * Turns the code into a ticket, then navigates to the file with it.
@@ -828,6 +872,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       // the old one is dropped and the page asked for again.
       onSaved={() => {
         translationCache.current.clear();
+        requestedKey.current = null;
         setPageTranslation(null);
         setTranslationError(null);
       }}

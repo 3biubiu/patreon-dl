@@ -18,20 +18,21 @@ import { commonLog } from '../../../utils/logging/Logger.js';
 const MAX_CHARS_PER_REQUEST = 3000;
 const MAX_BLOCKS_PER_REQUEST = 40;
 
-/** Long enough for a slow proxy, short enough not to hold a page open. */
-const REQUEST_TIMEOUT_MS = 15_000;
+/** Long enough for a slow proxy, short enough not to hold a request open. */
+const REQUEST_TIMEOUT_MS = 8_000;
 
 /**
- * The whole of what one page may take, retries and all.
+ * The whole of what one request may take, retries and all.
  *
  * There is usually a reverse proxy in front of this, and its patience is the
  * real limit: answer later than that and the reader gets the gateway's own
- * error page instead of anything this server said. So the budget is spent
- * rather than exceeded - when it runs out, whatever has been translated is
- * returned and the rest comes back as failures, which the reader already knows
- * how to show.
+ * error page instead of anything this server said. The reader already asks for
+ * a dozen blocks at a time so that a request is normally a second or two; this
+ * is the ceiling for when it is not. When it runs out, whatever has been
+ * translated is returned and the rest comes back as failures, which the reader
+ * knows how to show.
  */
-const PAGE_BUDGET_MS = 20_000;
+const PAGE_BUDGET_MS = 10_000;
 
 /**
  * Attempts per chunk, for the failures a second attempt could survive: a

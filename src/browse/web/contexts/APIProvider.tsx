@@ -68,7 +68,21 @@ async function apiFetch(input: string, init?: RequestInit) {
 }
 
 async function readJSON(response: Response) {
-  const data = await response.json() as { error?: string } & Record<string, any>;
+  const body = await response.text();
+  let data: ({ error?: string } & Record<string, any>) | null;
+  try {
+    data = JSON.parse(body) as { error?: string } & Record<string, any>;
+  }
+  catch (_error) {
+    // Every route here answers JSON, so anything else was written by something
+    // in between - a reverse proxy's own error page, most of the time. Said
+    // plainly, because "Unexpected token '<'" sends people looking at the
+    // application for a fault that is in front of it.
+    throw Error(
+      `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''} ` +
+      `- the reply did not come from the app itself`
+    );
+  }
   if (!response.ok) {
     throw Error(data?.error || 'Request failed');
   }

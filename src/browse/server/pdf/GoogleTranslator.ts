@@ -33,7 +33,19 @@ const MAX_CHARS_PER_REQUEST = 3000;
 const MAX_BLOCKS_PER_REQUEST = 40;
 
 /** Long enough for a slow proxy, short enough not to hold a page open. */
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * The whole of what one page may take, retries and all.
+ *
+ * There is a reverse proxy in front of this in most deployments, and its
+ * patience is the real limit: answer later than that and the reader gets the
+ * gateway's own HTML error page instead of anything this server said. So the
+ * budget is spent rather than exceeded - when it runs out, whatever has been
+ * translated is returned and the rest comes back as failures, which the reader
+ * already knows how to show.
+ */
+const PAGE_BUDGET_MS = 20_000;
 
 /**
  * Attempts per chunk, for the failures a second attempt could survive: a
@@ -206,6 +218,7 @@ export default class GoogleTranslator {
     const dispatcher = dispatcherFor(settings.proxyUrl, this.#logger);
     const via = settings.proxyUrl ? ` through ${settings.proxyUrl}` : ' directly';
     const batches = chunk(pending);
+    const deadline = Date.now() + PAGE_BUDGET_MS;
     let failed = 0;
     let error: string | null = null;
 
@@ -213,16 +226,27 @@ export default class GoogleTranslator {
       if (signal?.aborted) {
         throw new GoogleTranslationError('Translation was cancelled');
       }
-      if (batchIndex > 0) {
-        await delay(CHUNK_GAP_MS, signal);
-      }
       const batch = batches[batchIndex];
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        // Out of time. The rest of the page is reported as failed rather than
+        // kept waiting on, so the answer arrives before the gateway gives up.
+        failed += batch.length;
+        error = error || 'Translation took too long and was cut short';
+        this.log('warn', `Ran out of time on a page${via} with ${batches.length - batchIndex} chunk(s) to go`);
+        continue;
+      }
+      if (batchIndex > 0) {
+        await delay(Math.min(CHUNK_GAP_MS, remaining), signal);
+      }
       let responses: Awaited<ReturnType<typeof translate<string[]>>> | null = null;
 
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         // Its own timeout, so one wedged batch does not hold the whole page,
         // and still cancelled by the caller's signal.
-        const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+        const timeout = AbortSignal.timeout(
+          Math.max(1000, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()))
+        );
         const batchSignal = signal ? AbortSignal.any([ signal, timeout ]) : timeout;
         try {
           responses = await translate(batch.map((entry) => entry.t), {
@@ -247,14 +271,17 @@ export default class GoogleTranslator {
           }
           const failure = describeFailure(thrown);
           error = `Could not reach Google Translate${via}: ${failure.message}`;
-          if (!failure.retryable || attempt === MAX_ATTEMPTS) {
+          const backoff = RETRY_BACKOFF_MS[attempt - 1] ?? RETRY_BACKOFF_MS.at(-1)!;
+          // No point starting an attempt there is no time left to finish.
+          const outOfTime = Date.now() + backoff >= deadline;
+          if (!failure.retryable || attempt === MAX_ATTEMPTS || outOfTime) {
             this.log('warn',
               `Giving up on a batch after ${attempt} attempt(s)${via}: ${failure.message}`);
             break;
           }
           this.log('debug',
             `Retrying a batch (attempt ${attempt} of ${MAX_ATTEMPTS})${via}: ${failure.message}`);
-          await delay(RETRY_BACKOFF_MS[attempt - 1] ?? RETRY_BACKOFF_MS.at(-1)!, signal);
+          await delay(backoff, signal);
         }
       }
 

@@ -34,7 +34,29 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
  */
 const PDF_OPTIONS = {
   cMapUrl: '/assets/pdfjs/cmaps/',
-  standardFontDataUrl: '/assets/pdfjs/standard_fonts/'
+  standardFontDataUrl: '/assets/pdfjs/standard_fonts/',
+  /**
+   * Fetch the pages being read, and nothing else.
+   *
+   * pdf.js defaults to doing both at once: byte ranges for what is on screen
+   * *and* a background download of the whole file. On a 120 MB attachment that
+   * second one is twenty seconds of transfer for bytes nobody asked for, and
+   * it is invisible in the reader because the page appears from the ranges
+   * long before it finishes. `disableStream` drops the background download and
+   * `disableAutoFetch` stops it fetching ahead of what is actually needed.
+   *
+   * Both rely on the server answering byte ranges, which it does - the media
+   * route hands ranges to express, and PDFs are not compressed on the way out
+   * (which would break them).
+   */
+  disableStream: true,
+  disableAutoFetch: true,
+  /**
+   * Four times the default. Each range is a round trip, and at 64 KB a large
+   * page's fonts and images come to a lot of them; at this size a page is
+   * typically a handful.
+   */
+  rangeChunkSize: 262144
 };
 
 /**
@@ -145,10 +167,20 @@ interface LoadedPage {
 
 interface PageTranslation {
   blocks: PdfTextBlock[];
-  /** One per block, in step with it. `null` where Google gave nothing back. */
+  /** One per block, in step with it. `null` where nothing came back. */
   translations: (string | null)[];
   /** Blocks that came back with nothing; the original is shown for those. */
   failed: number;
+  /**
+   * Whether every block has been asked for.
+   *
+   * A page arrives a batch at a time and each batch is cached as it lands, so
+   * "there is an entry for this page" and "this page is done" are different
+   * questions. Only this one may stop it being asked for again - turning the
+   * page mid-way used to leave a partial entry that blocked the rest of it
+   * for good.
+   */
+  complete: boolean;
 }
 
 /**
@@ -323,9 +355,11 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       return;
     }
     const key = `${target.mediaId}:${page}`;
+    const cached = translationCache.current.get(page);
     // Guarded by a ref rather than by the state this sets, so that filling the
-    // page in batch by batch does not re-run the effect and abort itself.
-    if (translationCache.current.has(page) || requestedKey.current === key) {
+    // page in batch by batch does not re-run the effect and abort itself. Only
+    // a *finished* page is left alone - a half-translated one is resumed.
+    if (cached?.complete || requestedKey.current === key) {
       return;
     }
     requestedKey.current = key;
@@ -335,43 +369,61 @@ function PdfViewerModal(props: PdfViewerModalProps) {
 
     void (async () => {
       try {
-        const blocks = await extractPageBlocks(loadedPage, page);
+        // Reused when the page was left half done: the blocks are the same, so
+        // only what is still missing has to be asked for.
+        const blocks = cached?.blocks ?? await extractPageBlocks(loadedPage, page);
         if (abortController.signal.aborted) {
           return;
         }
-        // A scanned page has no text layer to translate. Recorded as an empty
-        // result all the same, so it is not asked for again on every render.
-        let result: PageTranslation = { blocks, translations: blocks.map(() => null), failed: 0 };
-        if (blocks.length === 0) {
+        let translations = cached ? [ ...cached.translations ] : blocks.map(() => null);
+        const record = (complete: boolean) => {
+          const result: PageTranslation = {
+            blocks,
+            translations,
+            failed: translations.filter((text) => text === null).length,
+            complete
+          };
           translationCache.current.set(page, result);
           setPageTranslation(result);
+        };
+
+        // A scanned page has no text layer to translate. Recorded all the same,
+        // so it is not asked for again on every render.
+        const missing = blocks.reduce<number[]>((result, block, index) => {
+          if (translations[index] === null && block.text.trim()) {
+            result.push(index);
+          }
+          return result;
+        }, []);
+        if (missing.length === 0) {
+          record(true);
           return;
         }
+
         // Asked for a handful of blocks at a time rather than a page at a
         // time. A whole page can take long enough for a reverse proxy to give
         // up on the request and answer with its own error page instead - and
         // a short request cannot. The translation also appears as it arrives
         // rather than all at the end, which is the better way round anyway.
-        for (let start = 0; start < blocks.length; start += BLOCKS_PER_REQUEST) {
-          const slice = blocks.slice(start, start + BLOCKS_PER_REQUEST);
+        for (let start = 0; start < missing.length; start += BLOCKS_PER_REQUEST) {
+          const indices = missing.slice(start, start + BLOCKS_PER_REQUEST);
           const response = await api.translatePdfPage(
             target.mediaId,
-            slice.map((block) => block.text),
+            indices.map((index) => blocks[index].text),
             undefined,
             abortController.signal
           );
           if (abortController.signal.aborted) {
             return;
           }
-          const translations = [ ...result.translations ];
-          response.translations.forEach((text, index) => {
-            translations[start + index] = text;
+          translations = [ ...translations ];
+          response.translations.forEach((text, at) => {
+            translations[indices[at]] = text;
           });
-          result = { blocks, translations, failed: result.failed + response.failed };
           // Kept as it goes, so turning the page away and back keeps whatever
-          // had arrived by then.
-          translationCache.current.set(page, result);
-          setPageTranslation(result);
+          // had arrived by then - and, being incomplete, the rest is still
+          // asked for on the way back.
+          record(start + BLOCKS_PER_REQUEST >= missing.length);
         }
       }
       catch (error) {
@@ -388,8 +440,9 @@ function PdfViewerModal(props: PdfViewerModalProps) {
 
     return () => {
       abortController.abort();
-      // Nothing was finished, so the next render is free to ask again.
-      if (requestedKey.current === key && !translationCache.current.has(page)) {
+      // Unless the page actually finished, the next render is free to ask
+      // again - it will pick up from whatever did arrive.
+      if (requestedKey.current === key && !translationCache.current.get(page)?.complete) {
         requestedKey.current = null;
       }
     };
@@ -693,7 +746,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         ) : null
       }
       {
-        pageTranslation && pageTranslation.failed > 0 ? (
+        pageTranslation?.complete && pageTranslation.failed > 0 ? (
           <p className="pdf-viewer__panel-empty">
             {pageTranslation.failed} of {pageTranslation.blocks.length} blocks could not be
             translated - the original is shown for those.

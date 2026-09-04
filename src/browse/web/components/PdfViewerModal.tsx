@@ -74,6 +74,13 @@ const PANEL_STORAGE_KEY = 'patreon-dl.pdfViewerTranslationPanel';
 /** Below this the overlay text is not worth reading; better to let it clip. */
 const MIN_OVERLAY_SCALE = 0.45;
 
+/**
+ * How long the width has to hold still before the page is redrawn at it. Long
+ * enough that a drag redraws once at the end rather than continuously, short
+ * enough that letting go feels like it sharpened immediately.
+ */
+const RENDER_SETTLE_MS = 150;
+
 function readStoredFlag(key: string) {
   try {
     return window.localStorage.getItem(key) === '1';
@@ -97,6 +104,7 @@ function storeFlag(key: string, value: boolean) {
  */
 interface LoadedPage {
   originalWidth: number;
+  originalHeight: number;
   getViewport: (params: { scale: number }) => { transform: number[]; scale: number };
   getTextContent: () => Promise<{ items: unknown[]; styles?: Record<string, { ascent?: number }> }>;
 }
@@ -216,7 +224,10 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const [ translating, setTranslating ] = useState(false);
   const [ translationError, setTranslationError ] = useState<string | null>(null);
   const [ hoveredBlockId, setHoveredBlockId ] = useState<string | null>(null);
-  const [ loadedPage, setLoadedPage ] = useState<LoadedPage | null>(null);
+  // Every page pdf.js has opened, preloaded ones included. Keyed rather than
+  // held singly because a page that was preloaded has already fired its load
+  // callback by the time it is turned to, and will not fire it again.
+  const [ loadedPages, setLoadedPages ] = useState(new Map<number, LoadedPage>());
   const observerRef = useRef<ResizeObserver | null>(null);
   // Kept for the life of one open document: turning back a page must not ask
   // the server again, and the server's own store is a network round trip away.
@@ -253,18 +264,19 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     translationCache.current.clear();
     setPageTranslation(null);
     setTranslationError(null);
-    setLoadedPage(null);
+    setLoadedPages(new Map());
   }, [target?.url]);
 
   // The page whose text is being read is the visible one; the preloaded ones
-  // are drawn but not translated. Cleared on a page turn so an overlay from
-  // the page just left cannot be shown over the new one for a frame.
+  // are drawn but not translated. Reset on a page turn so an overlay from the
+  // page just left cannot be shown over the new one for a frame.
   useEffect(() => {
-    setLoadedPage(null);
     setHoveredBlockId(null);
     setPageTranslation(translationCache.current.get(page) || null);
     setTranslationError(null);
   }, [page]);
+
+  const loadedPage = loadedPages.get(page) || null;
 
   useEffect(() => {
     if (!target || !translationWanted || !loadedPage || pageTranslation) {
@@ -286,7 +298,10 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           {
             blocks,
             translations: (await api.translatePdfPage(
-              target.mediaId, blocks.map((block) => block.text)
+              target.mediaId,
+              blocks.map((block) => block.text),
+              undefined,
+              abortController.signal
             )).translations
           };
         if (abortController.signal.aborted) {
@@ -390,7 +405,37 @@ function PdfViewerModal(props: PdfViewerModalProps) {
 
   // Whole pixels only: a fractional width rounds up in the canvas and puts the
   // last column of the page under the edge of the tray.
-  const pageWidth = containerWidth > 0 ? Math.max(240, Math.floor(containerWidth)) : undefined;
+  const fitWidth = containerWidth > 0 ? Math.max(240, Math.floor(containerWidth)) : 0;
+
+  /**
+   * The width the canvas was actually rasterised at, which lags the width the
+   * page is being shown at.
+   *
+   * A canvas is a bitmap: re-rendering it is pdf.js redrawing every glyph, and
+   * doing that on every pixel of a drag is what made resizing expensive. So the
+   * drawn page is scaled like an image while the size is still moving - the
+   * cheap, immediate thing - and redrawn once at the end, which is what keeps
+   * the text sharp. Between the two, only the moment of settling costs
+   * anything, and a scaled-up bitmap is soft for a fraction of a second rather
+   * than the whole drag.
+   */
+  const [ renderWidth, setRenderWidth ] = useState(0);
+
+  useEffect(() => {
+    if (fitWidth === 0 || fitWidth === renderWidth) {
+      return;
+    }
+    // Nothing to scale from yet: the first size is drawn at once.
+    if (renderWidth === 0) {
+      setRenderWidth(fitWidth);
+      return;
+    }
+    const timer = setTimeout(() => setRenderWidth(fitWidth), RENDER_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [fitWidth, renderWidth]);
+
+  const pageWidth = renderWidth > 0 ? renderWidth : undefined;
+  const displayScale = renderWidth > 0 && fitWidth > 0 ? fitWidth / renderWidth : 1;
 
   // The page being read, followed by the ones drawn ahead of it. Keyed by page
   // number when rendered, so turning a page keeps the ones already drawn
@@ -665,30 +710,54 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                 onLoadSuccess={handleLoadSuccess}
               >
                 {
-                  !failed && pageWidth ? mountedPages.map((pageNumber) => (
-                    <div
-                      key={pageNumber}
-                      className="pdf-viewer__page"
-                      // The preloaded ones are drawn all the same: a canvas
-                      // renders whether or not anything is looking at it.
-                      hidden={pageNumber !== page}
-                    >
-                      <Page
-                        pageNumber={pageNumber}
-                        width={pageWidth}
-                        // Annotations can carry links off to anywhere; the text
-                        // layer is kept so the page stays selectable.
-                        renderAnnotationLayer={false}
-                        loading={pageNumber === page ? <Spin /> : <></>}
-                        onLoadSuccess={
-                          pageNumber === page ?
-                            (loaded) => setLoadedPage(loaded as unknown as LoadedPage)
-                            : undefined
-                        }
-                      />
-                      {pageNumber === page ? overlay : null}
-                    </div>
-                  )) : null
+                  !failed && pageWidth ? mountedPages.map((pageNumber) => {
+                    const loaded = loadedPages.get(pageNumber);
+                    const aspect = loaded && loaded.originalWidth > 0 ?
+                      loaded.originalHeight / loaded.originalWidth : null;
+                    return (
+                      <div
+                        key={pageNumber}
+                        className="pdf-viewer__page"
+                        // The preloaded ones are drawn all the same: a canvas
+                        // renders whether or not anything is looking at it.
+                        hidden={pageNumber !== page}
+                        // While the drawn width lags the shown one, the box has
+                        // to be the size the scaled page occupies - a transform
+                        // does not change layout, and without this the page
+                        // would overhang the tray until it was redrawn.
+                        style={displayScale === 1 ? undefined : {
+                          width: Math.round(pageWidth * displayScale),
+                          height: aspect ?
+                            Math.round(pageWidth * aspect * displayScale) : undefined
+                        }}
+                      >
+                        <div
+                          className="pdf-viewer__page-scale"
+                          style={displayScale === 1 ? undefined : {
+                            width: pageWidth,
+                            transform: `scale(${displayScale})`
+                          }}
+                        >
+                          <Page
+                            pageNumber={pageNumber}
+                            width={pageWidth}
+                            // Annotations can carry links off to anywhere; the
+                            // text layer is kept so the page stays selectable.
+                            renderAnnotationLayer={false}
+                            loading={pageNumber === page ? <Spin /> : <></>}
+                            // Recorded for every page, not just the visible
+                            // one: a preloaded page fires this while it is
+                            // still hidden and never fires it again.
+                            onLoadSuccess={(callback) => setLoadedPages(
+                              (current) => current.has(pageNumber) ? current :
+                                new Map(current).set(pageNumber, callback as unknown as LoadedPage)
+                            )}
+                          />
+                          {pageNumber === page ? overlay : null}
+                        </div>
+                      </div>
+                    );
+                  }) : null
                 }
               </Document>
             ) : null

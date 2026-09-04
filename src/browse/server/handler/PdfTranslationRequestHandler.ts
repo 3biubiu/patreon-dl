@@ -82,11 +82,23 @@ export default class PdfTranslationRequestHandler extends Basehandler {
 
     if (missing.size > 0) {
       const texts = [ ...missing.keys() ];
+      // A reader who has turned the page is not waiting for this any more, and
+      // Google should not be asked for the rest of a page nobody is reading.
+      const abandoned = new AbortController();
+      req.on('close', () => {
+        if (!res.writableEnded) {
+          abandoned.abort();
+        }
+      });
       let fetched;
       try {
-        fetched = await this.#translator.translate(texts, target);
+        fetched = await this.#translator.translate(texts, target, abandoned.signal);
       }
       catch (error) {
+        if (abandoned.signal.aborted) {
+          this.log('debug', `Dropped a translation of "${mediaId}" - the reader moved on`);
+          return;
+        }
         this.log('warn', `Could not translate a page of "${mediaId}":`, error);
         res.status(502).json({
           error: error instanceof Error ? error.message : 'Translation failed'

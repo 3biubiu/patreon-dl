@@ -173,13 +173,16 @@
   // One per mounted page - the current one and the ones drawn ahead of it.
   // The hidden ones must take no room at all, so the flex layout of the body
   // cannot override the attribute.
-  &__page {
-    // The overlay is placed against this.
-    position: relative;
-  }
-
   &__page[hidden] {
     display: none !important;
+  }
+
+  // Scaled like an image while a resize is still moving, and back to 1 once
+  // the page has been redrawn at the new width. The overlay lives inside it,
+  // so the translation is scaled along with the text it covers.
+  &__page-scale {
+    position: relative;
+    transform-origin: top left;
   }
 
   &__layer {

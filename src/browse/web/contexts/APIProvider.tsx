@@ -620,13 +620,19 @@ class API {
    * cached there by the text itself - nothing to do with the AI translation
    * that subtitles go through.
    */
-  async translatePdfPage(mediaId: string, blocks: string[], to?: string): Promise<PdfTranslationResponse> {
+  async translatePdfPage(
+    mediaId: string, blocks: string[], to?: string, signal?: AbortSignal
+  ): Promise<PdfTranslationResponse> {
     const data = await readJSON(await apiFetch(
       `/api/media/${mediaId}/pdf-translation`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blocks, to })
+        body: JSON.stringify({ blocks, to }),
+        // Turning the page abandons the request rather than letting it run to
+        // completion into a result nobody will read. The server notices the
+        // disconnect and drops its own call along with it.
+        signal
       }
     ));
     return data as unknown as PdfTranslationResponse;

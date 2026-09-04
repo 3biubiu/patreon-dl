@@ -10,7 +10,12 @@ import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogE
 import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionProvider, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
-import { type PdfTranslationResponse } from '../../types/PdfTranslation';
+import {
+  type DeepLKeyStatus,
+  type PdfTranslationResponse,
+  type PdfTranslationSettings,
+  type PdfTranslationSettingsUpdate
+} from '../../types/PdfTranslation';
 import {
   type FavoriteListItem,
   type RecordWatchedVideoRequest,
@@ -650,6 +655,31 @@ class API {
       }
     ));
     return data as unknown as PdfTranslationResponse;
+  }
+
+  async getPdfTranslationSettings(): Promise<PdfTranslationSettings> {
+    return await readJSON(await apiFetch('/api/pdf-translation/settings')) as unknown as PdfTranslationSettings;
+  }
+
+  async savePdfTranslationSettings(
+    update: PdfTranslationSettingsUpdate
+  ): Promise<PdfTranslationSettings> {
+    const data = await readJSON(await apiFetch('/api/pdf-translation/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(update)
+    }));
+    return data as unknown as PdfTranslationSettings;
+  }
+
+  /** Asks DeepL what a key is worth. `apiKey` omitted checks the stored one. */
+  async checkDeepLKey(apiKey?: string): Promise<DeepLKeyStatus> {
+    const data = await readJSON(await apiFetch('/api/pdf-translation/deepl/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey })
+    }));
+    return data as unknown as DeepLKeyStatus;
   }
 
   /**

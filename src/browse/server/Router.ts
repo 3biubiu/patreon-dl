@@ -480,6 +480,24 @@ class _Router {
       this.#handlers.pdfTranslation.handleAvailabilityRequest(req, res)
     );
 
+    // Which engine, and the key it needs. An administrator's, like every other
+    // settings route - it holds an API key.
+    this.#router.get('/api/pdf-translation/settings', requireAdmin, (req, res) =>
+      this.#handlers.pdfTranslation.handleGetSettingsRequest(req, res)
+    );
+
+    this.#router.put('/api/pdf-translation/settings', requireAdmin, (req, res) =>
+      this.#handlers.pdfTranslation.handleSaveSettingsRequest(req, res)
+    );
+
+    this.#router.post('/api/pdf-translation/deepl/check', requireAdmin, (req, res) => {
+      this.#handlers.pdfTranslation.handleCheckDeepLKeyRequest(req, res).catch(() => {
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Could not check the DeepL key' });
+        }
+      });
+    });
+
     this.#router.post(
       '/api/media/:id/pdf-translation',
       inScope(byMediaParam),
@@ -558,7 +576,11 @@ export function getRouter(
     ),
     history: new HistoryAPIRequestHandler(db, historyStore, logger),
     pdfTranslation: new PdfTranslationRequestHandler(
-      pdfTranslation.translator, pdfTranslation.store, logger
+      pdfTranslation,
+      !!pdfTranslationConfig?.deepLApiKey,
+      pdfTranslationConfig?.proxyUrl !== undefined && pdfTranslationConfig?.proxyUrl !== null ||
+        process.env.PDF_TRANSLATE_PROXY_URL !== undefined,
+      logger
     ),
     transcription: new TranscriptionAPIRequestHandler(
       db, dataDir,

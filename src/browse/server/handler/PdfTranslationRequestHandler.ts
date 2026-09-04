@@ -1,11 +1,16 @@
 import { type Request, type Response } from 'express';
 import Basehandler from './BaseHandler.js';
 import { type Logger } from '../../../utils/logging/index.js';
-import type GoogleTranslator from '../pdf/GoogleTranslator.js';
 import type PdfTranslationStore from '../pdf/PdfTranslationStore.js';
+import { type PdfTranslationServices } from '../pdf/Config.js';
+import { DeepLKeyMissingError } from '../pdf/DeepLTranslator.js';
 import {
+  type DeepLKeyStatus,
+  type PdfTranslationAvailability,
   type PdfTranslationRequest,
-  type PdfTranslationResponse
+  type PdfTranslationResponse,
+  type PdfTranslationSettings,
+  type PdfTranslationSettingsUpdate
 } from '../../types/PdfTranslation.js';
 
 /** One page of a PDF is a handful of paragraphs; anything more is not a page. */
@@ -27,21 +32,83 @@ const MAX_TOTAL_CHARS = 60_000;
 export default class PdfTranslationRequestHandler extends Basehandler {
   name = 'PdfTranslationRequestHandler';
 
-  #translator: GoogleTranslator;
+  #services: PdfTranslationServices;
   #store: PdfTranslationStore;
+  /** Set when a key came from the command line, which the form may not overwrite. */
+  #deepLKeyFromConfig: boolean;
+  #proxyFromConfig: boolean;
 
   constructor(
-    translator: GoogleTranslator,
-    store: PdfTranslationStore,
+    services: PdfTranslationServices,
+    deepLKeyFromConfig: boolean,
+    proxyFromConfig: boolean,
     logger?: Logger | null
   ) {
     super(logger);
-    this.#translator = translator;
-    this.#store = store;
+    this.#services = services;
+    this.#store = services.store;
+    this.#deepLKeyFromConfig = deepLKeyFromConfig;
+    this.#proxyFromConfig = proxyFromConfig;
   }
 
   handleAvailabilityRequest(_req: Request, res: Response) {
-    res.json({ available: true, to: this.#translator.targetLanguage });
+    const { settings, deepL, translator } = this.#services;
+    const body: PdfTranslationAvailability = {
+      engine: settings.engine,
+      // Google needs nothing to be usable; DeepL without a key translates
+      // nothing, and the reader is better told that up front.
+      available: settings.engine !== 'deepl' || deepL.configured,
+      to: translator().targetLanguage
+    };
+    res.json(body);
+  }
+
+  handleGetSettingsRequest(_req: Request, res: Response) {
+    const { settings, google, deepL } = this.#services;
+    const body: PdfTranslationSettings = {
+      engine: settings.engine,
+      hasDeepLKey: deepL.configured,
+      deepLKeyFromConfig: this.#deepLKeyFromConfig,
+      targetLanguage: google.targetLanguage,
+      proxyUrl: settings.proxyUrl ?? '',
+      proxyFromConfig: this.#proxyFromConfig
+    };
+    res.json(body);
+  }
+
+  handleSaveSettingsRequest(req: Request, res: Response) {
+    const update = (req.body || {}) as PdfTranslationSettingsUpdate;
+    if (update.engine && update.engine !== 'google' && update.engine !== 'deepl') {
+      res.status(400).json({ error: 'Unknown translation engine' });
+      return;
+    }
+    this.#services.settings.update({
+      engine: update.engine,
+      // A key set on the command line wins, so accepting one here would only
+      // store something that never gets used.
+      deepLApiKey: this.#deepLKeyFromConfig ? undefined : update.deepLApiKey,
+      targetLanguage: update.targetLanguage,
+      proxyUrl: this.#proxyFromConfig ? undefined : update.proxyUrl
+    });
+    this.log('info', `PDF translation is now using ${this.#services.settings.engine}`);
+    this.handleGetSettingsRequest(req, res);
+  }
+
+  /** Asks DeepL what the key is worth, so the form can say whether it works. */
+  async handleCheckDeepLKeyRequest(req: Request, res: Response) {
+    const { apiKey } = (req.body || {}) as { apiKey?: string };
+    let body: DeepLKeyStatus;
+    try {
+      body = { ok: true, ...await this.#services.deepL.checkKey(apiKey) };
+    }
+    catch (error) {
+      body = {
+        ok: false,
+        error: error instanceof DeepLKeyMissingError ? error.message
+          : error instanceof Error ? error.message : 'Could not reach DeepL'
+      };
+    }
+    res.json(body);
   }
 
   async handleTranslateRequest(req: Request, res: Response, mediaId: string) {
@@ -59,7 +126,8 @@ export default class PdfTranslationRequestHandler extends Basehandler {
       res.status(400).json({ error: 'Too much text for one page' });
       return;
     }
-    const target = to || this.#translator.targetLanguage;
+    const translator = this.#services.translator();
+    const target = to || translator.targetLanguage;
 
     // What the store already has, and what is left to ask Google for. The
     // second list is de-duplicated by text: a page usually repeats something.
@@ -93,7 +161,7 @@ export default class PdfTranslationRequestHandler extends Basehandler {
       });
       let fetched;
       try {
-        fetched = await this.#translator.translate(texts, target, abandoned.signal);
+        fetched = await translator.translate(texts, target, abandoned.signal);
       }
       catch (error) {
         if (abandoned.signal.aborted) {

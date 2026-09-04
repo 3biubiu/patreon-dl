@@ -10,13 +10,15 @@ import {
   ColumnWidthOutlined,
   DownloadOutlined,
   TranslationOutlined,
-  ProfileOutlined
+  ProfileOutlined,
+  SettingOutlined
 } from "@ant-design/icons";
 import { Document, Page, pdfjs } from "react-pdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { extractPageBlocks, type PdfTextBlock } from "../utils/PdfText";
+import PdfTranslationSettingsModal from "./settings/PdfTranslationSettingsModal";
 
 // Bundled rather than pulled from a CDN: this is an offline browsing tool and
 // has to work with no network at all.
@@ -248,6 +250,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const [ translating, setTranslating ] = useState(false);
   const [ translationError, setTranslationError ] = useState<string | null>(null);
   const [ hoveredBlockId, setHoveredBlockId ] = useState<string | null>(null);
+  const [ settingsOpen, setSettingsOpen ] = useState(false);
   // Every page pdf.js has opened, preloaded ones included. Keyed rather than
   // held singly because a page that was preloaded has already fired its load
   // callback by the time it is turned to, and will not fire it again.
@@ -552,6 +555,21 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           />
         </Tooltip>
         {
+          // Same reasoning as the download button: the routes behind it are
+          // what refuse everyone else, this only keeps the toolbar honest.
+          canDownload ? (
+            <Tooltip title="Translation settings">
+              <Button
+                type="text"
+                size="small"
+                icon={<SettingOutlined />}
+                aria-label="Translation settings"
+                onClick={() => setSettingsOpen(true)}
+              />
+            </Tooltip>
+          ) : null
+        }
+        {
           // Hiding this from everyone else is only tidiness - the route that
           // hands out the ticket is what actually refuses them.
           canDownload ? (
@@ -803,6 +821,17 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       </div>
     </Modal>
     {codePrompt}
+    <PdfTranslationSettingsModal
+      open={settingsOpen}
+      onClose={() => setSettingsOpen(false)}
+      // A different engine means different text, so what was translated with
+      // the old one is dropped and the page asked for again.
+      onSaved={() => {
+        translationCache.current.clear();
+        setPageTranslation(null);
+        setTranslationError(null);
+      }}
+    />
     </>
   );
 }

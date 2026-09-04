@@ -152,10 +152,21 @@ export default class PdfTranslationRequestHandler extends Basehandler {
     if (missing.size > 0) {
       const texts = [ ...missing.keys() ];
       // A reader who has turned the page is not waiting for this any more, and
-      // Google should not be asked for the rest of a page nobody is reading.
+      // the engine should not be asked for the rest of a page nobody is
+      // reading.
+      //
+      // Listened for on the response, not the request. A request stream closes
+      // as soon as its body has been read - which is immediately, since the
+      // body parser has already consumed it - so `req.on('close')` fires on
+      // every request while the client is still perfectly happy. Watching that
+      // instead aborted every translation the moment it started and then
+      // returned without answering, which left the connection open until
+      // whatever sits in front of this server gave up and produced a 502 of
+      // its own. `res` closes when the response is finished or the connection
+      // is actually gone, and `writableFinished` tells the two apart.
       const abandoned = new AbortController();
-      req.on('close', () => {
-        if (!res.writableEnded) {
+      res.on('close', () => {
+        if (!res.writableFinished) {
           abandoned.abort();
         }
       });

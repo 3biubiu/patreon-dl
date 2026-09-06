@@ -1,9 +1,9 @@
 import "../assets/styles/Users.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Table, Tabs, Tag, Tooltip } from "antd";
-import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, ReloadOutlined, UnlockOutlined, UserAddOutlined } from "@ant-design/icons";
+import { Alert, Badge, Button, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from "antd";
+import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, ReloadOutlined, SafetyCertificateOutlined, UnlockOutlined, UserAddOutlined } from "@ant-design/icons";
 import { type FormInstance } from "antd";
-import { type AuthUser, type LoginLogEntry, type Registration, type UserRole } from "../../types/Auth";
+import { DEFAULT_CAN_TRANSLATE_PDF, type AuthUser, type LoginLogEntry, type Registration, type UserRole } from "../../types/Auth";
 import { DEFAULT_USER_QUOTA, type UserQuota } from "../../types/Quota";
 import { describeLoginRegion, LOGIN_REGION_SEPARATOR } from "../../types/LoginRegion";
 import { useAPI } from "../contexts/APIProvider";
@@ -45,6 +45,7 @@ interface UserFormValues {
   videoQuota: number;
   loginRegionAccess: LoginRegionAccess;
   loginRegions: string[];
+  canTranslatePdf: boolean;
 }
 
 const ROLE_OPTIONS = [
@@ -138,6 +139,8 @@ function Users() {
   const [ error, setError ] = useState<string | null>(null);
   const [ editing, setEditing ] = useState<AuthUser | 'new' | null>(null);
   const [ submitting, setSubmitting ] = useState(false);
+  /** The second dialog, where everything this account may and may not do lives. */
+  const [ permissionsOpen, setPermissionsOpen ] = useState(false);
   const [ signInsFor, setSignInsFor ] = useState<AuthUser | null>(null);
   const [ loginLog, setLoginLog ] = useState<LoginLogEntry[] | null>(null);
   const [ loginLogError, setLoginLogError ] = useState<string | null>(null);
@@ -332,6 +335,8 @@ function Users() {
   const openEditor = useCallback((target: AuthUser | 'new') => {
     setError(null);
     setEditing(target);
+    // Always on the account itself, never on whichever dialog was last open.
+    setPermissionsOpen(false);
     // A new account opens on the defaults every new account gets, so the form
     // shows what would happen anyway rather than something the server would
     // then override.
@@ -356,8 +361,23 @@ function Users() {
       videoQuota: videos.value,
       loginRegionAccess:
         target === 'new' ? 'anywhere' : (target.loginRegions ? 'selected' : 'anywhere'),
-      loginRegions: target === 'new' ? [] : (target.loginRegions || [])
+      loginRegions: target === 'new' ? [] : (target.loginRegions || []),
+      canTranslatePdf:
+        target === 'new' ? DEFAULT_CAN_TRANSLATE_PDF : target.canTranslatePdf
     });
+  }, [form]);
+
+  /**
+   * Closes the permissions dialog, but not over a limit that is not a number:
+   * those boxes are in there, and a form that quietly turned an empty one into
+   * zero would be the strictest setting arrived at by accident.
+   */
+  const closePermissions = useCallback(() => {
+    void form.validateFields([ 'postQuota', 'videoQuota' ])
+      .then(() => setPermissionsOpen(false))
+      // Nothing to report here - the field itself says what is wrong, and it
+      // is on screen.
+      .catch(() => undefined);
   }, [form]);
 
   const handleSubmit = useCallback(async (values: UserFormValues) => {
@@ -383,6 +403,9 @@ function Users() {
     const loginRegions =
       values.role === 'admin' || values.loginRegionAccess === 'anywhere' ?
         null : (values.loginRegions || []);
+    // An administrator always has it, so a promotion hands it over rather than
+    // carrying a denial the server would ignore anyway.
+    const canTranslatePdf = values.role === 'admin' || values.canTranslatePdf === true;
     try {
       if (editing === 'new') {
         await api.createUser({
@@ -391,7 +414,8 @@ function Users() {
           role: values.role,
           visibleCampaigns,
           quota,
-          loginRegions
+          loginRegions,
+          canTranslatePdf
         });
       }
       else {
@@ -402,10 +426,12 @@ function Users() {
           password: values.password || undefined,
           visibleCampaigns,
           quota,
-          loginRegions
+          loginRegions,
+          canTranslatePdf
         });
       }
       setEditing(null);
+      setPermissionsOpen(false);
       await refresh();
     }
     catch (e) {
@@ -567,6 +593,13 @@ function Users() {
                     }
                   },
                   {
+                    title: 'PDF translation',
+                    dataIndex: 'canTranslatePdf',
+                    render: (canTranslatePdf: boolean) => (
+                      canTranslatePdf ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                    )
+                  },
+                  {
                     title: 'Added',
                     dataIndex: 'createdAt',
                     render: (createdAt: string) => new Date(createdAt).toLocaleDateString()
@@ -716,7 +749,10 @@ function Users() {
         title={editing === 'new' ? 'Add user' : `Edit ${editing ? editing.username : ''}`}
         okText="Save"
         confirmLoading={submitting}
-        onCancel={() => setEditing(null)}
+        onCancel={() => {
+          setEditing(null);
+          setPermissionsOpen(false);
+        }}
         onOk={() => form.submit()}
       >
         <Form<UserFormValues>
@@ -745,17 +781,46 @@ function Users() {
           <Form.Item name="role" label="Role">
             <Select options={ROLE_OPTIONS} />
           </Form.Item>
-          <CampaignAccessFields
-            form={form}
-            options={campaignOptions}
-            loading={campaigns === null}
-          />
-          <QuotaFields form={form} />
-          <LoginRegionFields
-            form={form}
-            options={loginRegionOptions}
-            loading={knownRegions === null}
-          />
+          {/* Everything this account may and may not do is one dialog further
+              in. The account itself - who it is and how it signs in - is what
+              is being edited most of the time, and it was being read past four
+              blocks of permissions to get to. */}
+          <Form.Item label="Permissions" className="mb-0">
+            <Space orientation="vertical" size={8} className="users__permissions">
+              <PermissionsSummary form={form} />
+              <Button
+                icon={<SafetyCertificateOutlined />}
+                onClick={() => setPermissionsOpen(true)}
+              >
+                More permissions
+              </Button>
+            </Space>
+          </Form.Item>
+          {/* Inside the form on purpose: the fields below are the same form's
+              fields, saved by the Save button on the dialog behind this one,
+              not by closing this one. */}
+          <Modal
+            open={permissionsOpen}
+            title="Permissions"
+            width={620}
+            onCancel={() => setPermissionsOpen(false)}
+            footer={[
+              <Button key="done" type="primary" onClick={() => closePermissions()}>
+                Done
+              </Button>
+            ]}
+          >
+            <p className="text-body-secondary">
+              Kept when you save the user - closing this dialog on its own changes nothing.
+            </p>
+            <PermissionFields
+              form={form}
+              campaignOptions={campaignOptions}
+              campaignsLoading={campaigns === null}
+              regionOptions={loginRegionOptions}
+              regionsLoading={knownRegions === null}
+            />
+          </Modal>
         </Form>
       </Modal>
       <Modal
@@ -847,10 +912,148 @@ function Users() {
 }
 
 /**
- * The creator restriction, which only applies to ordinary users.
+ * Everything an account may and may not do, in one dialog.
  *
- * Its own component so that watching the role and the access mode re-renders
- * this and not the whole page - the user table above it is not cheap.
+ * Together rather than spread down the user form because they are read
+ * together: what somebody wants to know when they open this is what this
+ * account can do, and that was four separate answers in four places.
+ *
+ * An administrator has none of it - which is one alert here rather than the
+ * same explanation repeated by each block, so the components below can assume
+ * an ordinary user.
+ */
+function PermissionFields(props: {
+  form: FormInstance<UserFormValues>;
+  campaignOptions: { value: string; label: string; }[];
+  campaignsLoading: boolean;
+  regionOptions: { value: string; label: string; }[];
+  regionsLoading: boolean;
+}) {
+  const { form, campaignOptions, campaignsLoading, regionOptions, regionsLoading } = props;
+  const role = Form.useWatch('role', form);
+
+  if (role === 'admin') {
+    return (
+      <Alert
+        type="info"
+        showIcon
+        title="Administrators are not restricted"
+        description={
+          'Anyone who can edit permissions can lift their own, so nothing set ' +
+          'here would hold: an administrator sees every creator, reads with no ' +
+          'daily limit, signs in from anywhere and may translate. Make the ' +
+          'account a user to restrict it.'
+        }
+      />
+    );
+  }
+
+  return (
+    <>
+      <CampaignAccessFields
+        form={form}
+        options={campaignOptions}
+        loading={campaignsLoading}
+      />
+      <QuotaFields form={form} />
+      <LoginRegionFields
+        form={form}
+        options={regionOptions}
+        loading={regionsLoading}
+      />
+      <PdfTranslationField form={form} />
+    </>
+  );
+}
+
+/**
+ * What the permissions come to, on the dialog that does not show them.
+ *
+ * Without this the button would be a door with nothing written on it, and the
+ * only way to see whether an account was restricted at all would be to open
+ * it - which is exactly the reading the user table already does with tags.
+ */
+function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
+  const { form } = props;
+  const role = Form.useWatch('role', form);
+  const campaignAccess = Form.useWatch('campaignAccess', form);
+  const visibleCampaigns = Form.useWatch('visibleCampaigns', form);
+  const postQuotaMode = Form.useWatch('postQuotaMode', form);
+  const postQuota = Form.useWatch('postQuota', form);
+  const videoQuotaMode = Form.useWatch('videoQuotaMode', form);
+  const videoQuota = Form.useWatch('videoQuota', form);
+  const loginRegionAccess = Form.useWatch('loginRegionAccess', form);
+  const loginRegions = Form.useWatch('loginRegions', form);
+  const canTranslatePdf = Form.useWatch('canTranslatePdf', form);
+
+  if (role === 'admin') {
+    return <Tag color="green">Unrestricted</Tag>;
+  }
+
+  const campaignCount = (visibleCampaigns || []).length;
+  const regionCount = (loginRegions || []).length;
+  // "None" and "Nowhere" are the settings worth catching at a glance: both are
+  // reachable, both are meant, and both look like a mistake if they are not.
+  const campaigns = campaignAccess === 'all' ?
+    { text: 'All creators', color: undefined } :
+    campaignCount === 0 ? { text: 'No creators', color: 'red' } :
+      { text: `${campaignCount} creators`, color: 'blue' };
+  const regions = loginRegionAccess === 'anywhere' ?
+    { text: 'Signs in anywhere', color: undefined } :
+    regionCount === 0 ? { text: 'Signs in nowhere', color: 'red' } :
+      { text: `${regionCount} regions`, color: 'blue' };
+
+  return (
+    <Space size={4} wrap>
+      <Tag color={campaigns.color}>{campaigns.text}</Tag>
+      <Tag color={postQuotaMode === 'limited' ? 'blue' : undefined}>
+        {postQuotaMode === 'limited' ? `Posts ${postQuota ?? 0}/day` : 'Posts unlimited'}
+      </Tag>
+      <Tag color={videoQuotaMode === 'limited' ? 'blue' : undefined}>
+        {videoQuotaMode === 'limited' ? `Videos ${videoQuota ?? 0}/day` : 'Videos unlimited'}
+      </Tag>
+      <Tag color={regions.color}>{regions.text}</Tag>
+      <Tag color={canTranslatePdf ? 'blue' : undefined}>
+        {canTranslatePdf ? 'PDF translation on' : 'PDF translation off'}
+      </Tag>
+    </Space>
+  );
+}
+
+/**
+ * Whether the PDF reader offers this account its translation.
+ *
+ * A switch rather than the mode-and-value pairs beside it because there is no
+ * value to give: it is on or it is off, and the reader shows or hides its two
+ * translation buttons accordingly.
+ */
+function PdfTranslationField(props: { form: FormInstance<UserFormValues>; }) {
+  const { form } = props;
+  const canTranslatePdf = Form.useWatch('canTranslatePdf', form);
+
+  return (
+    <Form.Item
+      name="canTranslatePdf"
+      label="PDF translation"
+      valuePropName="checked"
+      extra={
+        canTranslatePdf ?
+          'The PDF reader offers both the overlay and the side-by-side panel.' :
+          'Both translation buttons are hidden in the PDF reader, and the server ' +
+          'refuses the requests behind them. The account can still open and read ' +
+          'every PDF it may see.'
+      }
+    >
+      <Switch checkedChildren="On" unCheckedChildren="Off" />
+    </Form.Item>
+  );
+}
+
+/**
+ * The creator restriction.
+ *
+ * Its own component so that watching the access mode re-renders this and not
+ * the whole page - the user table behind these dialogs is not cheap.
  */
 function CampaignAccessFields(props: {
   form: FormInstance<UserFormValues>;
@@ -858,22 +1061,7 @@ function CampaignAccessFields(props: {
   loading: boolean;
 }) {
   const { form, options, loading } = props;
-  const role = Form.useWatch('role', form);
   const access = Form.useWatch('campaignAccess', form);
-
-  if (role === 'admin') {
-    return (
-      <Alert
-        type="info"
-        showIcon
-        title="Administrators can see every creator"
-        description={
-          'Anyone who can edit permissions can lift their own, so a restriction ' +
-          'here would not hold. Make the account a user to limit it.'
-        }
-      />
-    );
-  }
 
   return (
     <>
@@ -902,19 +1090,14 @@ function CampaignAccessFields(props: {
 }
 
 /**
- * The daily allowance, which only applies to ordinary users.
+ * The daily allowance.
  *
  * Two limits, each either lifted or a number. Its own component for the same
- * reason the creator fields are: watching the role and the two modes should
- * re-render this and not the user table above it.
+ * reason the creator fields are: watching the two modes should re-render this
+ * and not the user table behind the dialog.
  */
 function QuotaFields(props: { form: FormInstance<UserFormValues>; }) {
   const { form } = props;
-  const role = Form.useWatch('role', form);
-
-  if (role === 'admin') {
-    return null;
-  }
 
   return (
     <>
@@ -978,9 +1161,9 @@ function QuotaField(props: {
  * one - somebody setting up an account for a colleague in a city nobody has
  * signed in from yet has to be able to write it down.
  *
- * Its own component for the reason the other two permission blocks are: this
- * watches the role and the mode, and re-rendering the user table for either
- * would be paying for the whole page to answer a radio button.
+ * Its own component for the reason the other permission blocks are: this
+ * watches the mode, and re-rendering the user table for it would be paying for
+ * the whole page to answer a radio button.
  */
 function LoginRegionFields(props: {
   form: FormInstance<UserFormValues>;
@@ -988,24 +1171,8 @@ function LoginRegionFields(props: {
   loading: boolean;
 }) {
   const { form, options, loading } = props;
-  const role = Form.useWatch('role', form);
   const access = Form.useWatch('loginRegionAccess', form);
   const regions = Form.useWatch('loginRegions', form);
-
-  if (role === 'admin') {
-    return (
-      <Alert
-        className="mt-3"
-        type="info"
-        showIcon
-        title="Administrators can sign in from anywhere"
-        description={
-          'An administrator locked out by their own region list would have nobody ' +
-          'left to lift it. Make the account a user to restrict it.'
-        }
-      />
-    );
-  }
 
   return (
     <>

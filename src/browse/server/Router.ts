@@ -190,6 +190,23 @@ class _Router {
       next();
     };
 
+    /**
+     * The PDF reader's translation, which not every account has.
+     *
+     * The reader hides its two translation buttons for an account without it,
+     * but that is only tidiness - this is what actually refuses the work, the
+     * same way the download routes rather than the toolbar are what keep a
+     * file in.
+     */
+    const requirePdfTranslation: RequestHandler = (req, res, next) => {
+      const user = (req as AuthenticatedRequest).authUser;
+      if (!user?.canTranslatePdf) {
+        res.status(403).json({ error: 'Translation is not enabled for this account' });
+        return;
+      }
+      next();
+    };
+
     // A user restricted to certain creators is refused everything belonging to
     // the others, whichever way the route names it. The campaign listing is
     // narrowed by its handler instead, in SQL, so that its paging counts only
@@ -487,8 +504,9 @@ class _Router {
     );
 
     // The PDF reader's own translation - Google Translate, free, and nothing
-    // to do with the Gemini routes above. Open to anyone who may see the file:
-    // there is no key being spent, only a page being read.
+    // to do with the Gemini routes above. Open to anyone who may see the file
+    // and has been granted the permission; whether an engine is configured at
+    // all is not itself a secret, so the availability route asks for nothing.
     this.#router.get('/api/pdf-translation/availability', (req, res) =>
       this.#handlers.pdfTranslation.handleAvailabilityRequest(req, res)
     );
@@ -513,6 +531,7 @@ class _Router {
 
     this.#router.post(
       '/api/media/:id/pdf-translation',
+      requirePdfTranslation,
       inScope(byMediaParam),
       (req, res) => {
         this.#handlers.pdfTranslation.handleTranslateRequest(req, res, req.params.id)

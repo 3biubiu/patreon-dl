@@ -105,6 +105,24 @@ function readLoginRegions(body: unknown): string[] | null | undefined {
 }
 
 /**
+ * The PDF translation permission as it arrived over the wire.
+ *
+ * `undefined` means the field was not sent - leave what is on file alone.
+ * Anything other than a boolean is rejected rather than coerced, so a
+ * malformed body cannot hand out a permission by being truthy.
+ */
+function readCanTranslatePdf(body: unknown): boolean | undefined {
+  if (!body || typeof body !== 'object' || !('canTranslatePdf' in body)) {
+    return undefined;
+  }
+  const value = (body as { canTranslatePdf: unknown }).canTranslatePdf;
+  if (typeof value !== 'boolean') {
+    throw Error('"canTranslatePdf" must be true or false');
+  }
+  return value;
+}
+
+/**
  * One daily limit as it arrived over the wire. `null` is "no limit"; a number
  * is the allowance, zero included. Anything else is rejected rather than
  * guessed at, so a malformed body cannot quietly lift a limit.
@@ -417,9 +435,10 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const visibleCampaigns = readVisibleCampaigns(req.body);
       const quota = readQuota(req.body);
       const loginRegions = readLoginRegions(req.body);
+      const canTranslatePdf = readCanTranslatePdf(req.body);
       res.json({
         user: this.#store.createUser({
-          username, password, role, visibleCampaigns, quota, loginRegions
+          username, password, role, visibleCampaigns, quota, loginRegions, canTranslatePdf
         })
       });
     }
@@ -435,8 +454,9 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const visibleCampaigns = readVisibleCampaigns(req.body);
       const quota = readQuota(req.body);
       const loginRegions = readLoginRegions(req.body);
+      const canTranslatePdf = readCanTranslatePdf(req.body);
       const user = this.#store.updateUser(id, {
-        password, role, visibleCampaigns, quota, loginRegions
+        password, role, visibleCampaigns, quota, loginRegions, canTranslatePdf
       });
       // Changing your own password does not sign you out: the session names a
       // user id, and that has not changed.

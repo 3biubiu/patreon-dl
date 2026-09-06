@@ -3,7 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
-import { type AuthUser, type Registration, type UserRole } from '../types/Auth.js';
+import {
+  DEFAULT_CAN_TRANSLATE_PDF,
+  type AuthUser,
+  type Registration,
+  type UserRole
+} from '../types/Auth.js';
 import {
   DEFAULT_USER_QUOTA,
   UNLIMITED_QUOTA,
@@ -170,6 +175,24 @@ function normalizeLoginRegionsFor(
   return normalizeLoginRegions(loginRegions ?? null);
 }
 
+/**
+ * The stored form of the PDF translation permission.
+ *
+ * An administrator always has it, for the reason they are never limited or
+ * narrowed. `fallback` is what an unspecified value becomes - the default for
+ * a new account, and whatever is already on file for an existing one.
+ */
+function normalizeCanTranslatePdf(
+  canTranslatePdf: boolean | undefined,
+  role: UserRole,
+  fallback: boolean
+): boolean {
+  if (role === 'admin') {
+    return true;
+  }
+  return typeof canTranslatePdf === 'boolean' ? canTranslatePdf : fallback;
+}
+
 function hashPassword(password: string, salt: string) {
   return crypto.scryptSync(password, salt, SCRYPT_KEY_LENGTH).toString('base64');
 }
@@ -222,6 +245,12 @@ export default class AuthStore {
         // and a migration that silently pinned them to a region would lock out
         // whoever happened to be travelling that week.
         user.loginRegions = normalizeLoginRegionsFor(user.loginRegions, user.role);
+        // Accounts written before the translation permission existed have
+        // been translating up to this point, so they keep it - taking a
+        // feature away from everybody who was using it is not something a
+        // migration should decide. Only accounts made from here on start on
+        // `DEFAULT_CAN_TRANSLATE_PDF`.
+        user.canTranslatePdf = normalizeCanTranslatePdf(user.canTranslatePdf, user.role, true);
         // Accounts written before bans existed are not banned; a reason with
         // no ban behind it is stale and dropped.
         user.banned = user.banned === true && user.role !== 'admin';
@@ -251,6 +280,7 @@ export default class AuthStore {
           visibleCampaigns: null,
           quota: { ...UNLIMITED_QUOTA },
           loginRegions: null,
+          canTranslatePdf: true,
           banned: false,
           banReason: null,
           salt,
@@ -383,6 +413,7 @@ export default class AuthStore {
     visibleCampaigns?: string[] | null;
     quota?: Partial<UserQuota> | null;
     loginRegions?: string[] | null;
+    canTranslatePdf?: boolean;
   }): AuthUser {
     const username = params.username.trim();
     if (!username) {
@@ -406,6 +437,11 @@ export default class AuthStore {
       // Unlike the daily allowance, there is no sensible default region to
       // start it on - only whoever is creating it knows where it will be used.
       loginRegions: normalizeLoginRegionsFor(params.loginRegions, params.role),
+      // Off unless it is asked for, unlike the accounts already on file - see
+      // `DEFAULT_CAN_TRANSLATE_PDF`.
+      canTranslatePdf: normalizeCanTranslatePdf(
+        params.canTranslatePdf, params.role, DEFAULT_CAN_TRANSLATE_PDF
+      ),
       banned: false,
       banReason: null,
       salt,
@@ -422,6 +458,7 @@ export default class AuthStore {
     visibleCampaigns?: string[] | null;
     quota?: Partial<UserQuota> | null;
     loginRegions?: string[] | null;
+    canTranslatePdf?: boolean;
   }): AuthUser {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
@@ -463,6 +500,12 @@ export default class AuthStore {
     user.loginRegions = normalizeLoginRegionsFor(
       params.loginRegions !== undefined ? params.loginRegions : user.loginRegions,
       user.role
+    );
+    // And re-normalized against the role for the same reason: promoting
+    // someone hands them the permission outright, and demoting them again
+    // starts from whatever is set here rather than from a stale denial.
+    user.canTranslatePdf = normalizeCanTranslatePdf(
+      params.canTranslatePdf, user.role, user.canTranslatePdf
     );
     if (params.password !== undefined) {
       this.#assertPassword(params.password);
@@ -560,6 +603,7 @@ export default class AuthStore {
       visibleCampaigns: null,
       quota: { ...DEFAULT_USER_QUOTA },
       loginRegions: null,
+      canTranslatePdf: DEFAULT_CAN_TRANSLATE_PDF,
       banned: false,
       banReason: null,
       salt: registration.salt,
@@ -621,7 +665,8 @@ export default class AuthStore {
 
   #toAuthUser(user: StoredUser): AuthUser {
     const {
-      id, username, role, createdAt, visibleCampaigns, quota, loginRegions, banned, banReason
+      id, username, role, createdAt, visibleCampaigns, quota, loginRegions,
+      canTranslatePdf, banned, banReason
     } = user;
     // A copy, so a caller cannot reach into the store and edit a permission
     // in place - the array would otherwise be the live one.
@@ -630,6 +675,7 @@ export default class AuthStore {
       visibleCampaigns: visibleCampaigns ? [ ...visibleCampaigns ] : null,
       quota: { ...quota },
       loginRegions: loginRegions ? [ ...loginRegions ] : null,
+      canTranslatePdf,
       banned,
       banReason
     };

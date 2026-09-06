@@ -3,6 +3,17 @@ import { type UserQuota } from './Quota.js';
 export type UserRole = 'admin' | 'user';
 
 /**
+ * Whether a newly created ordinary account may use the PDF reader's
+ * translation.
+ *
+ * Off, unlike the daily allowance's defaults: translating goes out to a
+ * translation service on every page, and an account nobody has thought about
+ * yet should not be spending that. Accounts that already existed when this
+ * arrived keep it - see `AuthStore.load`.
+ */
+export const DEFAULT_CAN_TRANSLATE_PDF = false;
+
+/**
  * A user as the browser is allowed to see them - no salt, no password hash.
  *
  * The permissions live here rather than anywhere else because the auth guard
@@ -47,6 +58,18 @@ export interface AuthUser {
    * the ban rule.
    */
   loginRegions: string[] | null;
+  /**
+   * Whether the PDF reader offers to translate for this account.
+   *
+   * `false` hides both translation buttons and is refused by the route behind
+   * them - the reader still opens every PDF this account may see, it just
+   * reads them in the language they were written in.
+   *
+   * Always `true` for administrators, for the reason every other restriction
+   * is lifted for them: they can edit their own permissions, so storing a
+   * denial here would only be something to go stale.
+   */
+  canTranslatePdf: boolean;
   /**
    * Locked out entirely - no session survives it and no sign-in gets past it.
    * Put on by the sign-in anomaly rule, taken off only by an administrator.
@@ -99,6 +122,8 @@ export interface CreateUserRequest {
    * explicitly, or a list of regions to pin it.
    */
   loginRegions?: string[] | null;
+  /** Omit to start the account on {@link DEFAULT_CAN_TRANSLATE_PDF}. */
+  canTranslatePdf?: boolean;
 }
 
 export interface UpdateUserRequest {
@@ -110,6 +135,8 @@ export interface UpdateUserRequest {
   quota?: Partial<UserQuota> | null;
   /** Omit to leave as it is; `null` to let the account sign in from anywhere. */
   loginRegions?: string[] | null;
+  /** Omit to leave as it is. */
+  canTranslatePdf?: boolean;
 }
 
 /**

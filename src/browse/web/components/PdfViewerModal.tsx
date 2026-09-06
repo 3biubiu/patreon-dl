@@ -322,7 +322,13 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   /** The file whose stored page has been applied, so it is applied once. */
   const resumedFile = useRef<string | null>(null);
   const canDownload = user?.role === 'admin';
-  const translationWanted = immersive || panelOpen;
+  /**
+   * Whether this reader is offered the translation at all. Without it the two
+   * buttons are not drawn and nothing is ever asked for - the route behind
+   * them refuses the account regardless, this only keeps the toolbar honest.
+   */
+  const canTranslate = user?.canTranslatePdf === true;
+  const translationWanted = canTranslate && (immersive || panelOpen);
 
   // A callback ref, because the element only exists while the modal is open.
   // `ResizeObserver` reports the content box, so what comes back is the room
@@ -688,32 +694,40 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           disabled={widthPercent >= MAX_WIDTH_PERCENT}
           onClick={() => changeWidth(WIDTH_STEP)}
         />
-        <Tooltip title="Overlay the translation on the page">
-          <Button
-            type={immersive ? 'primary' : 'text'}
-            size="small"
-            icon={<TranslationOutlined />}
-            aria-label="Immersive translation"
-            aria-pressed={immersive}
-            onClick={() => setImmersive((on) => {
-              storeFlag(IMMERSIVE_STORAGE_KEY, !on);
-              return !on;
-            })}
-          />
-        </Tooltip>
-        <Tooltip title="Show the translation beside the page">
-          <Button
-            type={panelOpen ? 'primary' : 'text'}
-            size="small"
-            icon={<ProfileOutlined />}
-            aria-label="Translation panel"
-            aria-pressed={panelOpen}
-            onClick={() => setPanelOpen((on) => {
-              storeFlag(PANEL_STORAGE_KEY, !on);
-              return !on;
-            })}
-          />
-        </Tooltip>
+        {
+          canTranslate ? (
+            <Tooltip title="Overlay the translation on the page">
+              <Button
+                type={immersive ? 'primary' : 'text'}
+                size="small"
+                icon={<TranslationOutlined />}
+                aria-label="Immersive translation"
+                aria-pressed={immersive}
+                onClick={() => setImmersive((on) => {
+                  storeFlag(IMMERSIVE_STORAGE_KEY, !on);
+                  return !on;
+                })}
+              />
+            </Tooltip>
+          ) : null
+        }
+        {
+          canTranslate ? (
+            <Tooltip title="Show the translation beside the page">
+              <Button
+                type={panelOpen ? 'primary' : 'text'}
+                size="small"
+                icon={<ProfileOutlined />}
+                aria-label="Translation panel"
+                aria-pressed={panelOpen}
+                onClick={() => setPanelOpen((on) => {
+                  storeFlag(PANEL_STORAGE_KEY, !on);
+                  return !on;
+                })}
+              />
+            </Tooltip>
+          ) : null
+        }
         {
           // Same reasoning as the download button: the routes behind it are
           // what refuse everyone else, this only keeps the toolbar honest.
@@ -755,7 +769,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const overlayScale = pageWidth && loadedPage?.originalWidth ?
     pageWidth / loadedPage.originalWidth : 0;
 
-  const overlay = overlayScale > 0 && pageTranslation && (immersive || hoveredBlockId) ? (
+  const overlay = canTranslate && overlayScale > 0 && pageTranslation &&
+    (immersive || hoveredBlockId) ? (
     <div className="pdf-viewer__layer">
       {
         pageTranslation.blocks.map((block, index) => {
@@ -797,7 +812,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     </div>
   ) : null;
 
-  const panel = panelOpen ? (
+  const panel = canTranslate && panelOpen ? (
     <aside className="pdf-viewer__panel">
       <div className="pdf-viewer__panel-head">
         <span>Translation</span>

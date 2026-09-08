@@ -55,6 +55,20 @@ export function checkMediaAccess(req: Request): string | null {
 }
 
 /**
+ * Whether the URL is being opened as a page of its own - a tab, a new window,
+ * a middle-click - rather than fetched by something on a page.
+ *
+ * What it is for: a file the browser has a viewer of its own for, chiefly a
+ * PDF, is a download in all but name when it is opened this way, because that
+ * viewer comes with a save button. The reader in this app fetches the same
+ * file from inside the page, which reports `empty`, so the two can be told
+ * apart.
+ */
+export function isDocumentRequest(req: Request) {
+  return req.headers['sec-fetch-dest'] === 'document';
+}
+
+/**
  * Whether a video or audio stream is being fetched by a player rather than
  * pulled down whole. `Sec-Fetch-Dest` is `video` / `audio` only for a media
  * element; a tab navigation says `document` and `fetch()` says `empty`.

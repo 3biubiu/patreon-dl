@@ -8,6 +8,7 @@ import PdfViewerModal, { type PdfViewerTarget } from "./PdfViewerModal";
 import { formatFileSize, getContentUrlForMedia, getFileExtension, getFileIcon } from "../utils/Misc";
 import Icon from "./Icon";
 import VideoPlayer, { type VideoPlayerSource } from "./VideoPlayer";
+import { useDownload } from "../contexts/DownloadProvider";
 
 interface MediaGalleryProps {
   items: MediaListItem<any>[];
@@ -25,7 +26,9 @@ interface FileProps {
   extension: string;
   icon: string;
   size: string | null;
-  downloadURL: string;
+  /** What a download ticket is asked for, and where it is then spent. */
+  mediaId: string;
+  url: string;
 }
 
 /**
@@ -72,7 +75,8 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
         extension: getFileExtension(filename).toUpperCase(),
         icon: getFileIcon(filename),
         size: formatFileSize(mi.size),
-        downloadURL: `${mediaURL}?dl=1`
+        mediaId: mi.id,
+        url: mediaURL
       }
     };
   }
@@ -139,7 +143,11 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
     width,
     lg: {
       id: mi.id,
-      href: isImage || isPDF ? mediaURL : undefined,
+      // Not for a PDF, even though clicking one opens the reader: the tile is
+      // still an anchor, and an href on it is a middle-click away from the
+      // browser's own viewer - which the server now refuses, so the only thing
+      // left to follow would be a 403.
+      href: isImage ? mediaURL : undefined,
       dataSrc: isImage ? mediaURL : undefined,
       dataVideo: dataAV,
       dataPoster: isVideo || isAudio ? thumbnailURL : undefined,
@@ -162,22 +170,48 @@ function buildTile(mi: MediaListItem<any>): GalleryTile {
   };
 }
 
+/**
+ * A file with nothing to preview: an archive, a 3D model, a document.
+ *
+ * A card either way, but only a button for an administrator - for everyone
+ * else there is nothing behind it to click, so it is drawn as what it is: the
+ * file's name, its type and its size, and the link back to the post it came
+ * from underneath.
+ */
 function FileTile(props: { file: FileProps }) {
   const { file } = props;
-  return (
-    <a
-      className="media-gallery__file"
-      href={file.downloadURL}
-      title={`Download ${file.filename}`}
-    >
+  const { canDownload, requestDownload } = useDownload();
+  const body = (
+    <>
       <Icon name={file.icon} outlined className="media-gallery__file-icon" />
       <span className="media-gallery__file-name">{file.filename}</span>
       <span className="media-gallery__file-meta">
         {file.extension ? <span className="media-gallery__file-ext">{file.extension}</span> : null}
         {file.size ? <span>{file.size}</span> : null}
-        <Icon name="download" className="media-gallery__file-download" />
+        {canDownload ? <Icon name="download" className="media-gallery__file-download" /> : null}
       </span>
-    </a>
+    </>
+  );
+  if (!canDownload) {
+    return (
+      <div className="media-gallery__file media-gallery__file--static" title={file.filename}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="media-gallery__file"
+      title={`Download ${file.filename}`}
+      onClick={() => requestDownload({
+        url: file.url,
+        mediaId: file.mediaId,
+        filename: file.filename
+      })}
+    >
+      {body}
+    </button>
   );
 }
 

@@ -16,8 +16,22 @@
     font-weight: 600;
   }
 
+  // The page being read, as a box that can be typed in, followed by how many
+  // there are. Sized so the pair takes about as much room as the plain
+  // "3 / 128" it replaces - the toolbar has to fit on a phone.
+  &__page-jump {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+
+  &__page-input {
+    width: 3.25rem;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
   &__page-count {
-    min-width: 4.5rem;
     text-align: center;
     font-size: 0.85rem;
     font-variant-numeric: tabular-nums;

@@ -73,4 +73,48 @@
     color: var(--bs-secondary-color);
     flex-shrink: 0;
   }
+
+  // The name of a file, which is a button when there is a reader to open it in
+  // and plain text when there is not. Both are laid out the same, so a list of
+  // mixed attachments still reads as one list.
+  &__attachment-name {
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    text-align: left;
+    word-break: break-word;
+    color: inherit;
+
+    &--open {
+      color: var(--bs-link-color);
+      cursor: pointer;
+
+      &:hover {
+        color: var(--bs-link-hover-color);
+        text-decoration: underline;
+      }
+    }
+  }
+
+  // Administrators only, so it is drawn quietly: the file is the thing on the
+  // row, not the button beside it.
+  &__attachment-download {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0.1em 0.3em;
+    border: none;
+    border-radius: var(--bs-border-radius-sm);
+    background: none;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--bs-link-hover-color);
+      background-color: var(--bs-secondary-bg);
+    }
+  }
 }

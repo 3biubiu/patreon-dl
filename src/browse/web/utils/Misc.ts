@@ -68,6 +68,26 @@ export function getFileExtension(filename: string | null) {
   return filename.slice(dotIndex + 1).toLowerCase();
 }
 
+const VIDEO_EXTENSIONS = [
+  'mp4', 'm4v', 'mkv', 'webm', 'mov', 'avi', 'flv', 'wmv', 'mpg', 'mpeg', 'ts', 'm2ts', 'ogv'
+];
+
+/**
+ * Whether a file is a video, judged the way the server judges it: by mime type
+ * when the downloader managed to sniff one, and by extension when it did not -
+ * which happens often enough with externally downloaded videos.
+ *
+ * Here so that a download button is not drawn on the one kind of file that is
+ * never handed out. It is not what enforces that: the ticket route refuses a
+ * video whoever asks, and the media route refuses one again on the way out.
+ */
+export function isVideoFile(filename: string | null, mimeType?: string | null) {
+  if (mimeType) {
+    return mimeType.startsWith('video/');
+  }
+  return VIDEO_EXTENSIONS.includes(getFileExtension(filename));
+}
+
 export function getFileIcon(filename: string | null) {
   return FILE_ICONS[getFileExtension(filename)] || 'insert_drive_file';
 }

@@ -27,6 +27,7 @@ import CollectionLayout from "./layouts/CollectionLayout";
 import { DocumentProvider } from "./contexts/DocumentProvider";
 import { SidebarProvider } from "./contexts/SidebarProvider";
 import { AuthProvider } from "./contexts/AuthProvider";
+import { DownloadProvider } from "./contexts/DownloadProvider";
 import { QuotaProvider } from "./contexts/QuotaProvider";
 import Users from "./pages/Users";
 import TranscriptionHistory from "./pages/TranscriptionHistory";
@@ -97,33 +98,35 @@ function ThemedApp(props: { dark: boolean }) {
           <QuotaProvider>
             <BrowseSettingsProvider>
               <GlobalModalsProvider>
-                <DocumentProvider>
-                  <SidebarProvider>
-                    <PlayerControls />
-                    <Routes>
-                      <Route path="/" element={<MainLayout />} >
-                        <Route index element={<CampaignList />} />
-                        <Route path="creators" element={<CampaignList />} />
-                        <Route path="campaigns/:id" element={<CampaignLayout />}>
-                          {campaignSubRoutes}
+                <DownloadProvider>
+                  <DocumentProvider>
+                    <SidebarProvider>
+                      <PlayerControls />
+                      <Routes>
+                        <Route path="/" element={<MainLayout />} >
+                          <Route index element={<CampaignList />} />
+                          <Route path="creators" element={<CampaignList />} />
+                          <Route path="campaigns/:id" element={<CampaignLayout />}>
+                            {campaignSubRoutes}
+                          </Route>
+                          <Route path="posts/:id" element={<PostContent />} />
+                          <Route path="products/:id" element={<ProductContent />} />
+                          <Route path="collections/:id" element={<CollectionLayout />}>
+                            <Route index element={<CampaignContent type="post" collection />} />
+                          </Route>
+                          <Route path="search" element={<Search />} />
+                          <Route path="favorites" element={<Favorites />} />
+                          <Route path="history" element={<History />} />
+                          <Route path="users" element={<Users />} />
+                          <Route path="transcription" element={<TranscriptionHistory />} />
+                          <Route path=":vanity" element={<CampaignLayout />}>
+                            {campaignSubRoutes}
+                          </Route>
                         </Route>
-                        <Route path="posts/:id" element={<PostContent />} />
-                        <Route path="products/:id" element={<ProductContent />} />
-                        <Route path="collections/:id" element={<CollectionLayout />}>
-                          <Route index element={<CampaignContent type="post" collection />} />
-                        </Route>
-                        <Route path="search" element={<Search />} />
-                        <Route path="favorites" element={<Favorites />} />
-                        <Route path="history" element={<History />} />
-                        <Route path="users" element={<Users />} />
-                        <Route path="transcription" element={<TranscriptionHistory />} />
-                        <Route path=":vanity" element={<CampaignLayout />}>
-                          {campaignSubRoutes}
-                        </Route>
-                      </Route>
-                    </Routes>
-                  </SidebarProvider>
-                </DocumentProvider>
+                      </Routes>
+                    </SidebarProvider>
+                  </DocumentProvider>
+                </DownloadProvider>
               </GlobalModalsProvider>
             </BrowseSettingsProvider>
           </QuotaProvider>

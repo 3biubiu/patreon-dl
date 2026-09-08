@@ -17,6 +17,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
+import { useDownload } from "../contexts/DownloadProvider";
 import { extractPageBlocks, type PdfTextBlock } from "../utils/PdfText";
 import PdfTranslationSettingsModal from "./settings/PdfTranslationSettingsModal";
 
@@ -292,16 +293,23 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const { target, onClose, preloadPages = DEFAULT_PRELOAD_PAGES } = props;
   const { api } = useAPI();
   const { user } = useAuth();
+  const { canDownload, requestDownload } = useDownload();
   const [ numPages, setNumPages ] = useState(0);
   const [ page, setPage ] = useState(1);
+  /**
+   * What is in the page box, which is not the page being read.
+   *
+   * They are separate because a box that only ever held a valid page number
+   * could not be typed in: clearing it to type "12" would be an empty string,
+   * and "1" on the way to "12" is a page of its own. So the box holds whatever
+   * has been typed, and only a committed value - Enter, or leaving the box -
+   * turns into a page turn.
+   */
+  const [ pageInput, setPageInput ] = useState('1');
   const [ widthPercent, setWidthPercent ] = useState(readStoredWidthPercent);
   const [ containerWidth, setContainerWidth ] = useState(0);
   const [ resizing, setResizing ] = useState(false);
   const [ failed, setFailed ] = useState(false);
-  const [ askingForCode, setAskingForCode ] = useState(false);
-  const [ code, setCode ] = useState('');
-  const [ requestingTicket, setRequestingTicket ] = useState(false);
-  const [ codeError, setCodeError ] = useState<string | null>(null);
   const [ immersive, setImmersive ] = useState(() => readStoredFlag(IMMERSIVE_STORAGE_KEY));
   const [ panelOpen, setPanelOpen ] = useState(() => readStoredFlag(PANEL_STORAGE_KEY));
   const [ pageTranslation, setPageTranslation ] = useState<PageTranslation | null>(null);
@@ -321,7 +329,6 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const requestedKey = useRef<string | null>(null);
   /** The file whose stored page has been applied, so it is applied once. */
   const resumedFile = useRef<string | null>(null);
-  const canDownload = user?.role === 'admin';
   /**
    * Whether this reader is offered the translation at all. Without it the two
    * buttons are not drawn and nothing is ever asked for - the route behind
@@ -356,9 +363,6 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setNumPages(0);
     setPage(1);
     setFailed(false);
-    setAskingForCode(false);
-    setCode('');
-    setCodeError(null);
     translationCache.current.clear();
     requestedKey.current = null;
     resumedFile.current = null;
@@ -366,6 +370,12 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setTranslationError(null);
     setLoadedPages(new Map());
   }, [target?.url]);
+
+  // Arrow buttons, a resumed reading position, a document that turned out to
+  // be shorter than the box says - the box follows the page, whatever moved it.
+  useEffect(() => {
+    setPageInput(String(page));
+  }, [page]);
 
   // The page whose text is being read is the visible one; the preloaded ones
   // are drawn but not translated. Reset on a page turn so an overlay from the
@@ -477,37 +487,24 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   }, [api, target, page, translationWanted, loadedPage]);
 
   /**
-   * Turns the code into a ticket, then navigates to the file with it.
+   * Reads what is in the page box and turns to it.
    *
-   * A plain navigation rather than a `fetch` or an `<a download>`: the answer
-   * is a `Content-Disposition` attachment, so the browser saves it and leaves
-   * the reader open behind it - and the file is never pulled into memory on
-   * its way to disk.
+   * Anything that is not a page number puts the box back to the page being
+   * read rather than complaining: a typo in a three-character box is not worth
+   * an error message, and the page it is showing is the answer to it.
    */
-  const startDownload = useCallback(() => {
-    if (!target) {
+  const goToTypedPage = useCallback(() => {
+    const wanted = Number.parseInt(pageInput, 10);
+    if (numPages === 0 || !Number.isFinite(wanted)) {
+      setPageInput(String(page));
       return;
     }
-    setRequestingTicket(true);
-    setCodeError(null);
-    void (async () => {
-      try {
-        const { token } = await api.createDownloadTicket(target.mediaId, code);
-        const url = new URL(target.url, window.location.origin);
-        url.searchParams.set('dl', '1');
-        url.searchParams.set('dlt', token);
-        window.location.href = url.toString();
-        setAskingForCode(false);
-        setCode('');
-      }
-      catch (error) {
-        setCodeError(error instanceof Error ? error.message : 'Could not start the download');
-      }
-      finally {
-        setRequestingTicket(false);
-      }
-    })();
-  }, [api, code, target]);
+    const next = Math.min(Math.max(1, wanted), numPages);
+    // Set even when it is the page already open: it is what tidies "007" and a
+    // number past the end of the document back into what was turned to.
+    setPageInput(String(next));
+    setPage(next);
+  }, [ pageInput, numPages, page ]);
 
   // Opens the file where it was left. Once per file, and only once the page
   // count is known - a stored page from a file that has since been replaced by
@@ -660,8 +657,26 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           disabled={page <= 1}
           onClick={() => setPage((current) => Math.max(1, current - 1))}
         />
-        <span className="pdf-viewer__page-count">
-          {numPages > 0 ? `${page} / ${numPages}` : '-'}
+        <span className="pdf-viewer__page-jump">
+          <Input
+            className="pdf-viewer__page-input"
+            size="small"
+            value={pageInput}
+            aria-label="Go to page"
+            inputMode="numeric"
+            disabled={numPages === 0}
+            onChange={(e) => setPageInput(e.target.value)}
+            // Committed on Enter, and again on the way out - a number typed
+            // and then clicked away from is still a page someone asked for.
+            onPressEnter={goToTypedPage}
+            onBlur={goToTypedPage}
+            // So the next thing typed replaces the page number rather than
+            // being appended to it.
+            onFocus={(e) => e.target.select()}
+          />
+          <span className="pdf-viewer__page-count">
+            {numPages > 0 ? `/ ${numPages}` : '/ -'}
+          </span>
         </span>
         <Button
           type="text"
@@ -746,16 +761,17 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         {
           // Hiding this from everyone else is only tidiness - the route that
           // hands out the ticket is what actually refuses them.
-          canDownload ? (
+          canDownload && target ? (
             <Button
               type="text"
               size="small"
               icon={<DownloadOutlined />}
               aria-label="Download"
-              onClick={() => {
-                setCodeError(null);
-                setAskingForCode(true);
-              }}
+              onClick={() => requestDownload({
+                url: target.url,
+                mediaId: target.mediaId,
+                filename: target.filename
+              })}
             />
           ) : null
         }
@@ -857,44 +873,6 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       </ol>
     </aside>
   ) : null;
-
-  const codePrompt = (
-    <Modal
-      open={askingForCode}
-      title="Download code"
-      okText="Download"
-      centered
-      width={360}
-      confirmLoading={requestingTicket}
-      okButtonProps={{ disabled: !code }}
-      onOk={startDownload}
-      onCancel={() => {
-        setAskingForCode(false);
-        setCode('');
-        setCodeError(null);
-      }}
-    >
-      <p className="text-body-secondary">
-        {target?.filename}
-      </p>
-      <Input.Password
-        value={code}
-        autoFocus
-        inputMode="numeric"
-        placeholder="Enter the download code"
-        onChange={(e) => {
-          setCode(e.target.value);
-          setCodeError(null);
-        }}
-        onPressEnter={() => { if (code && !requestingTicket) { startDownload(); } }}
-      />
-      {
-        codeError ? (
-          <Alert className="mt-3" type="error" showIcon title={codeError} />
-        ) : null
-      }
-    </Modal>
-  );
 
   return (
     <>
@@ -1004,7 +982,6 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         {panel}
       </div>
     </Modal>
-    {codePrompt}
     <PdfTranslationSettingsModal
       open={settingsOpen}
       onClose={() => setSettingsOpen(false)}

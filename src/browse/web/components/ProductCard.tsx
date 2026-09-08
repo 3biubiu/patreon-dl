@@ -10,8 +10,9 @@ import ObjectHelper from "../../../utils/ObjectHelper";
 import path from "path";
 import MediaImage from "./MediaImage";
 import { ProductType } from "../../../entities/Product";
-import { getCampaignBaseUrl, getContentUrl } from "../utils/Misc";
+import { getCampaignBaseUrl, getContentUrl, getFileIcon, isVideoFile } from "../utils/Misc";
 import Icon from "./Icon";
+import { useDownload } from "../contexts/DownloadProvider";
 
 interface ProductCardProps {
   product: Product;
@@ -65,6 +66,7 @@ function convertToMediaListItems(mi: Downloadable[], product: Product) {
 function ProductCard(props: ProductCardProps) {
   const { product, variant = 'full', showCampaign = false } = props;
   const location = useLocation();
+  const { canDownload, requestDownload } = useDownload();
 
   const displayableMedia = useMemo(() => ({
     content: getDisplayableMedia(product.contentMedia),
@@ -86,32 +88,59 @@ function ProductCard(props: ProductCardProps) {
       : null;
   }, [coverImage, product]);
 
+  /**
+   * The product's files - archives, models, anything with no preview.
+   *
+   * Named rather than linked, for the reason the same list on a post is: the
+   * link they used to carry was a download for whoever followed it, and a
+   * download is now a ticket an administrator asks for. Videos are never
+   * handed out, so no button is drawn on one.
+   */
   const getFileLinksEl = useCallback((files: Downloadable[]) => {
-    const links = files.reduce<{title: string; url: string}[]>((result, file) => {
+    const entries = files.reduce<{
+      mediaId: string; filename: string; url: string; isVideo: boolean
+    }[]>((result, file) => {
       if (file.downloaded?.path) {
-        const title = ObjectHelper.getProperty(file, 'filename') || path.parse(file.downloaded.path).base;
+        const filename = ObjectHelper.getProperty(file, 'filename') ||
+          path.parse(file.downloaded.path).base;
         result.push({
-          title,
-          url: `/media/${file.id}`
+          mediaId: file.id,
+          filename,
+          url: `/media/${file.id}`,
+          isVideo: isVideoFile(filename, file.downloaded.mimeType)
         });
       }
       return result;
     }, []);
-    return links.length > 0 ? (
-      <div>
+    return entries.length > 0 ? (
+      <div className="product-card__files">
         <p>Files:</p>
-        <ul>
+        <ul className="product-card__file-list">
           {
-            links.map(({title, url}) => (
-              <li>
-                <a href={url}>{title}</a>
+            entries.map((file) => (
+              <li key={file.mediaId} className="product-card__file">
+                <Icon name={getFileIcon(file.filename)} outlined className="product-card__file-icon" />
+                <span className="product-card__file-name">{file.filename}</span>
+                {
+                  canDownload && !file.isVideo ? (
+                    <button
+                      type="button"
+                      className="product-card__file-download"
+                      title={`Download ${file.filename}`}
+                      aria-label={`Download ${file.filename}`}
+                      onClick={() => requestDownload(file)}
+                    >
+                      <Icon name="download" />
+                    </button>
+                  ) : null
+                }
               </li>
             ))
           }
         </ul>
       </div>
     ) : null;
-  }, [])
+  }, [ canDownload, requestDownload ])
 
   const previewMediaEl = useMemo(() => {
     if (variant === 'compact') {

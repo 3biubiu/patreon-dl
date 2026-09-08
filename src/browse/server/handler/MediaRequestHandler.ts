@@ -6,7 +6,7 @@ import fs from 'fs';
 import Basehandler from './BaseHandler.js';
 import contentDisposition from 'content-disposition';
 import { type Downloaded } from '../../../entities';
-import { checkMediaAccess, isMediaElementRequest } from '../MediaAccessGuard.js';
+import { checkMediaAccess, isDocumentRequest, isMediaElementRequest } from '../MediaAccessGuard.js';
 import type QuotaStore from '../QuotaStore.js';
 import { consumeQuota } from '../QuotaGuard.js';
 import mime from 'mime-types';
@@ -48,6 +48,18 @@ function isUsableFile(filePath: string) {
   catch {
     return false;
   }
+}
+
+/**
+ * A PDF is the one document the app has a viewer for, so it is served inline
+ * where an archive or a 3D model is not - see `handleMediaRequest`. Judged by
+ * both mime type and extension, because either alone is wrong often enough:
+ * the DB records no mime type for some files, and some record
+ * "application/octet-stream" for a file plainly named ".pdf".
+ */
+function looksLikePdf(filePath: string, mimeType?: string | null) {
+  return mimeType?.toLowerCase() === 'application/pdf' ||
+    path.extname(filePath).toLowerCase() === '.pdf';
 }
 
 function looksLikeImage(filePath: string, mimeType?: string | null) {
@@ -185,7 +197,11 @@ export default class MediaRequestHandler extends Basehandler {
     const { lapid } = req.query; // Linked attachment parent post Id
     // A ticket is only ever asked for in order to download, so it says so on
     // its own - there is no reading of one that does not mean "save this file".
-    const isDownloadRequest = (req.query.dl === '1' || !!ticketUserId) && !isRequestingThumbnail;
+    // It is also the *only* thing that says so: an appended "dl=1" used to
+    // turn any media URL into a download endpoint for whoever thought to add
+    // it, which left the permission to download a file resting on nobody
+    // thinking to.
+    const isDownloadRequest = !!ticketUserId && !isRequestingThumbnail;
     let downloaded: Downloaded | null | undefined = null;
     if (lapid) {
       const post = this.#db.getContent(lapid as string, 'post');
@@ -224,11 +240,39 @@ export default class MediaRequestHandler extends Basehandler {
     }
     const isVideo = looksLikeVideo(mediaFilePath, downloaded.mimeType);
     const isPlayable = isVideo || !!downloaded.mimeType?.startsWith('audio/');
-    // "dl=1" is how the attachment and file-card links offer a plain download,
-    // so it excuses a request that did not come from a player - but never for
-    // a video. Nothing in the app hands a video out that way, which is what
-    // made an appended "dl=1" the one bypass worth having: it turned every
-    // media URL into a download endpoint for anyone who thought to add it.
+    const isPdf = looksLikePdf(mediaFilePath, downloaded.mimeType);
+    /**
+     * Whether the app itself has anywhere to put this file: a picture, a
+     * player, or the PDF reader.
+     *
+     * Everything else - an archive, a 3D model, a document - has no viewer
+     * here, so the only thing a request for one can mean is "keep this file",
+     * whether or not it says `dl`. That is a download, and downloads go
+     * through a ticket.
+     */
+    const isDisplayable = isPlayable || isPdf ||
+      looksLikeImage(mediaFilePath, downloaded.mimeType);
+    if (!isThumbnail && !isDisplayable && !ticketUserId) {
+      this.log('debug',
+        `Refused media file "${mediaFilePath}" - a file the app cannot display ` +
+        `is only served against a download ticket (${this.#describeFetchMetadata(req)})`
+      );
+      res.status(403).send('Forbidden');
+      return;
+    }
+    // The reader asks for a PDF from inside the page, which arrives as a
+    // "fetch"; a tab opened at the same URL asks for it as a "document" and
+    // gets the browser's own viewer, which has a save button on it. That is a
+    // download with no ticket behind it, so it is refused as one - the reader
+    // is where a PDF is read here, and a ticket is how one is kept.
+    if (!isThumbnail && isPdf && !ticketUserId && isDocumentRequest(req)) {
+      this.log('debug',
+        `Refused document request for PDF "${mediaFilePath}" ` +
+        `(${this.#describeFetchMetadata(req)})`
+      );
+      res.status(403).send('Forbidden');
+      return;
+    }
     // Never a video, ticket or no ticket. A ticket stands the fetch-metadata
     // guard down; it does not make a video downloadable, and one issued for
     // a video is refused here as well as at the point it is asked for.

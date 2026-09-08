@@ -45,4 +45,50 @@
       }
     }
   }
+
+  // The product's files. Laid out like a post's attachments, because they are
+  // the same thing seen from a different page.
+  &__file-list {
+    list-style: none;
+    padding-left: 0;
+    margin-bottom: 0;
+  }
+
+  &__file {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.25em 0.5em;
+    border-radius: var(--bs-border-radius);
+  }
+
+  &__file-icon {
+    font-size: 1.2em;
+    color: var(--bs-secondary-color);
+    flex-shrink: 0;
+  }
+
+  &__file-name {
+    min-width: 0;
+    word-break: break-word;
+  }
+
+  // Administrators only, so it is drawn quietly.
+  &__file-download {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    margin-left: auto;
+    padding: 0.1em 0.3em;
+    border: none;
+    border-radius: var(--bs-border-radius-sm);
+    background: none;
+    color: var(--bs-secondary-color);
+    cursor: pointer;
+
+    &:hover {
+      color: var(--bs-link-hover-color);
+      background-color: var(--bs-secondary-bg);
+    }
+  }
 }

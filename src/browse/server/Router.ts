@@ -21,6 +21,8 @@ import { resolveDownloadTicket, type DownloadTicketRequest } from './DownloadTic
 import PdfTranslationRequestHandler from './handler/PdfTranslationRequestHandler.js';
 import { createPdfTranslationServices, type PdfTranslationConfig } from './pdf/Config.js';
 import TranscriptionAPIRequestHandler from './handler/TranscriptionAPIRequestHandler.js';
+import UploadAPIRequestHandler from './handler/UploadAPIRequestHandler.js';
+import UploadStore from './UploadStore.js';
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
 import type QuotaStore from './QuotaStore.js';
@@ -48,6 +50,7 @@ interface RequestHandlers {
   translation: TranslationAPIRequestHandler;
   history: HistoryAPIRequestHandler;
   pdfTranslation: PdfTranslationRequestHandler;
+  uploads: UploadAPIRequestHandler;
 }
 
 class _Router {
@@ -207,6 +210,24 @@ class _Router {
       next();
     };
 
+    /**
+     * Uploading a video of one's own to be transcribed, which not every
+     * account may do.
+     *
+     * The page is hidden from an account without it, but that is only
+     * tidiness in the same way the reader's translation buttons are: this is
+     * what refuses the work, and it stands in front of reading an upload back
+     * as well as making one - the permission is what the whole page is for.
+     */
+    const requireUploadTranscription: RequestHandler = (req, res, next) => {
+      const user = (req as AuthenticatedRequest).authUser;
+      if (!user?.canUploadTranscription) {
+        res.status(403).json({ error: 'Uploading is not enabled for this account' });
+        return;
+      }
+      next();
+    };
+
     // A user restricted to certain creators is refused everything belonging to
     // the others, whichever way the route names it. The campaign listing is
     // narrowed by its handler instead, in SQL, so that its paging counts only
@@ -349,6 +370,44 @@ class _Router {
       this.#handlers.transcription.handleStatusRequest(req, res)
     );
 
+    /*
+     * Uploads: somebody's own video, transcribed and translated by the same
+     * pipeline the library's videos go through.
+     *
+     * The audio arrives as the request body rather than as a multipart form -
+     * see the handler - so this route is deliberately not behind anything that
+     * would read the body first.
+     */
+    this.#router.post('/api/uploads', requireUploadTranscription, (req, res) => {
+      this.#handlers.uploads.handleUploadRequest(req, res).catch(() => {
+        // The handler reports what it knows; this only makes sure a request
+        // that fell over still gets an answer rather than hanging.
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Could not accept the upload' });
+        }
+      });
+    });
+
+    this.#router.get('/api/uploads', requireUploadTranscription, (req, res) =>
+      this.#handlers.uploads.handleListRequest(req, res)
+    );
+
+    this.#router.delete('/api/uploads/:id', requireUploadTranscription, (req, res) =>
+      this.#handlers.uploads.handleDeleteRequest(req, res, req.params.id)
+    );
+
+    this.#router.get('/api/uploads/:id/subtitles', requireUploadTranscription, (req, res) =>
+      this.#handlers.uploads.handleSubtitleListRequest(req, res, req.params.id)
+    );
+
+    this.#router.get(
+      '/api/uploads/:id/subtitles/:filename',
+      requireUploadTranscription,
+      (req, res) => this.#handlers.uploads.handleSubtitleDownloadRequest(
+        req, res, req.params.id, req.params.filename
+      )
+    );
+
     // The API key is set and cleared here. Administrators only, and the key
     // itself is never in a response - see the handler.
     this.#router.get('/api/transcription/settings', requireAdmin, (req, res) =>
@@ -387,7 +446,12 @@ class _Router {
       this.#handlers.translation.handleCancelAllRequest(req, res)
     );
 
-    this.#router.get('/api/translation/status', requireAdmin, (req, res) =>
+    // Not an administrator's route, for the same reason the transcription one
+    // is not: it answers whether the server can translate at all, and the
+    // upload page has to know that to say whether it can offer the Chinese
+    // pass. The answer carries no key and no setting - only yes or no, and why
+    // not.
+    this.#router.get('/api/translation/status', (req, res) =>
       this.#handlers.translation.handleStatusRequest(req, res)
     );
 
@@ -622,6 +686,16 @@ export function getRouter(
     ),
     translation: new TranslationAPIRequestHandler(
       transcription.index, translation.queue, translation.settings,
+      logger
+    ),
+    uploads: new UploadAPIRequestHandler(
+      UploadStore.load(
+        path.resolve(dataDir, '.patreon-dl', 'uploads.json'),
+        path.resolve(dataDir, '.patreon-dl', 'uploads'),
+        logger
+      ),
+      transcription.queue, transcription.index, translation.queue,
+      transcription.settings, transcription.vad,
       logger
     )
   }, authStore, quotaStore, regionGuard, db).router;

@@ -20,6 +20,7 @@ export const translations = {
   nav_history: { en: 'History', zh: '历史' },
   nav_users: { en: 'Users', zh: '用户' },
   nav_transcription: { en: 'Transcription', zh: '转录' },
+  nav_uploads: { en: 'Upload', zh: '上传转录' },
   nav_settings: { en: 'Settings', zh: '设置' },
   nav_signout: { en: 'Sign out', zh: '退出登录' },
   nav_creators: { en: 'Creators', zh: '创作者' },

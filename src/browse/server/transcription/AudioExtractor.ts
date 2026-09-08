@@ -127,6 +127,14 @@ export default class AudioExtractor {
     this.#logger = logger;
   }
 
+  /**
+   * The binary this was built to call, so a worker thread can build its own
+   * extractor pointing at the same one - see `VADWorker`.
+   */
+  get ffmpegPath() {
+    return this.#ffmpegPath;
+  }
+
   /** Length of the file in seconds, or `null` when ffprobe cannot tell. */
   async probeDuration(videoPath: string): Promise<number | null> {
     const args = [

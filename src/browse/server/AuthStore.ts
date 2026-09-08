@@ -5,6 +5,7 @@ import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
 import {
   DEFAULT_CAN_TRANSLATE_PDF,
+  DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
   type AuthUser,
   type Registration,
   type UserRole
@@ -193,6 +194,21 @@ function normalizeCanTranslatePdf(
   return typeof canTranslatePdf === 'boolean' ? canTranslatePdf : fallback;
 }
 
+/**
+ * The stored form of the upload permission. An administrator always has it,
+ * for the reason they always have the rest.
+ */
+function normalizeCanUploadTranscription(
+  canUploadTranscription: boolean | undefined,
+  role: UserRole,
+  fallback: boolean
+): boolean {
+  if (role === 'admin') {
+    return true;
+  }
+  return typeof canUploadTranscription === 'boolean' ? canUploadTranscription : fallback;
+}
+
 function hashPassword(password: string, salt: string) {
   return crypto.scryptSync(password, salt, SCRYPT_KEY_LENGTH).toString('base64');
 }
@@ -251,6 +267,12 @@ export default class AuthStore {
         // migration should decide. Only accounts made from here on start on
         // `DEFAULT_CAN_TRANSLATE_PDF`.
         user.canTranslatePdf = normalizeCanTranslatePdf(user.canTranslatePdf, user.role, true);
+        // Not the same decision as the line above: uploading did not exist
+        // before this, so no account is losing anything by starting without
+        // it. See `DEFAULT_CAN_UPLOAD_TRANSCRIPTION`.
+        user.canUploadTranscription = normalizeCanUploadTranscription(
+          user.canUploadTranscription, user.role, DEFAULT_CAN_UPLOAD_TRANSCRIPTION
+        );
         // Accounts written before bans existed are not banned; a reason with
         // no ban behind it is stale and dropped.
         user.banned = user.banned === true && user.role !== 'admin';
@@ -281,6 +303,7 @@ export default class AuthStore {
           quota: { ...UNLIMITED_QUOTA },
           loginRegions: null,
           canTranslatePdf: true,
+          canUploadTranscription: true,
           banned: false,
           banReason: null,
           salt,
@@ -414,6 +437,7 @@ export default class AuthStore {
     quota?: Partial<UserQuota> | null;
     loginRegions?: string[] | null;
     canTranslatePdf?: boolean;
+    canUploadTranscription?: boolean;
   }): AuthUser {
     const username = params.username.trim();
     if (!username) {
@@ -442,6 +466,11 @@ export default class AuthStore {
       canTranslatePdf: normalizeCanTranslatePdf(
         params.canTranslatePdf, params.role, DEFAULT_CAN_TRANSLATE_PDF
       ),
+      // Off unless it is asked for, for the same reason and more so: an
+      // upload is work the server does and API credit it spends.
+      canUploadTranscription: normalizeCanUploadTranscription(
+        params.canUploadTranscription, params.role, DEFAULT_CAN_UPLOAD_TRANSCRIPTION
+      ),
       banned: false,
       banReason: null,
       salt,
@@ -459,6 +488,7 @@ export default class AuthStore {
     quota?: Partial<UserQuota> | null;
     loginRegions?: string[] | null;
     canTranslatePdf?: boolean;
+    canUploadTranscription?: boolean;
   }): AuthUser {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
@@ -506,6 +536,9 @@ export default class AuthStore {
     // starts from whatever is set here rather than from a stale denial.
     user.canTranslatePdf = normalizeCanTranslatePdf(
       params.canTranslatePdf, user.role, user.canTranslatePdf
+    );
+    user.canUploadTranscription = normalizeCanUploadTranscription(
+      params.canUploadTranscription, user.role, user.canUploadTranscription
     );
     if (params.password !== undefined) {
       this.#assertPassword(params.password);
@@ -604,6 +637,7 @@ export default class AuthStore {
       quota: { ...DEFAULT_USER_QUOTA },
       loginRegions: null,
       canTranslatePdf: DEFAULT_CAN_TRANSLATE_PDF,
+      canUploadTranscription: DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
       banned: false,
       banReason: null,
       salt: registration.salt,
@@ -666,7 +700,7 @@ export default class AuthStore {
   #toAuthUser(user: StoredUser): AuthUser {
     const {
       id, username, role, createdAt, visibleCampaigns, quota, loginRegions,
-      canTranslatePdf, banned, banReason
+      canTranslatePdf, canUploadTranscription, banned, banReason
     } = user;
     // A copy, so a caller cannot reach into the store and edit a permission
     // in place - the array would otherwise be the live one.
@@ -676,6 +710,7 @@ export default class AuthStore {
       quota: { ...quota },
       loginRegions: loginRegions ? [ ...loginRegions ] : null,
       canTranslatePdf,
+      canUploadTranscription,
       banned,
       banReason
     };

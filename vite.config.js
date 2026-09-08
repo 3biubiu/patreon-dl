@@ -20,6 +20,18 @@ export default defineConfig({
         {
           src: "../../../node_modules/pdfjs-dist/standard_fonts",
           dest: "assets/pdfjs",
+        },
+        // ffmpeg's WebAssembly build, which the upload page uses to strip a
+        // video to audio before sending it. Served from here rather than from
+        // a CDN for the same reason as everything above: this application has
+        // to work with no outside network.
+        {
+          src: "../../../node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.js",
+          dest: "assets/ffmpeg",
+        },
+        {
+          src: "../../../node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.wasm",
+          dest: "assets/ffmpeg",
         }
       ]
     })

@@ -31,6 +31,7 @@ import { DownloadProvider } from "./contexts/DownloadProvider";
 import { QuotaProvider } from "./contexts/QuotaProvider";
 import Users from "./pages/Users";
 import TranscriptionHistory from "./pages/TranscriptionHistory";
+import Uploads from "./pages/Uploads";
 import { DARK_SCHEME_QUERY, useMediaQuery } from "./utils/useMediaQuery";
 import PlayerControls from "./components/PlayerControls";
 import History from "./pages/History";
@@ -119,6 +120,7 @@ function ThemedApp(props: { dark: boolean }) {
                           <Route path="history" element={<History />} />
                           <Route path="users" element={<Users />} />
                           <Route path="transcription" element={<TranscriptionHistory />} />
+                          <Route path="uploads" element={<Uploads />} />
                           <Route path=":vanity" element={<CampaignLayout />}>
                             {campaignSubRoutes}
                           </Route>

@@ -11,7 +11,8 @@ import {
   SettingOutlined,
   StarOutlined,
   TeamOutlined,
-  AudioOutlined
+  AudioOutlined,
+  CloudUploadOutlined
 } from "@ant-design/icons";
 import { type Campaign } from "../../../entities";
 import { useAPI } from "../contexts/APIProvider";
@@ -47,6 +48,7 @@ const FAVORITES_KEY = '/favorites';
 const HISTORY_KEY = '/history';
 const USERS_KEY = '/users';
 const TRANSCRIPTION_KEY = '/transcription';
+const UPLOADS_KEY = '/uploads';
 const SIGN_OUT_KEY = 'sign-out';
 const COLLAPSE_KEY = 'collapse';
 
@@ -153,6 +155,12 @@ function Sidebar(props: SidebarProps) {
       items.push({ key: USERS_KEY, icon: <TeamOutlined />, label: t('nav_users') });
       items.push({ key: TRANSCRIPTION_KEY, icon: <AudioOutlined />, label: t('nav_transcription') });
     }
+    // Not a role but a permission of its own, so this is not folded into the
+    // block above. The routes behind the page refuse an account without it
+    // whatever the menu shows.
+    if (user?.canUploadTranscription) {
+      items.push({ key: UPLOADS_KEY, icon: <CloudUploadOutlined />, label: t('nav_uploads') });
+    }
     items.push(
       { key: SETTINGS_KEY, icon: <SettingOutlined />, label: t('nav_settings') },
       { key: SIGN_OUT_KEY, icon: <LogoutOutlined />, label: t('nav_signout') }
@@ -165,7 +173,7 @@ function Sidebar(props: SidebarProps) {
       });
     }
     return items;
-  }, [user?.role, collapsed, onToggleCollapse, t]);
+  }, [user?.role, user?.canUploadTranscription, collapsed, onToggleCollapse, t]);
 
   // A campaign stays selected while any of its sub-pages is open.
   const selectedKeys = useMemo(() => {

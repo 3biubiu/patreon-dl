@@ -10,6 +10,7 @@ import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogE
 import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionProvider, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
+import { type UploadJobView } from '../../types/Upload';
 import {
   type DeepLKeyStatus,
   type PdfTranslationResponse,
@@ -721,6 +722,78 @@ class API {
       }
     ));
     return { token: data.token as string, expiresAt: data.expiresAt as number };
+  }
+
+  /** Everything this account has uploaded; an administrator gets everybody's. */
+  async listUploads(): Promise<UploadJobView[]> {
+    const data = await readJSON(await apiFetch('/api/uploads'));
+    return data.jobs as UploadJobView[];
+  }
+
+  /**
+   * Sends one already-extracted audio track and queues it.
+   *
+   * `XMLHttpRequest` rather than `fetch`, alone among the calls here, because
+   * this is the only one where how far it has got matters: `fetch` reports
+   * nothing about an upload until it is over, and an upload is the part of
+   * this page that takes a while.
+   */
+  uploadAudio(
+    audio: Blob,
+    params: { title: string; duration: number | null; translate: boolean },
+    onProgress?: (fraction: number) => void,
+    signal?: AbortSignal
+  ): Promise<UploadJobView> {
+    const url = new URL('/api/uploads', window.location.origin);
+    url.searchParams.set('title', params.title);
+    if (params.duration !== null) {
+      url.searchParams.set('duration', String(params.duration));
+    }
+    if (params.translate) {
+      url.searchParams.set('translate', '1');
+    }
+
+    return new Promise<UploadJobView>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open('POST', url.toString());
+      request.setRequestHeader('Content-Type', 'application/octet-stream');
+      request.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          onProgress?.(event.loaded / event.total);
+        }
+      });
+      request.addEventListener('load', () => {
+        let body: { job?: UploadJobView; error?: string } = {};
+        try {
+          body = JSON.parse(request.responseText);
+        }
+        catch { /* An answer that is not JSON is reported by status alone. */ }
+        if (request.status === 401) {
+          window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+          reject(new UnauthorizedError());
+          return;
+        }
+        if (request.status >= 400 || !body.job) {
+          reject(Error(body.error || `Upload failed (${request.status})`));
+          return;
+        }
+        resolve(body.job);
+      });
+      request.addEventListener('error', () => reject(Error('The upload could not be sent')));
+      request.addEventListener('abort', () => reject(Error('Aborted')));
+      signal?.addEventListener('abort', () => request.abort(), { once: true });
+      request.send(audio);
+    });
+  }
+
+  async deleteUpload(id: string): Promise<boolean> {
+    const data = await readJSON(await apiFetch(`/api/uploads/${id}`, { method: 'DELETE' }));
+    return !!data.removed;
+  }
+
+  /** Where one of an upload's subtitles is downloaded from. */
+  uploadSubtitleURL(id: string, filename: string) {
+    return `/api/uploads/${encodeURIComponent(id)}/subtitles/${encodeURIComponent(filename)}`;
   }
 
   async startTranscription(mediaId: string): Promise<TranscriptionRecord> {

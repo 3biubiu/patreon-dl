@@ -14,6 +14,17 @@ export type UserRole = 'admin' | 'user';
 export const DEFAULT_CAN_TRANSLATE_PDF = false;
 
 /**
+ * Whether a newly created ordinary account may upload a video of its own to be
+ * transcribed.
+ *
+ * Off, and off for the accounts that already existed when this arrived too -
+ * unlike the PDF translation, which was taken away from nobody. There was no
+ * such thing as uploading before this, so no account can be said to have been
+ * using it, and every upload spends the transcription and translation keys.
+ */
+export const DEFAULT_CAN_UPLOAD_TRANSCRIPTION = false;
+
+/**
  * A user as the browser is allowed to see them - no salt, no password hash.
  *
  * The permissions live here rather than anywhere else because the auth guard
@@ -71,6 +82,17 @@ export interface AuthUser {
    */
   canTranslatePdf: boolean;
   /**
+   * Whether this account may upload its own video to be transcribed.
+   *
+   * `false` hides the upload page and is refused by every route behind it.
+   * What the account can already do is unaffected: the captions on the videos
+   * in the library are read by anyone whose player asks for them.
+   *
+   * Always `true` for administrators, for the reason every other permission
+   * is: they can edit their own.
+   */
+  canUploadTranscription: boolean;
+  /**
    * Locked out entirely - no session survives it and no sign-in gets past it.
    * Put on by the sign-in anomaly rule, taken off only by an administrator.
    * Never `true` for an administrator.
@@ -124,6 +146,8 @@ export interface CreateUserRequest {
   loginRegions?: string[] | null;
   /** Omit to start the account on {@link DEFAULT_CAN_TRANSLATE_PDF}. */
   canTranslatePdf?: boolean;
+  /** Omit to start the account on {@link DEFAULT_CAN_UPLOAD_TRANSCRIPTION}. */
+  canUploadTranscription?: boolean;
 }
 
 export interface UpdateUserRequest {
@@ -137,6 +161,8 @@ export interface UpdateUserRequest {
   loginRegions?: string[] | null;
   /** Omit to leave as it is. */
   canTranslatePdf?: boolean;
+  /** Omit to leave as it is. */
+  canUploadTranscription?: boolean;
 }
 
 /**

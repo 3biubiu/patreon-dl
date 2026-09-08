@@ -184,8 +184,12 @@ export default class TranscriptionQueue {
   /**
    * Queues `mediaId`. Returns the existing record when one is already queued
    * or running, so a double click does not transcribe twice.
+   *
+   * `title` is what the job is called in the history, for the one caller whose
+   * file on disk is not worth showing: an upload is stored under a name this
+   * server chose, and "audio.ogg" tells nobody which video it was.
    */
-  enqueue(mediaId: string, videoPath: string) {
+  enqueue(mediaId: string, videoPath: string, title?: string) {
     const existing = this.#index.get(mediaId);
     if (existing && (existing.state === 'pending' || existing.state === 'running')) {
       return existing;
@@ -193,7 +197,7 @@ export default class TranscriptionQueue {
     const record = this.#index.markPending(
       mediaId,
       path.relative(this.#dataDir, videoPath),
-      path.basename(videoPath)
+      title || path.basename(videoPath)
     );
     this.#pending.push({ mediaId, videoPath, controller: new AbortController() });
     void this.#drain();

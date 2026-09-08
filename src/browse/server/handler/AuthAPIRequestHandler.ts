@@ -105,19 +105,19 @@ function readLoginRegions(body: unknown): string[] | null | undefined {
 }
 
 /**
- * The PDF translation permission as it arrived over the wire.
+ * One of the yes-or-no permissions as it arrived over the wire.
  *
  * `undefined` means the field was not sent - leave what is on file alone.
  * Anything other than a boolean is rejected rather than coerced, so a
  * malformed body cannot hand out a permission by being truthy.
  */
-function readCanTranslatePdf(body: unknown): boolean | undefined {
-  if (!body || typeof body !== 'object' || !('canTranslatePdf' in body)) {
+function readPermission(body: unknown, field: string): boolean | undefined {
+  if (!body || typeof body !== 'object' || !(field in body)) {
     return undefined;
   }
-  const value = (body as { canTranslatePdf: unknown }).canTranslatePdf;
+  const value = (body as Record<string, unknown>)[field];
   if (typeof value !== 'boolean') {
-    throw Error('"canTranslatePdf" must be true or false');
+    throw Error(`"${field}" must be true or false`);
   }
   return value;
 }
@@ -435,10 +435,12 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const visibleCampaigns = readVisibleCampaigns(req.body);
       const quota = readQuota(req.body);
       const loginRegions = readLoginRegions(req.body);
-      const canTranslatePdf = readCanTranslatePdf(req.body);
+      const canTranslatePdf = readPermission(req.body, 'canTranslatePdf');
+      const canUploadTranscription = readPermission(req.body, 'canUploadTranscription');
       res.json({
         user: this.#store.createUser({
-          username, password, role, visibleCampaigns, quota, loginRegions, canTranslatePdf
+          username, password, role, visibleCampaigns, quota, loginRegions,
+          canTranslatePdf, canUploadTranscription
         })
       });
     }
@@ -454,9 +456,11 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const visibleCampaigns = readVisibleCampaigns(req.body);
       const quota = readQuota(req.body);
       const loginRegions = readLoginRegions(req.body);
-      const canTranslatePdf = readCanTranslatePdf(req.body);
+      const canTranslatePdf = readPermission(req.body, 'canTranslatePdf');
+      const canUploadTranscription = readPermission(req.body, 'canUploadTranscription');
       const user = this.#store.updateUser(id, {
-        password, role, visibleCampaigns, quota, loginRegions, canTranslatePdf
+        password, role, visibleCampaigns, quota, loginRegions,
+        canTranslatePdf, canUploadTranscription
       });
       // Changing your own password does not sign you out: the session names a
       // user id, and that has not changed.

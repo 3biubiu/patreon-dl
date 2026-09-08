@@ -3,7 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Form, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from "antd";
 import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, ReloadOutlined, SafetyCertificateOutlined, UnlockOutlined, UserAddOutlined } from "@ant-design/icons";
 import { type FormInstance } from "antd";
-import { DEFAULT_CAN_TRANSLATE_PDF, type AuthUser, type LoginLogEntry, type Registration, type UserRole } from "../../types/Auth";
+import {
+  DEFAULT_CAN_TRANSLATE_PDF,
+  DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
+  type AuthUser,
+  type LoginLogEntry,
+  type Registration,
+  type UserRole
+} from "../../types/Auth";
 import { DEFAULT_USER_QUOTA, type UserQuota } from "../../types/Quota";
 import { describeLoginRegion, LOGIN_REGION_SEPARATOR } from "../../types/LoginRegion";
 import { useAPI } from "../contexts/APIProvider";
@@ -46,6 +53,7 @@ interface UserFormValues {
   loginRegionAccess: LoginRegionAccess;
   loginRegions: string[];
   canTranslatePdf: boolean;
+  canUploadTranscription: boolean;
 }
 
 const ROLE_OPTIONS = [
@@ -363,7 +371,9 @@ function Users() {
         target === 'new' ? 'anywhere' : (target.loginRegions ? 'selected' : 'anywhere'),
       loginRegions: target === 'new' ? [] : (target.loginRegions || []),
       canTranslatePdf:
-        target === 'new' ? DEFAULT_CAN_TRANSLATE_PDF : target.canTranslatePdf
+        target === 'new' ? DEFAULT_CAN_TRANSLATE_PDF : target.canTranslatePdf,
+      canUploadTranscription:
+        target === 'new' ? DEFAULT_CAN_UPLOAD_TRANSCRIPTION : target.canUploadTranscription
     });
   }, [form]);
 
@@ -406,6 +416,9 @@ function Users() {
     // An administrator always has it, so a promotion hands it over rather than
     // carrying a denial the server would ignore anyway.
     const canTranslatePdf = values.role === 'admin' || values.canTranslatePdf === true;
+    // And the same for uploading, for the same reason.
+    const canUploadTranscription =
+      values.role === 'admin' || values.canUploadTranscription === true;
     try {
       if (editing === 'new') {
         await api.createUser({
@@ -415,7 +428,8 @@ function Users() {
           visibleCampaigns,
           quota,
           loginRegions,
-          canTranslatePdf
+          canTranslatePdf,
+          canUploadTranscription
         });
       }
       else {
@@ -427,7 +441,8 @@ function Users() {
           visibleCampaigns,
           quota,
           loginRegions,
-          canTranslatePdf
+          canTranslatePdf,
+          canUploadTranscription
         });
       }
       setEditing(null);
@@ -597,6 +612,13 @@ function Users() {
                     dataIndex: 'canTranslatePdf',
                     render: (canTranslatePdf: boolean) => (
                       canTranslatePdf ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                    )
+                  },
+                  {
+                    title: 'Uploads',
+                    dataIndex: 'canUploadTranscription',
+                    render: (canUploadTranscription: boolean) => (
+                      canUploadTranscription ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
                     )
                   },
                   {
@@ -962,6 +984,7 @@ function PermissionFields(props: {
         loading={regionsLoading}
       />
       <PdfTranslationField form={form} />
+      <UploadTranscriptionField form={form} />
     </>
   );
 }
@@ -985,6 +1008,7 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
   const loginRegionAccess = Form.useWatch('loginRegionAccess', form);
   const loginRegions = Form.useWatch('loginRegions', form);
   const canTranslatePdf = Form.useWatch('canTranslatePdf', form);
+  const canUploadTranscription = Form.useWatch('canUploadTranscription', form);
 
   if (role === 'admin') {
     return <Tag color="green">Unrestricted</Tag>;
@@ -1016,6 +1040,9 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
       <Tag color={canTranslatePdf ? 'blue' : undefined}>
         {canTranslatePdf ? 'PDF translation on' : 'PDF translation off'}
       </Tag>
+      <Tag color={canUploadTranscription ? 'blue' : undefined}>
+        {canUploadTranscription ? 'Uploads on' : 'Uploads off'}
+      </Tag>
     </Space>
   );
 }
@@ -1042,6 +1069,36 @@ function PdfTranslationField(props: { form: FormInstance<UserFormValues>; }) {
           'Both translation buttons are hidden in the PDF reader, and the server ' +
           'refuses the requests behind them. The account can still open and read ' +
           'every PDF it may see.'
+      }
+    >
+      <Switch checkedChildren="On" unCheckedChildren="Off" />
+    </Form.Item>
+  );
+}
+
+/**
+ * Whether this account may upload a video of its own to be transcribed.
+ *
+ * A switch for the same reason the one above is: there is nothing to give it
+ * but a yes or a no. What it costs is why it is off by default - an upload is
+ * work the server does and API credit it spends, on a file nobody here chose.
+ */
+function UploadTranscriptionField(props: { form: FormInstance<UserFormValues>; }) {
+  const { form } = props;
+  const canUploadTranscription = Form.useWatch('canUploadTranscription', form);
+
+  return (
+    <Form.Item
+      name="canUploadTranscription"
+      label="Video uploads"
+      valuePropName="checked"
+      extra={
+        canUploadTranscription ?
+          'The account gets the upload page, and can have its own videos transcribed ' +
+          'and translated. The video stays on their machine - the browser sends only ' +
+          'the audio.' :
+          'The upload page is hidden and the routes behind it are refused. ' +
+          'Captions on the videos already in the library are unaffected.'
       }
     >
       <Switch checkedChildren="On" unCheckedChildren="Off" />

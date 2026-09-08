@@ -13,6 +13,7 @@ import type TranslationQueue from '../translation/TranslationQueue.js';
 import { listSubtitlesFor } from '../transcription/SubtitleLibrary.js';
 import { type AuthenticatedRequest } from '../AuthGuard.js';
 import { type UploadJob, type UploadJobView } from '../../types/Upload.js';
+import { type SubtitleFile } from '../../types/Transcription.js';
 
 /**
  * Most audio one upload may be.
@@ -55,6 +56,48 @@ function cleanTitle(value: unknown): string {
   // eslint-disable-next-line no-control-regex
   const cleaned = value.replace(/[\\/\u0000-\u001f]/g, ' ').trim();
   return cleaned.slice(0, 200) || 'Untitled';
+}
+
+/**
+ * The language part of a downloaded subtitle's name: `zh`, not `zh-Hans`.
+ *
+ * The tag on disk is what the translator wrote and is worth keeping there -
+ * it says exactly which Chinese it is. What people want in their downloads
+ * folder is the short form, and it is what every player and every other tool
+ * expects to see beside a video: `Talk.zh.srt`, `Talk.en.srt`.
+ */
+function shortLanguage(language: string | null): string | null {
+  if (!language) {
+    return null;
+  }
+  const primary = language.split('-')[0].toLowerCase();
+  return primary || null;
+}
+
+/**
+ * What one subtitle is called when it is saved.
+ *
+ * `<the video's name>.<language>.srt` - the video's, not the audio's: the file
+ * on disk is `audio.zh-Hans.srt`, which says nothing about which video it
+ * belongs to once it is sitting in a downloads folder next to nine others.
+ *
+ * `others` is the rest of the job's subtitles, and is only there to settle the
+ * one case where shortening loses information: a job holding both `zh-Hans`
+ * and `zh-Hant` cannot have them both saved as `.zh.srt`, so in that case both
+ * keep the tag they were written with.
+ */
+function downloadNameFor(title: string, subtitle: SubtitleFile, others: SubtitleFile[]): string {
+  const stem = title.replace(/\.[^.]+$/, '') || title;
+  const extension = path.extname(subtitle.filename) || '.srt';
+  const short = shortLanguage(subtitle.language);
+  if (!short) {
+    return `${stem}${extension}`;
+  }
+  const collides = others.some((other) =>
+    other.filename !== subtitle.filename &&
+    shortLanguage(other.language) === short
+  );
+  return `${stem}.${collides ? subtitle.language : short}${extension}`;
 }
 
 function readNumber(value: unknown): number | null {
@@ -233,17 +276,17 @@ export default class UploadAPIRequestHandler extends Basehandler {
     if (!job) {
       return;
     }
-    const match = this.#subtitlesFor(job).find((subtitle) => subtitle.filename === filename);
+    const subtitles = this.#subtitlesFor(job);
+    const match = subtitles.find((subtitle) => subtitle.filename === filename);
     if (!match) {
       res.status(404).json({ error: 'Not found' });
       return;
     }
     const file = path.resolve(this.#store.directoryFor(job.id), match.filename);
-    // Named after the video it came from rather than after the audio on disk:
-    // "audio.zh-Hans.srt" is not what anybody wants in their downloads folder.
-    const stem = job.title.replace(/\.[^.]+$/, '') || job.title;
-    const suffix = match.filename.slice(AUDIO_STEM.length);
-    res.setHeader('Content-Disposition', contentDisposition(`${stem}${suffix}`));
+    res.setHeader(
+      'Content-Disposition',
+      contentDisposition(downloadNameFor(job.title, match, subtitles))
+    );
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.sendFile(file);
   }

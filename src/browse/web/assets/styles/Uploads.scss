@@ -22,6 +22,18 @@
     background-color: var(--bs-tertiary-bg);
   }
 
+  // While a file is over the panel. The dashed box below picks up the same
+  // colour, so the whole target reads as live rather than only its border.
+  &__panel--dragging {
+    border-color: var(--bs-primary-border-subtle);
+    background-color: var(--bs-secondary-bg);
+  }
+
+  &__panel--dragging &__dropzone {
+    border-color: var(--bs-primary-border-subtle);
+    background-color: var(--bs-tertiary-bg);
+  }
+
   &__input {
     display: none;
   }

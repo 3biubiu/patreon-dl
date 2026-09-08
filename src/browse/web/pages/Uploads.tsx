@@ -130,6 +130,8 @@ function Uploads() {
   const [ phaseFraction, setPhaseFraction ] = useState(0);
   const [ working, setWorking ] = useState<string | null>(null);
   const [ busyId, setBusyId ] = useState<string | null>(null);
+  const [ downloading, setDownloading ] = useState<string | null>(null);
+  const [ dragging, setDragging ] = useState(false);
   const [ anyActive, setAnyActive ] = useState(false);
   const [ translate, setTranslate ] = useState(readTranslatePreference);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -225,6 +227,40 @@ function Uploads() {
     }
   }, [ api, translate, canTranslate, refresh ]);
 
+  /**
+   * Saves one subtitle.
+   *
+   * Fetched and handed to a `download` link rather than being one: a link
+   * straight at the API is a navigation, and something between here and the
+   * server - an extension, a proxy, the browser's own download rules - can
+   * swallow that with nothing shown to say so. This way a refusal is an error
+   * message and a success is a file.
+   */
+  const download = useCallback(async (job: UploadJobView, filename: string) => {
+    const key = `${job.id}:${filename}`;
+    setDownloading(key);
+    setError(null);
+    try {
+      const saved = await api.fetchUploadSubtitle(job.id, filename);
+      const url = URL.createObjectURL(saved.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = saved.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      // Given to the browser first; revoking immediately can cancel the save
+      // on the slower ones.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
+    catch (e) {
+      setError(describeError(e, 'Could not download that subtitle'));
+    }
+    finally {
+      setDownloading(null);
+    }
+  }, [ api ]);
+
   const remove = useCallback(async (job: UploadJobView) => {
     setBusyId(job.id);
     setError(null);
@@ -242,8 +278,56 @@ function Uploads() {
 
   const busy = phase !== 'idle';
 
+  /**
+   * A file dropped anywhere else on the page.
+   *
+   * Without this the browser navigates away to play the video that was
+   * dropped, which loses the page and whatever it was doing - a harsh answer
+   * to missing the target by an inch.
+   */
+  useEffect(() => {
+    const swallow = (e: DragEvent) => e.preventDefault();
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+    };
+  }, []);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    if (busy) {
+      return;
+    }
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      void submit(file);
+    }
+  }, [ busy, submit ]);
+
   const uploader = (
-    <div className="uploads__panel">
+    <div
+      className={`uploads__panel${dragging ? ' uploads__panel--dragging' : ''}`}
+      onDragOver={(e) => {
+        // Both are needed for a drop to be allowed at all, and saying "copy"
+        // is what makes the cursor show a plus rather than a no-entry sign.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (!busy) {
+          setDragging(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        // Only when the pointer has left the panel itself - moving over a
+        // child fires this too, and the highlight should not flicker.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setDragging(false);
+        }
+      }}
+      onDrop={onDrop}
+    >
       <input
         ref={inputRef}
         type="file"
@@ -284,7 +368,9 @@ function Uploads() {
             onClick={() => inputRef.current?.click()}
           >
             <InboxOutlined className="uploads__dropzone-icon" />
-            <span className="uploads__dropzone-title">Choose a video</span>
+            <span className="uploads__dropzone-title">
+              {dragging ? 'Drop it here' : 'Choose a video, or drop one here'}
+            </span>
             <span className="uploads__dropzone-hint">
               The audio is extracted in your browser - only that is uploaded, not the video.
             </span>
@@ -402,10 +488,8 @@ function Uploads() {
                 key={subtitle.filename}
                 size="small"
                 icon={<DownloadOutlined />}
-                href={api.uploadSubtitleURL(job.id, subtitle.filename)}
-                // A plain link: the answer is an attachment, so the browser
-                // saves it and leaves the page where it is.
-                target="_self"
+                loading={downloading === `${job.id}:${subtitle.filename}`}
+                onClick={() => { void download(job, subtitle.filename); }}
               >
                 {subtitle.label}
               </Button>

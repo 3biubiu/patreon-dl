@@ -59,6 +59,28 @@ export class QuotaExceededError extends Error {
 }
 
 /**
+ * The name out of a `Content-Disposition`, or `null` when it does not carry one.
+ *
+ * `filename*` is preferred over `filename`, because that is the one that
+ * survives a name with characters outside ASCII in it - which, for a library
+ * of Chinese video titles, is most of them.
+ */
+function readAttachmentFilename(header: string | null): string | null {
+  if (!header) {
+    return null;
+  }
+  const extended = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (extended) {
+    try {
+      return decodeURIComponent(extended[1]);
+    }
+    catch { /* A malformed escape is no worse than no name at all. */ }
+  }
+  const plain = /filename="([^"]*)"/i.exec(header) || /filename=([^;]+)/i.exec(header);
+  return plain ? plain[1].trim() || null : null;
+}
+
+/**
  * Every data request goes through here so that one expired session is noticed
  * once, in one place.
  *
@@ -794,6 +816,42 @@ class API {
   /** Where one of an upload's subtitles is downloaded from. */
   uploadSubtitleURL(id: string, filename: string) {
     return `/api/uploads/${encodeURIComponent(id)}/subtitles/${encodeURIComponent(filename)}`;
+  }
+
+  /**
+   * Fetches one subtitle, with the name to save it under.
+   *
+   * Fetched rather than linked to. A link is a navigation, and a navigation
+   * that answers with an attachment is exactly the shape browsers, extensions
+   * and corporate proxies have learned to be suspicious of - one of them
+   * swallowing it leaves nothing on screen to explain why. This is an ordinary
+   * request on the page: if the server refuses it, the refusal arrives as an
+   * error that can be shown, and if it does not, the bytes are already here.
+   *
+   * A subtitle is a few kilobytes, so holding one in memory costs nothing -
+   * which is the reason this is not how the media downloads work.
+   */
+  async fetchUploadSubtitle(
+    id: string, filename: string
+  ): Promise<{ blob: Blob; filename: string }> {
+    const response = await apiFetch(this.uploadSubtitleURL(id, filename));
+    if (!response.ok) {
+      let message = `Could not download the subtitle (${response.status})`;
+      try {
+        const body = await response.json() as { error?: string };
+        if (body.error) {
+          message = body.error;
+        }
+      }
+      catch { /* Not JSON; the status is all there is to say. */ }
+      throw Error(message);
+    }
+    return {
+      blob: await response.blob(),
+      // The server decides what a subtitle is called - it is the side that
+      // knows both the video's name and what else the job produced.
+      filename: readAttachmentFilename(response.headers.get('content-disposition')) || filename
+    };
   }
 
   async startTranscription(mediaId: string): Promise<TranscriptionRecord> {

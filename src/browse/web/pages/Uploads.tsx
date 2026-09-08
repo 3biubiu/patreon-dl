@@ -72,6 +72,25 @@ const PHASE_LABEL: Record<Exclude<Phase, 'idle'>, string> = {
   uploading: 'Uploading the audio'
 };
 
+/**
+ * What went wrong, in words.
+ *
+ * Not every failure here arrives as an `Error`: ffmpeg runs inside a worker
+ * and reports a failure by posting the text of it, so a plain string can come
+ * back up the promise chain. `extractAudio` converts the ones it raises
+ * itself, and this catches whatever else gets through - the alternative is a
+ * page that answers every problem with the same unhelpful sentence.
+ */
+function describeError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  if (typeof error === 'string' && error.trim()) {
+    return error.trim();
+  }
+  return fallback;
+}
+
 function formatSeconds(seconds: number | null) {
   if (seconds === null || !Number.isFinite(seconds)) {
     return null;
@@ -132,7 +151,7 @@ function Uploads() {
       ));
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load your uploads');
+      setError(describeError(e, 'Could not load your uploads'));
     }
   }, [ api ]);
 
@@ -192,7 +211,10 @@ function Uploads() {
     }
     catch (e) {
       if (!controller.signal.aborted) {
-        setError(e instanceof Error ? e.message : 'That upload did not work');
+        // Also to the console: an ffmpeg failure has a log behind it that no
+        // alert has room for, and it is the first thing worth looking at.
+        console.error('Upload failed', e);
+        setError(describeError(e, 'That upload did not work'));
       }
     }
     finally {
@@ -211,7 +233,7 @@ function Uploads() {
       await refresh();
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'That did not work');
+      setError(describeError(e, 'That did not work'));
     }
     finally {
       setBusyId(null);

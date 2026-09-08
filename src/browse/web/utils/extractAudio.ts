@@ -58,6 +58,23 @@ export interface ExtractProgress {
   fraction: number;
 }
 
+/**
+ * ffmpeg.wasm's own errors, as `Error`s.
+ *
+ * Everything inside the core runs in a worker, and that worker reports a
+ * failure by posting `e.toString()` - so what arrives here is a *string*, and
+ * a caller writing the usual `error instanceof Error` sees nothing it
+ * recognises. Converting at the boundary means the rest of the app can treat
+ * these like any other failure.
+ */
+function asError(value: unknown, context: string): Error {
+  if (value instanceof Error) {
+    return value;
+  }
+  const text = typeof value === 'string' && value.trim() ? value.trim() : '';
+  return Error(text ? `${context}: ${text}` : context);
+}
+
 let loading: Promise<FFmpeg> | null = null;
 
 /**
@@ -72,10 +89,15 @@ function getFFmpeg(): Promise<FFmpeg> {
   if (!loading) {
     loading = (async () => {
       const ffmpeg = new FFmpeg();
-      await ffmpeg.load({
-        coreURL: `${CORE_BASE}/ffmpeg-core.js`,
-        wasmURL: `${CORE_BASE}/ffmpeg-core.wasm`
-      });
+      try {
+        await ffmpeg.load({
+          coreURL: `${CORE_BASE}/ffmpeg-core.js`,
+          wasmURL: `${CORE_BASE}/ffmpeg-core.wasm`
+        });
+      }
+      catch (error) {
+        throw asError(error, 'Could not start the video converter in this browser');
+      }
       return ffmpeg;
     })().catch((error: unknown) => {
       // A failed load must not be cached as the instance: the next attempt
@@ -131,16 +153,32 @@ export async function extractAudio(
     catch {
       // Left over from a previous extraction in this page's lifetime.
     }
-    await ffmpeg.mount('WORKERFS' as Parameters<typeof ffmpeg.mount>[0], {
-      files: [ mounted ]
-    }, MOUNT_POINT);
-    mountedOk = true;
+    try {
+      // Answers `false` rather than throwing when the build has no WORKERFS,
+      // so the result is worth reading: without it the video would have to be
+      // copied into WebAssembly memory whole, which is the thing this avoids.
+      mountedOk = await ffmpeg.mount('WORKERFS' as Parameters<typeof ffmpeg.mount>[0], {
+        files: [ mounted ]
+      }, MOUNT_POINT);
+    }
+    catch (error) {
+      throw asError(error, 'Could not read the video file');
+    }
+    if (!mountedOk) {
+      throw Error('This browser build of ffmpeg cannot read files from disk.');
+    }
 
-    const code = await ffmpeg.exec([
-      '-i', `${MOUNT_POINT}/${INPUT_NAME}`,
-      ...AUDIO_ARGS,
-      OUTPUT_NAME
-    ]);
+    let code: number;
+    try {
+      code = await ffmpeg.exec([
+        '-i', `${MOUNT_POINT}/${INPUT_NAME}`,
+        ...AUDIO_ARGS,
+        OUTPUT_NAME
+      ]);
+    }
+    catch (error) {
+      throw asError(error, 'The video could not be converted');
+    }
     if (code !== 0) {
       throw Error(
         'This video could not be converted in the browser. It may use a format ' +

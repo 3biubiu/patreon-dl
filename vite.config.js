@@ -25,12 +25,19 @@ export default defineConfig({
         // video to audio before sending it. Served from here rather than from
         // a CDN for the same reason as everything above: this application has
         // to work with no outside network.
+        //
+        // The ESM build, not the UMD one beside it. @ffmpeg/ffmpeg runs the
+        // core inside a *module* worker, where `importScripts` does not exist,
+        // so it loads the core with a dynamic `import()` and reads
+        // `createFFmpegCore` off the default export. The UMD file has no
+        // default export - importing it gets as far as "failed to import
+        // ffmpeg-core.js" and no further.
         {
-          src: "../../../node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.js",
+          src: "../../../node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.js",
           dest: "assets/ffmpeg",
         },
         {
-          src: "../../../node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.wasm",
+          src: "../../../node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm",
           dest: "assets/ffmpeg",
         }
       ]

@@ -288,7 +288,19 @@ export default class UploadAPIRequestHandler extends Basehandler {
       contentDisposition(downloadNameFor(job.title, match, subtitles))
     );
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.sendFile(file);
+    // `dotfiles: 'allow'` because every upload lives under the data
+    // directory's own `.patreon-dl`, and express refuses a path with a dot
+    // segment in it by default - with a 404 of its own, before this handler's
+    // own checks have anything to say. The media route carries the same option
+    // for the same reason.
+    res.sendFile(file, { dotfiles: 'allow' }, (error?: Error) => {
+      // The file was listed a moment ago, so this is a genuine surprise -
+      // worth a line, and worth an answer rather than a hung request.
+      if (error && !res.headersSent) {
+        this.log('warn', `Could not send subtitle "${file}":`, error);
+        res.status(404).json({ error: 'That subtitle is no longer there' });
+      }
+    });
   }
 
   /**

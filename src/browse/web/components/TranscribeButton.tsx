@@ -119,7 +119,13 @@ function TranscribeButton(props: TranscribeButtonProps) {
           {
             captioned ?
               'This video already has subtitles. Transcribing again replaces them.'
-              : 'It runs in the background and costs roughly $0.01 per hour of video.'
+            // What it costs is an administrator's business - they are the ones
+            // who set the key and pay the bill. Saying it to everybody else
+            // turns a button into a price tag, and a price is not something
+            // the person clicking can act on.
+            : isAdmin ?
+              'It runs in the background and costs roughly $0.01 per hour of video.'
+              : 'It runs in the background. The subtitles appear on this video when it is done.'
           }
         </div>
         {

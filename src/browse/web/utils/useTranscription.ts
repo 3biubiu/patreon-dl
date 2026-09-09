@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useAPI } from "../contexts/APIProvider";
+import { TranscriptionLimitError, useAPI } from "../contexts/APIProvider";
+import { useAuth } from "../contexts/AuthProvider";
 import { isActive, type TranscriptionRecord } from "../../types/Transcription";
 import { isTranslationActive, type TranslationProgress } from "../../types/Translation";
 
@@ -30,14 +31,36 @@ export interface TranscriptionHandle {
   cancel: () => Promise<void>;
 }
 
+export interface TranscriptionOptions {
+  /**
+   * Told when the day's transcriptions are spent.
+   *
+   * Handed out rather than kept here as an error, because it is not one: the
+   * request was understood and refused for the day, which is something to say
+   * once, where the click happened - not a state for the control to sit in.
+   */
+  onLimitReached?: (error: TranscriptionLimitError) => void;
+}
+
 /**
  * Follows one video's transcription, and the translation that may follow it.
  *
  * Polling runs only while something is still moving, so a page of tiles that
  * have all finished settles down to no traffic at all.
  */
-export function useTranscription(mediaId: string, enabled = true): TranscriptionHandle {
+export function useTranscription(
+  mediaId: string,
+  enabled = true,
+  options?: TranscriptionOptions
+): TranscriptionHandle {
   const { api } = useAPI();
+  // Translation is an administrator's, and this hook drives the control an
+  // ordinary account with the transcription permission also sees. Asking for
+  // it on their behalf would be a request the server refuses, shown to them as
+  // a transcription that failed when it did not.
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const onLimitReached = options?.onLimitReached;
   const [ record, setRecord ] = useState<TranscriptionRecord | null>(null);
   const [ busy, setBusy ] = useState(false);
   const [ localError, setLocalError ] = useState<string | null>(null);
@@ -75,7 +98,7 @@ export function useTranscription(mediaId: string, enabled = true): Transcription
     try {
       const started = await api.startTranscription(mediaId);
       setRecord(started);
-      if (translate) {
+      if (translate && isAdmin) {
         // Marked on the record now and picked up by the server once there is a
         // subtitle to translate, so the two are asked for in one gesture even
         // though they run one after the other.
@@ -83,7 +106,15 @@ export function useTranscription(mediaId: string, enabled = true): Transcription
       }
     }
     catch (error) {
-      setLocalError(error instanceof Error ? error.message : 'Could not start transcription');
+      if (error instanceof TranscriptionLimitError) {
+        // Nothing was started and nothing is wrong with the video, so this
+        // does not become the control's error state - it is said once, to
+        // whoever clicked.
+        onLimitReached?.(error);
+      }
+      else {
+        setLocalError(error instanceof Error ? error.message : 'Could not start transcription');
+      }
       // The transcription may well have started even though the translation
       // could not be queued, so what is on the server is what gets shown.
       await refresh();
@@ -91,14 +122,17 @@ export function useTranscription(mediaId: string, enabled = true): Transcription
     finally {
       setBusy(false);
     }
-  }, [ api, mediaId, refresh ]);
+  }, [ api, mediaId, refresh, isAdmin, onLimitReached ]);
 
   const cancel = useCallback(async () => {
     setBusy(true);
     try {
       // Both, and translation first: cancelling the transcription is what lets
       // the queue hand over to a translation that is still marked pending.
-      await api.cancelTranslation(mediaId);
+      // Only an administrator has a translation to cancel - see above.
+      if (isAdmin) {
+        await api.cancelTranslation(mediaId);
+      }
       await api.cancelTranscription(mediaId);
       await refresh();
     }
@@ -108,7 +142,7 @@ export function useTranscription(mediaId: string, enabled = true): Transcription
     finally {
       setBusy(false);
     }
-  }, [ api, mediaId, refresh ]);
+  }, [ api, mediaId, refresh, isAdmin ]);
 
   return {
     record,

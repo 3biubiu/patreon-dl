@@ -59,6 +59,12 @@ export interface TranscriptionConfig {
 export interface TranscriptionServices {
   index: TranscriptionIndex;
   queue: TranscriptionQueue;
+  /**
+   * The ffmpeg pair, handed out so that whoever has to know how long a video
+   * is can ask the same binary the jobs are run with rather than building a
+   * second extractor pointing somewhere else.
+   */
+  extractor: AudioExtractor;
   vad: VoiceActivityDetector;
   settings: TranscriptionSettingsStore;
   vocabulary: VocabularyStore;
@@ -190,5 +196,5 @@ export function createTranscriptionServices(
       'can set one in the transcription settings; existing subtitles are served ' +
       'either way.');
   }
-  return { index, queue, vad, settings, vocabulary };
+  return { index, queue, extractor, vad, settings, vocabulary };
 }

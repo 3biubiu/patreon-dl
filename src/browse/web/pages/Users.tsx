@@ -4,6 +4,7 @@ import { Alert, Badge, Button, Form, Input, InputNumber, Modal, Popconfirm, Radi
 import { CheckOutlined, CloseOutlined, DeleteOutlined, EditOutlined, HistoryOutlined, ReloadOutlined, SafetyCertificateOutlined, UnlockOutlined, UserAddOutlined } from "@ant-design/icons";
 import { type FormInstance } from "antd";
 import {
+  DEFAULT_CAN_TRANSCRIBE_VIDEO,
   DEFAULT_CAN_TRANSLATE_PDF,
   DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
   type AuthUser,
@@ -12,6 +13,10 @@ import {
   type UserRole
 } from "../../types/Auth";
 import { DEFAULT_USER_QUOTA, type UserQuota } from "../../types/Quota";
+import {
+  DAILY_TRANSCRIPTION_SECONDS,
+  DAILY_TRANSCRIPTION_VIDEOS
+} from "../../types/TranscriptionQuota";
 import { describeLoginRegion, LOGIN_REGION_SEPARATOR } from "../../types/LoginRegion";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
@@ -54,6 +59,7 @@ interface UserFormValues {
   loginRegions: string[];
   canTranslatePdf: boolean;
   canUploadTranscription: boolean;
+  canTranscribeVideo: boolean;
 }
 
 const ROLE_OPTIONS = [
@@ -373,7 +379,9 @@ function Users() {
       canTranslatePdf:
         target === 'new' ? DEFAULT_CAN_TRANSLATE_PDF : target.canTranslatePdf,
       canUploadTranscription:
-        target === 'new' ? DEFAULT_CAN_UPLOAD_TRANSCRIPTION : target.canUploadTranscription
+        target === 'new' ? DEFAULT_CAN_UPLOAD_TRANSCRIPTION : target.canUploadTranscription,
+      canTranscribeVideo:
+        target === 'new' ? DEFAULT_CAN_TRANSCRIBE_VIDEO : target.canTranscribeVideo
     });
   }, [form]);
 
@@ -419,6 +427,10 @@ function Users() {
     // And the same for uploading, for the same reason.
     const canUploadTranscription =
       values.role === 'admin' || values.canUploadTranscription === true;
+    // And for asking the library to transcribe something, again for the same
+    // reason - an administrator has it whatever the switch was left on.
+    const canTranscribeVideo =
+      values.role === 'admin' || values.canTranscribeVideo === true;
     try {
       if (editing === 'new') {
         await api.createUser({
@@ -429,7 +441,8 @@ function Users() {
           quota,
           loginRegions,
           canTranslatePdf,
-          canUploadTranscription
+          canUploadTranscription,
+          canTranscribeVideo
         });
       }
       else {
@@ -442,7 +455,8 @@ function Users() {
           quota,
           loginRegions,
           canTranslatePdf,
-          canUploadTranscription
+          canUploadTranscription,
+          canTranscribeVideo
         });
       }
       setEditing(null);
@@ -619,6 +633,13 @@ function Users() {
                     dataIndex: 'canUploadTranscription',
                     render: (canUploadTranscription: boolean) => (
                       canUploadTranscription ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                    )
+                  },
+                  {
+                    title: 'Transcribe',
+                    dataIndex: 'canTranscribeVideo',
+                    render: (canTranscribeVideo: boolean) => (
+                      canTranscribeVideo ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
                     )
                   },
                   {
@@ -985,6 +1006,7 @@ function PermissionFields(props: {
       />
       <PdfTranslationField form={form} />
       <UploadTranscriptionField form={form} />
+      <TranscribeVideoField form={form} />
     </>
   );
 }
@@ -1009,6 +1031,7 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
   const loginRegions = Form.useWatch('loginRegions', form);
   const canTranslatePdf = Form.useWatch('canTranslatePdf', form);
   const canUploadTranscription = Form.useWatch('canUploadTranscription', form);
+  const canTranscribeVideo = Form.useWatch('canTranscribeVideo', form);
 
   if (role === 'admin') {
     return <Tag color="green">Unrestricted</Tag>;
@@ -1042,6 +1065,9 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
       </Tag>
       <Tag color={canUploadTranscription ? 'blue' : undefined}>
         {canUploadTranscription ? 'Uploads on' : 'Uploads off'}
+      </Tag>
+      <Tag color={canTranscribeVideo ? 'blue' : undefined}>
+        {canTranscribeVideo ? 'Transcribe on' : 'Transcribe off'}
       </Tag>
     </Space>
   );
@@ -1099,6 +1125,39 @@ function UploadTranscriptionField(props: { form: FormInstance<UserFormValues>; }
           'the audio.' :
           'The upload page is hidden and the routes behind it are refused. ' +
           'Captions on the videos already in the library are unaffected.'
+      }
+    >
+      <Switch checkedChildren="On" unCheckedChildren="Off" />
+    </Form.Item>
+  );
+}
+
+/**
+ * Whether this account may ask for a video in the library to be transcribed.
+ *
+ * A switch like the two above, and like them there is nothing to type in
+ * beside it: what the account may spend in a day is fixed - see
+ * `TranscriptionQuota` - rather than another pair of boxes on a form that
+ * already has several. What it buys is one button in the corner of a video
+ * tile; the transcription page stays an administrator's.
+ */
+function TranscribeVideoField(props: { form: FormInstance<UserFormValues>; }) {
+  const { form } = props;
+  const canTranscribeVideo = Form.useWatch('canTranscribeVideo', form);
+
+  return (
+    <Form.Item
+      name="canTranscribeVideo"
+      label="Transcribe videos"
+      valuePropName="checked"
+      extra={
+        canTranscribeVideo ?
+          `The account gets the transcribe button on video tiles, for up to ` +
+          `${DAILY_TRANSCRIPTION_VIDEOS} videos or ` +
+          `${DAILY_TRANSCRIPTION_SECONDS / 3600} hours of video a day, whichever comes first. ` +
+          'It does not get the transcription page - only the button.' :
+          'The button is kept off the tiles and the route behind it is refused. ' +
+          'Subtitles that already exist are unaffected.'
       }
     >
       <Switch checkedChildren="On" unCheckedChildren="Off" />

@@ -4,6 +4,7 @@ import Basehandler from './BaseHandler.js';
 import type AuthStore from '../AuthStore.js';
 import type HistoryStore from '../HistoryStore.js';
 import type QuotaStore from '../QuotaStore.js';
+import type TranscriptionQuotaStore from '../TranscriptionQuotaStore.js';
 import type LoginLogStore from '../LoginLogStore.js';
 import { MAX_LOGIN_LOG_ENTRIES } from '../LoginLogStore.js';
 import type LoginRegionGuard from '../LoginRegionGuard.js';
@@ -170,6 +171,7 @@ export default class AuthAPIRequestHandler extends Basehandler {
   #store: AuthStore;
   #historyStore: HistoryStore;
   #quotaStore: QuotaStore;
+  #transcriptionQuotaStore: TranscriptionQuotaStore;
   #loginLogStore: LoginLogStore;
   /**
    * Shared with the router, which runs the same check on every request a
@@ -182,6 +184,7 @@ export default class AuthAPIRequestHandler extends Basehandler {
     store: AuthStore,
     historyStore: HistoryStore,
     quotaStore: QuotaStore,
+    transcriptionQuotaStore: TranscriptionQuotaStore,
     loginLogStore: LoginLogStore,
     regionGuard: LoginRegionGuard,
     logger?: Logger | null
@@ -190,6 +193,7 @@ export default class AuthAPIRequestHandler extends Basehandler {
     this.#store = store;
     this.#historyStore = historyStore;
     this.#quotaStore = quotaStore;
+    this.#transcriptionQuotaStore = transcriptionQuotaStore;
     this.#loginLogStore = loginLogStore;
     this.#regionGuard = regionGuard;
   }
@@ -437,10 +441,11 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const loginRegions = readLoginRegions(req.body);
       const canTranslatePdf = readPermission(req.body, 'canTranslatePdf');
       const canUploadTranscription = readPermission(req.body, 'canUploadTranscription');
+      const canTranscribeVideo = readPermission(req.body, 'canTranscribeVideo');
       res.json({
         user: this.#store.createUser({
           username, password, role, visibleCampaigns, quota, loginRegions,
-          canTranslatePdf, canUploadTranscription
+          canTranslatePdf, canUploadTranscription, canTranscribeVideo
         })
       });
     }
@@ -458,9 +463,10 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const loginRegions = readLoginRegions(req.body);
       const canTranslatePdf = readPermission(req.body, 'canTranslatePdf');
       const canUploadTranscription = readPermission(req.body, 'canUploadTranscription');
+      const canTranscribeVideo = readPermission(req.body, 'canTranscribeVideo');
       const user = this.#store.updateUser(id, {
         password, role, visibleCampaigns, quota, loginRegions,
-        canTranslatePdf, canUploadTranscription
+        canTranslatePdf, canUploadTranscription, canTranscribeVideo
       });
       // Changing your own password does not sign you out: the session names a
       // user id, and that has not changed.
@@ -483,6 +489,7 @@ export default class AuthAPIRequestHandler extends Basehandler {
       this.#historyStore.forgetUser(id);
       // Same reasoning for today's counters - nothing can spend them any more.
       this.#quotaStore.forgetUser(id);
+      this.#transcriptionQuotaStore.forgetUser(id);
       // The sign-in log is deliberately left alone - see `LoginLogStore`.
       res.json({ ok: true });
     }

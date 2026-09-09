@@ -8,6 +8,10 @@ import { type MediaList } from '../../types/Media';
 import { type Collection } from '../../../entities/Post';
 import { type AuthSession, type AuthUser, type CreateUserRequest, type LoginLogEntry, type Registration, type UpdateUserRequest } from '../../types/Auth';
 import { QUOTA_EXCEEDED_CODE, type QuotaStatus } from '../../types/Quota';
+import {
+  TRANSCRIPTION_LIMIT_CODE,
+  type TranscriptionLimitInfo
+} from '../../types/TranscriptionQuota';
 import { type SubtitleFile, type TranscriptionAvailability, type TranscriptionProvider, type TranscriptionRecord, type TranscriptionSettings } from '../../types/Transcription';
 import { type TranslationAvailability, type TranslationSettings } from '../../types/Translation';
 import { type UploadJobView } from '../../types/Upload';
@@ -55,6 +59,24 @@ export class QuotaExceededError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'QuotaExceededError';
+  }
+}
+
+/**
+ * Raised when the day's transcriptions are spent.
+ *
+ * Its own type for the same reason `QuotaExceededError` is one, and separate
+ * from it because the two are different ceilings answered in different places:
+ * this one is the button on a video tile, and it carries the numbers so the
+ * refusal can be put in the reader's own language rather than the server's.
+ */
+export class TranscriptionLimitError extends Error {
+  limit: TranscriptionLimitInfo | null;
+
+  constructor(message: string, limit: TranscriptionLimitInfo | null) {
+    super(message);
+    this.name = 'TranscriptionLimitError';
+    this.limit = limit;
   }
 }
 
@@ -855,9 +877,21 @@ class API {
   }
 
   async startTranscription(mediaId: string): Promise<TranscriptionRecord> {
-    const data = await readJSON(await apiFetch(
-      `/api/media/${mediaId}/transcribe`, { method: 'POST' }
-    ));
+    const response = await apiFetch(`/api/media/${mediaId}/transcribe`, { method: 'POST' });
+    // Read before `readJSON` gets to it: the day's ceiling is the one refusal
+    // the button can say something useful about, so it is raised as itself
+    // rather than as one more failed request.
+    if (response.status === 403) {
+      const data = await response.clone().json().catch(() => null) as
+        { error?: string; code?: string; limit?: TranscriptionLimitInfo } | null;
+      if (data?.code === TRANSCRIPTION_LIMIT_CODE) {
+        throw new TranscriptionLimitError(
+          data.error || 'Daily transcription limit reached',
+          data.limit || null
+        );
+      }
+    }
+    const data = await readJSON(response);
     return data.record as TranscriptionRecord;
   }
 

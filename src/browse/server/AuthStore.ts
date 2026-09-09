@@ -4,6 +4,7 @@ import path from 'path';
 import { commonLog, type LogLevel } from '../../utils/logging/Logger.js';
 import { type Logger } from '../../utils/logging/index.js';
 import {
+  DEFAULT_CAN_TRANSCRIBE_VIDEO,
   DEFAULT_CAN_TRANSLATE_PDF,
   DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
   type AuthUser,
@@ -209,6 +210,21 @@ function normalizeCanUploadTranscription(
   return typeof canUploadTranscription === 'boolean' ? canUploadTranscription : fallback;
 }
 
+/**
+ * The stored form of the permission to have a library video transcribed. An
+ * administrator always has it, for the reason they always have the rest.
+ */
+function normalizeCanTranscribeVideo(
+  canTranscribeVideo: boolean | undefined,
+  role: UserRole,
+  fallback: boolean
+): boolean {
+  if (role === 'admin') {
+    return true;
+  }
+  return typeof canTranscribeVideo === 'boolean' ? canTranscribeVideo : fallback;
+}
+
 function hashPassword(password: string, salt: string) {
   return crypto.scryptSync(password, salt, SCRYPT_KEY_LENGTH).toString('base64');
 }
@@ -273,6 +289,12 @@ export default class AuthStore {
         user.canUploadTranscription = normalizeCanUploadTranscription(
           user.canUploadTranscription, user.role, DEFAULT_CAN_UPLOAD_TRANSCRIPTION
         );
+        // The same decision again: asking for a transcription did not exist
+        // for ordinary accounts before this, so starting them all without it
+        // takes nothing away from anyone. See `DEFAULT_CAN_TRANSCRIBE_VIDEO`.
+        user.canTranscribeVideo = normalizeCanTranscribeVideo(
+          user.canTranscribeVideo, user.role, DEFAULT_CAN_TRANSCRIBE_VIDEO
+        );
         // Accounts written before bans existed are not banned; a reason with
         // no ban behind it is stale and dropped.
         user.banned = user.banned === true && user.role !== 'admin';
@@ -304,6 +326,7 @@ export default class AuthStore {
           loginRegions: null,
           canTranslatePdf: true,
           canUploadTranscription: true,
+          canTranscribeVideo: true,
           banned: false,
           banReason: null,
           salt,
@@ -438,6 +461,7 @@ export default class AuthStore {
     loginRegions?: string[] | null;
     canTranslatePdf?: boolean;
     canUploadTranscription?: boolean;
+    canTranscribeVideo?: boolean;
   }): AuthUser {
     const username = params.username.trim();
     if (!username) {
@@ -471,6 +495,11 @@ export default class AuthStore {
       canUploadTranscription: normalizeCanUploadTranscription(
         params.canUploadTranscription, params.role, DEFAULT_CAN_UPLOAD_TRANSCRIPTION
       ),
+      // Off unless it is asked for, for the same reason: it is the same key
+      // being spent, on a video the account picked out of the library.
+      canTranscribeVideo: normalizeCanTranscribeVideo(
+        params.canTranscribeVideo, params.role, DEFAULT_CAN_TRANSCRIBE_VIDEO
+      ),
       banned: false,
       banReason: null,
       salt,
@@ -489,6 +518,7 @@ export default class AuthStore {
     loginRegions?: string[] | null;
     canTranslatePdf?: boolean;
     canUploadTranscription?: boolean;
+    canTranscribeVideo?: boolean;
   }): AuthUser {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
@@ -539,6 +569,9 @@ export default class AuthStore {
     );
     user.canUploadTranscription = normalizeCanUploadTranscription(
       params.canUploadTranscription, user.role, user.canUploadTranscription
+    );
+    user.canTranscribeVideo = normalizeCanTranscribeVideo(
+      params.canTranscribeVideo, user.role, user.canTranscribeVideo
     );
     if (params.password !== undefined) {
       this.#assertPassword(params.password);
@@ -638,6 +671,7 @@ export default class AuthStore {
       loginRegions: null,
       canTranslatePdf: DEFAULT_CAN_TRANSLATE_PDF,
       canUploadTranscription: DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
+      canTranscribeVideo: DEFAULT_CAN_TRANSCRIBE_VIDEO,
       banned: false,
       banReason: null,
       salt: registration.salt,
@@ -700,7 +734,7 @@ export default class AuthStore {
   #toAuthUser(user: StoredUser): AuthUser {
     const {
       id, username, role, createdAt, visibleCampaigns, quota, loginRegions,
-      canTranslatePdf, canUploadTranscription, banned, banReason
+      canTranslatePdf, canUploadTranscription, canTranscribeVideo, banned, banReason
     } = user;
     // A copy, so a caller cannot reach into the store and edit a permission
     // in place - the array would otherwise be the live one.
@@ -711,6 +745,7 @@ export default class AuthStore {
       loginRegions: loginRegions ? [ ...loginRegions ] : null,
       canTranslatePdf,
       canUploadTranscription,
+      canTranscribeVideo,
       banned,
       banReason
     };

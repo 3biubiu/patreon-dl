@@ -41,6 +41,25 @@ export const translations = {
     zh: '每天 08:00（北京时间）重置（{time}）。重复打开同一帖子或视频不消耗额度。'
   },
 
+  // ---- Transcription allowance ----
+  // The one thing the transcribe button ever says in the reader's own
+  // language: it is the only refusal they can do something about, and "come
+  // back tomorrow" is no use to somebody who cannot read it.
+  transcribe_limit_title: { en: 'Daily limit reached', zh: '已达今日上限' },
+  transcribe_limit_videos: {
+    en: 'You have transcribed {used} of {limit} videos today.',
+    zh: '今日已转录 {used} 个视频，上限 {limit} 个。'
+  },
+  transcribe_limit_duration: {
+    en: 'You have transcribed {used} of {limit} hours of video today, and this one does not fit in what is left.',
+    zh: '今日已转录 {used} 小时视频，上限 {limit} 小时，剩余额度不足以转录这个视频。'
+  },
+  transcribe_limit_resets: {
+    en: 'It resets at 08:00 Beijing time ({time}).',
+    zh: '每天 08:00（北京时间）重置（{time}）。'
+  },
+  transcribe_limit_ok: { en: 'Got it', zh: '知道了' },
+
   // ---- Sort options ----
   sort_most_media: { en: 'Most media', zh: '媒体最多' },
   sort_most_content: { en: 'Most content', zh: '内容最多' },

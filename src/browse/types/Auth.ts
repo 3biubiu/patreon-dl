@@ -25,6 +25,18 @@ export const DEFAULT_CAN_TRANSLATE_PDF = false;
 export const DEFAULT_CAN_UPLOAD_TRANSCRIPTION = false;
 
 /**
+ * Whether a newly created ordinary account may ask for a video in the library
+ * to be transcribed.
+ *
+ * Off, and off for the accounts that already existed when this arrived: it
+ * spends the transcription key on a file nobody was asked about, which is the
+ * same reasoning that keeps uploading off. What holds the cost down for the
+ * accounts that are given it is the daily allowance in `TranscriptionQuota` -
+ * a permission with no ceiling behind it would be one video and a bill.
+ */
+export const DEFAULT_CAN_TRANSCRIBE_VIDEO = false;
+
+/**
  * A user as the browser is allowed to see them - no salt, no password hash.
  *
  * The permissions live here rather than anywhere else because the auth guard
@@ -93,6 +105,22 @@ export interface AuthUser {
    */
   canUploadTranscription: boolean;
   /**
+   * Whether this account may ask for a video in the library to be transcribed.
+   *
+   * `false` keeps the button off the video tiles and is refused by the route
+   * behind it. What the account can already do is unaffected: subtitles that
+   * exist are read by anyone whose player asks for them.
+   *
+   * It does not carry the transcription history page with it - that stays an
+   * administrator's, because it is every account's jobs and it can stop and
+   * forget them. The button is the whole of this permission, and how far it
+   * goes in a day is capped - see `TranscriptionQuotaStore`.
+   *
+   * Always `true` for administrators, for the reason every other permission
+   * is: they can edit their own.
+   */
+  canTranscribeVideo: boolean;
+  /**
    * Locked out entirely - no session survives it and no sign-in gets past it.
    * Put on by the sign-in anomaly rule, taken off only by an administrator.
    * Never `true` for an administrator.
@@ -148,6 +176,8 @@ export interface CreateUserRequest {
   canTranslatePdf?: boolean;
   /** Omit to start the account on {@link DEFAULT_CAN_UPLOAD_TRANSCRIPTION}. */
   canUploadTranscription?: boolean;
+  /** Omit to start the account on {@link DEFAULT_CAN_TRANSCRIBE_VIDEO}. */
+  canTranscribeVideo?: boolean;
 }
 
 export interface UpdateUserRequest {
@@ -163,6 +193,8 @@ export interface UpdateUserRequest {
   canTranslatePdf?: boolean;
   /** Omit to leave as it is. */
   canUploadTranscription?: boolean;
+  /** Omit to leave as it is. */
+  canTranscribeVideo?: boolean;
 }
 
 /**

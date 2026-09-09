@@ -4,6 +4,10 @@ import path from 'path';
 import { type Logger } from '../../../utils/logging/index.js';
 import { type DBInstance } from '../../db/index.js';
 import Basehandler from './BaseHandler.js';
+import type AudioExtractor from '../transcription/AudioExtractor.js';
+import type TranscriptionQuotaStore from '../TranscriptionQuotaStore.js';
+import { type AuthenticatedRequest } from '../AuthGuard.js';
+import { TRANSCRIPTION_LIMIT_CODE } from '../../types/TranscriptionQuota.js';
 import type TranscriptionQueue from '../transcription/TranscriptionQueue.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type VoiceActivityDetector from '../transcription/VoiceActivityDetector.js';
@@ -54,8 +58,10 @@ function looksLikeVideo(filePath: string, mimeType?: string | null) {
  * Transcription: starting jobs, reporting their progress, and serving the
  * subtitles that come out.
  *
- * Starting and cancelling are for administrators; reading is not, so that an
- * ordinary viewer's player can still list and load captions.
+ * Starting and cancelling are for administrators, and for an ordinary account
+ * that has been given the permission - which is where the daily ceiling in
+ * `TranscriptionQuotaStore` comes in. Reading is for everyone, so that any
+ * viewer's player can list and load the captions that exist.
  */
 export default class TranscriptionAPIRequestHandler extends Basehandler {
   name = 'TranscriptionAPIRequestHandler';
@@ -67,6 +73,8 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
   #vad: VoiceActivityDetector;
   #settings: TranscriptionSettingsStore;
   #vocabulary: VocabularyStore;
+  #extractor: AudioExtractor;
+  #quota: TranscriptionQuotaStore;
 
   constructor(
     db: DBInstance,
@@ -76,6 +84,8 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     vad: VoiceActivityDetector,
     settings: TranscriptionSettingsStore,
     vocabulary: VocabularyStore,
+    extractor: AudioExtractor,
+    quota: TranscriptionQuotaStore,
     logger?: Logger | null
   ) {
     super(logger);
@@ -86,6 +96,8 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     this.#vad = vad;
     this.#settings = settings;
     this.#vocabulary = vocabulary;
+    this.#extractor = extractor;
+    this.#quota = quota;
   }
 
   /**
@@ -368,6 +380,15 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     await this.handleGetSettingsRequest(req, res);
   }
 
+  /**
+   * Queues one video, spending a day's allowance for anyone who is not an
+   * administrator.
+   *
+   * The allowance is counted here rather than in a guard of its own because
+   * this is where the video on disk has been found: the hours half of the
+   * ceiling needs the file's real length, and that comes from ffprobe, not
+   * from anything the request carries.
+   */
   async handleTranscribeRequest(req: Request, res: Response, id: string) {
     const blocked = await this.#getBlockedReason();
     if (blocked) {
@@ -378,6 +399,26 @@ export default class TranscriptionAPIRequestHandler extends Basehandler {
     if (!video) {
       res.status(404).json({ error: 'No video found for this media' });
       return;
+    }
+    const user = (req as AuthenticatedRequest).authUser;
+    if (user && user.role !== 'admin') {
+      // The file's own length, not the speech in it: the detector's idea of
+      // how much talking there is only exists after the job has run, and it
+      // is not what the video costs to get through.
+      const seconds = await this.#extractor.probeDuration(video);
+      const verdict = this.#quota.consume(user.id, id, seconds);
+      if (!verdict.allowed) {
+        this.log('info',
+          `Transcription refused for "${user.username}" - today's ` +
+          `${verdict.info.kind === 'videos' ? 'video count' : 'video hours'} is spent.`
+        );
+        res.status(403).json({
+          code: TRANSCRIPTION_LIMIT_CODE,
+          error: 'You have reached your daily transcription limit. It resets at 08:00 (Beijing time).',
+          limit: verdict.info
+        });
+        return;
+      }
     }
     const record = this.#queue.enqueue(id, video);
     this.log('info', `Transcription queued for media "${id}"`);

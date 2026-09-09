@@ -26,6 +26,7 @@ import UploadStore from './UploadStore.js';
 import HistoryAPIRequestHandler from './handler/HistoryAPIRequestHandler.js';
 import type HistoryStore from './HistoryStore.js';
 import type QuotaStore from './QuotaStore.js';
+import TranscriptionQuotaStore from './TranscriptionQuotaStore.js';
 import type LoginLogStore from './LoginLogStore.js';
 import { requirePostQuota } from './QuotaGuard.js';
 import { createTranscriptionServices, type TranscriptionConfig } from './transcription/Config.js';
@@ -57,6 +58,7 @@ class _Router {
   #handlers: RequestHandlers;
   #authStore: AuthStore;
   #quotaStore: QuotaStore;
+  #transcriptionQuotaStore: TranscriptionQuotaStore;
   #regionGuard: LoginRegionGuard;
   #db: DBInstance;
   #router: Router;
@@ -65,12 +67,14 @@ class _Router {
     handlers: RequestHandlers,
     authStore: AuthStore,
     quotaStore: QuotaStore,
+    transcriptionQuotaStore: TranscriptionQuotaStore,
     regionGuard: LoginRegionGuard,
     db: DBInstance
   ) {
     this.#handlers = handlers;
     this.#authStore = authStore;
     this.#quotaStore = quotaStore;
+    this.#transcriptionQuotaStore = transcriptionQuotaStore;
     this.#regionGuard = regionGuard;
     this.#db = db;
     this.#router = express.Router();
@@ -228,6 +232,50 @@ class _Router {
       next();
     };
 
+    /**
+     * Asking for a video in the library to be transcribed, which not every
+     * account may do.
+     *
+     * The button is kept off the tiles of an account without it, but that is
+     * only tidiness in the way the upload page is: this is what refuses the
+     * work. What it does not decide is how much of it - the handler counts the
+     * day's allowance, because that needs the video's length and so has to
+     * wait until the file has been found.
+     */
+    const requireTranscribeVideo: RequestHandler = (req, res, next) => {
+      const user = (req as AuthenticatedRequest).authUser;
+      if (user?.role !== 'admin' && !user?.canTranscribeVideo) {
+        res.status(403).json({ error: 'Transcription is not enabled for this account' });
+        return;
+      }
+      next();
+    };
+
+    /**
+     * Stopping one, which is the same permission plus a question of whose job
+     * it is.
+     *
+     * An ordinary account may stop what it started today and nothing else.
+     * Without that second half the permission would hand every holder a button
+     * that cancels an administrator's work halfway through a film - which is
+     * not what the tile's own button, the only place this is offered, is for.
+     */
+    const requireOwnTranscription: RequestHandler = (req, res, next) => {
+      const user = (req as AuthenticatedRequest).authUser;
+      if (user?.role === 'admin') {
+        next();
+        return;
+      }
+      if (
+        user?.canTranscribeVideo &&
+        this.#transcriptionQuotaStore.startedToday(user.id, req.params.id)
+      ) {
+        next();
+        return;
+      }
+      res.status(403).json({ error: 'Transcription is not enabled for this account' });
+    };
+
     // A user restricted to certain creators is refused everything belonging to
     // the others, whichever way the route names it. The campaign listing is
     // narrowed by its handler instead, in SQL, so that its paging counts only
@@ -339,14 +387,34 @@ class _Router {
       this.#handlers.history.handleRemoveFavoriteRequest(req, res, req.params.id)
     );
 
-    // Making captions is an administrator's job; reading them is not, so an
-    // ordinary viewer's player can still list and load what is already there.
-    this.#router.post('/api/media/:id/transcribe', requireAdmin, (req, res) =>
-      this.#handlers.transcription.handleTranscribeRequest(req, res, req.params.id)
+    // Making captions is an administrator's job, and an ordinary account's when
+    // it has been given the permission - capped at a few videos a day, and
+    // never for a creator the account may not see, which is what `inScope` is
+    // doing on a route that used to be an administrator's alone. Reading
+    // captions is nobody's permission: any viewer's player can list and load
+    // what is already there.
+    //
+    // Answered rather than left to hang if the handler falls over: it is
+    // asynchronous now that the video has to be measured before it is queued.
+    this.#router.post(
+      '/api/media/:id/transcribe',
+      requireTranscribeVideo,
+      inScope(byMediaParam),
+      (req, res) => {
+        this.#handlers.transcription.handleTranscribeRequest(req, res, req.params.id)
+          .catch(() => {
+            if (!res.headersSent) {
+              res.status(500).json({ error: 'Could not start the transcription' });
+            }
+          });
+      }
     );
 
-    this.#router.delete('/api/media/:id/transcribe', requireAdmin, (req, res) =>
-      this.#handlers.transcription.handleCancelRequest(req, res, req.params.id)
+    this.#router.delete(
+      '/api/media/:id/transcribe',
+      requireOwnTranscription,
+      inScope(byMediaParam),
+      (req, res) => this.#handlers.transcription.handleCancelRequest(req, res, req.params.id)
     );
 
     this.#router.get('/api/transcriptions', requireAdmin, (req, res) =>
@@ -661,6 +729,13 @@ export function getRouter(
   // One guard, shared by the sign-in handler and by the check the router runs
   // on every request, so that an address placed for one is placed for both.
   const regionGuard = new LoginRegionGuard(loginLogStore, logger);
+  // Today's transcription tallies for the ordinary accounts that may ask for
+  // one. Beside the view counters and the accounts, in the folder everything
+  // this server writes goes into.
+  const transcriptionQuotaStore = TranscriptionQuotaStore.load(
+    path.resolve(dataDir, '.patreon-dl', 'transcription-quota.json'),
+    logger
+  );
   return new _Router({
     campaignAPI: new CampaignAPIRequestHandler(api, logger),
     contentAPI: new ContentAPIRequestHandler(api, logger),
@@ -668,7 +743,8 @@ export function getRouter(
     settingsAPI: new SettingsAPIRequestHandler(api, logger),
     mediaAPI: new MediaAPIRequestHandler(api, dataDir, logger),
     auth: new AuthAPIRequestHandler(
-      authStore, historyStore, quotaStore, loginLogStore, regionGuard, logger
+      authStore, historyStore, quotaStore, transcriptionQuotaStore, loginLogStore,
+      regionGuard, logger
     ),
     history: new HistoryAPIRequestHandler(db, historyStore, logger),
     pdfTranslation: new PdfTranslationRequestHandler(
@@ -682,6 +758,9 @@ export function getRouter(
       db, dataDir,
       transcription.index, transcription.queue, transcription.vad, transcription.settings,
       transcription.vocabulary,
+      // The measuring and the counting behind the daily ceiling an ordinary
+      // account transcribes under.
+      transcription.extractor, transcriptionQuotaStore,
       logger
     ),
     translation: new TranslationAPIRequestHandler(
@@ -698,5 +777,5 @@ export function getRouter(
       transcription.settings, transcription.vad,
       logger
     )
-  }, authStore, quotaStore, regionGuard, db).router;
+  }, authStore, quotaStore, transcriptionQuotaStore, regionGuard, db).router;
 }

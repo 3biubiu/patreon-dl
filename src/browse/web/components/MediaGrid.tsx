@@ -52,9 +52,12 @@ function MediaGrid(props: MediaGridProps) {
   // that the lightbox keeps the elements it was built around.
   const [ playing, setPlaying ] = useState<VideoPlayerSource | null>(null);
   // Making subtitles costs money and writes into the library, so the control
-  // is only drawn for the people allowed to do it. The server enforces this
-  // too - this just keeps the button out of everyone else's way.
-  const canTranscribe = user?.role === 'admin';
+  // is only drawn for the people allowed to do it: administrators, and the
+  // ordinary accounts given the permission - who get this button and nothing
+  // else, no page and no history. The server enforces both that and the few
+  // videos a day it comes with; this just keeps the button out of everyone
+  // else's way.
+  const canTranscribe = user?.role === 'admin' || !!user?.canTranscribeVideo;
   const mediaItems = _mi.filter((mi) => mi.downloaded?.path);
   const lgItemProps = mediaItems.reduce<MediaGridItemProps[]>((result, mi) => {
     // mimeType can be null when the downloader could not sniff the file, which

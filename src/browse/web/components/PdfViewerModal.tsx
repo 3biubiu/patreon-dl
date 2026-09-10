@@ -186,6 +186,13 @@ const PAGE_IMAGE_MAX_EDGE = 2000;
 const PAGE_IMAGE_QUALITY = 0.85;
 
 /**
+ * The thumbnail a page is checked against before it is sent. Big enough that
+ * a line of text somewhere on the page disturbs it, small enough that reading
+ * every pixel back costs nothing. See {@link isBlankCanvas}.
+ */
+const BLANK_PROBE_SIZE = 64;
+
+/**
  * The two ways a translation is shown, remembered separately because they are
  * not alternatives: the overlay is for reading the page as if it were in your
  * own language, the panel is for reading the translation as prose beside the
@@ -334,6 +341,52 @@ function storeImageMode(mode: ImageTranslationMode) {
 }
 
 /**
+ * Whether there is anything on the canvas.
+ *
+ * Assigning a width to a canvas empties it, which is how pdf.js starts drawing
+ * a page again at a new size - so between a layout change and the redraw that
+ * follows it, a page that is perfectly good to look at is momentarily blank to
+ * read from. A picture taken in that window is a white page, and a white page
+ * sent for translation comes back "no text on this page" and is remembered as
+ * one.
+ *
+ * The whole page is squeezed into a thumbnail and every pixel of that
+ * compared. Real content never averages to one flat colour at this size;
+ * an emptied canvas is nothing else. A page that genuinely is blank reads as
+ * blank too, which is the right answer for it as well - there is nothing on it
+ * to translate.
+ */
+function isBlankCanvas(canvas: HTMLCanvasElement) {
+  const probe = document.createElement('canvas');
+  probe.width = BLANK_PROBE_SIZE;
+  probe.height = BLANK_PROBE_SIZE;
+  const context = probe.getContext('2d', { willReadFrequently: true });
+  if (!context) {
+    // Unreadable is not the same as blank, and guessing "blank" here would
+    // stop the page being translated at all.
+    return false;
+  }
+  context.fillStyle = '#ffffff';
+  context.fillRect(0, 0, BLANK_PROBE_SIZE, BLANK_PROBE_SIZE);
+  context.drawImage(canvas, 0, 0, BLANK_PROBE_SIZE, BLANK_PROBE_SIZE);
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = context.getImageData(0, 0, BLANK_PROBE_SIZE, BLANK_PROBE_SIZE).data;
+  }
+  catch (_error) {
+    return false;
+  }
+  for (let at = 4; at < pixels.length; at += 4) {
+    if (pixels[at] !== pixels[0] ||
+      pixels[at + 1] !== pixels[1] ||
+      pixels[at + 2] !== pixels[2]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * The page as a picture to send for translation.
  *
  * Taken from the canvas the reader is already showing rather than drawn again:
@@ -343,10 +396,14 @@ function storeImageMode(mode: ImageTranslationMode) {
  * Drawn onto white first. A JPEG has no transparency to fall back on, so a
  * canvas with any left in it would come out with black where the paper should
  * be - and a black page is one Baidu can read nothing from.
+ *
+ * `null` where there was nothing to photograph. The caller records nothing for
+ * it, deliberately: the page will be drawn again, and being drawn again is
+ * what asks for it a second time.
  */
 function capturePageImage(canvas: HTMLCanvasElement): Promise<Blob | null> {
   const source = Math.max(canvas.width, canvas.height);
-  if (!source) {
+  if (!source || isBlankCanvas(canvas)) {
     return Promise.resolve(null);
   }
   const scale = Math.min(1, PAGE_IMAGE_MAX_EDGE / source);
@@ -660,8 +717,20 @@ function PdfViewerModal(props: PdfViewerModalProps) {
    * carries that decision into the two effects that do the work.
    */
   const [ retryEpoch, setRetryEpoch ] = useState(0);
-  /** Pages whose canvas has finished drawing, and so can be photographed. */
-  const [ paintedPages, setPaintedPages ] = useState(new Set<number>());
+  /**
+   * Pages whose canvas has finished drawing, and so can be photographed - and
+   * how many times each has finished.
+   *
+   * The count is the point. A page is drawn again whenever the width it is
+   * drawn at changes, and the width halves the moment the reader goes to two
+   * columns: switching to the spread, or to a page beside its translated
+   * picture, redraws every canvas on screen. As a set of page numbers this
+   * said nothing on the second drawing - the page was already in it - so the
+   * effect below never ran again, and a page whose first drawing it had missed
+   * (or had photographed while it was being cleared for the second) stayed
+   * untranslated with nothing left to trigger it.
+   */
+  const [ paintedPages, setPaintedPages ] = useState(new Map<number, number>());
   /** Which pages are actually in view. Only the scrolling layout can't say up front. */
   const [ visiblePages, setVisiblePages ] = useState<number[]>([]);
   // Every page pdf.js has opened, preloaded ones included. Keyed rather than
@@ -695,6 +764,14 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const canvasCallbacks = useRef(new Map<number, (node: HTMLCanvasElement | null) => void>());
   const imageUrls = useRef(new Map<number, string | null>());
   const runningImages = useRef(new Set<number>());
+  /**
+   * Pages the reader has pressed "try again" on.
+   *
+   * Held until the request for that page actually goes out, and taken off it
+   * as it does: it is what tells the server not to answer from its own copy,
+   * which may be the blank page this used to photograph.
+   */
+  const forcedImages = useRef(new Set<number>());
   const imageAbort = useRef<AbortController | null>(null);
   /** Bumped when the engine changes, which is what re-runs everything cached. */
   const [ translationEpoch, setTranslationEpoch ] = useState(0);
@@ -786,7 +863,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           if (!current.has(pageNumber)) {
             return current;
           }
-          const next = new Set(current);
+          const next = new Map(current);
           next.delete(pageNumber);
           return next;
         });
@@ -824,6 +901,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     translationCache.current.clear();
     runningPages.current.clear();
     runningImages.current.clear();
+    forcedImages.current.clear();
     slotRefs.current.clear();
     slotCallbacks.current.clear();
     pageCanvases.current.clear();
@@ -834,7 +912,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setTranslatingPages(new Set());
     setTranslationError(null);
     setImageErrors(new Map());
-    setPaintedPages(new Set());
+    setPaintedPages(new Map());
     releaseImages();
     setVisiblePages([]);
     setLoadedPages(new Map());
@@ -926,6 +1004,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
    */
   const retryPages = useCallback((pages: number[]) => {
     for (const pageNumber of pages) {
+      forcedImages.current.add(pageNumber);
       const url = imageUrls.current.get(pageNumber);
       if (url) {
         URL.revokeObjectURL(url);
@@ -1164,7 +1243,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   }, [ target?.url, imageWanted, translationEpoch ]);
 
   const translatePageImage = useCallback(async (
-    pageNumber: number, canvas: HTMLCanvasElement, mediaId: string, signal: AbortSignal
+    pageNumber: number, canvas: HTMLCanvasElement, mediaId: string,
+    refresh: boolean, signal: AbortSignal
   ) => {
     setImageTranslating((current) => new Set(current).add(pageNumber));
     try {
@@ -1172,7 +1252,9 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       if (!image || signal.aborted) {
         return;
       }
-      const result = await api.translatePdfPageImage(mediaId, pageNumber, image, undefined, signal);
+      const result = await api.translatePdfPageImage(
+        mediaId, pageNumber, image, { refresh, signal }
+      );
       if (signal.aborted) {
         // Nothing will be shown, so the URL would leak if it were not let go.
         if (result.url) {
@@ -1228,14 +1310,17 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       const canvas = pageCanvases.current.get(pageNumber);
       // Drawn, and finished drawing: a canvas photographed halfway through
       // being painted is a page with half its glyphs on it.
-      if (!canvas || !paintedPages.has(pageNumber)) {
+      if (!canvas || !canvas.width || !paintedPages.has(pageNumber)) {
         continue;
       }
       if (imageUrls.current.has(pageNumber) || runningImages.current.has(pageNumber)) {
         continue;
       }
       runningImages.current.add(pageNumber);
-      void translatePageImage(pageNumber, canvas, target.mediaId, controller.signal)
+      // Taken off as the request goes out, so one press means one forced
+      // request rather than every request from here on.
+      const forced = forcedImages.current.delete(pageNumber);
+      void translatePageImage(pageNumber, canvas, target.mediaId, forced, controller.signal)
         .finally(() => {
           if (imageAbort.current === controller) {
             runningImages.current.delete(pageNumber);
@@ -2019,8 +2104,9 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                 // Drawn, as opposed to merely opened: a canvas photographed
                 // before this has half a page on it.
                 onRenderSuccess={() => setPaintedPages(
-                  (current) => current.has(pageNumber) ? current :
-                    new Set(current).add(pageNumber)
+                  (current) => new Map(current).set(
+                    pageNumber, (current.get(pageNumber) ?? 0) + 1
+                  )
                 )}
                 // Recorded for every page, not just the visible one: a
                 // preloaded page fires this while it is still hidden and never

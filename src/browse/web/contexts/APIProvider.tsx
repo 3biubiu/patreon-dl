@@ -716,11 +716,17 @@ class API {
    * would cost the same and answer the same.
    */
   async translatePdfPageImage(
-    mediaId: string, page: number, image: Blob, to?: string, signal?: AbortSignal
+    mediaId: string, page: number, image: Blob,
+    options?: { to?: string; refresh?: boolean; signal?: AbortSignal }
   ): Promise<PdfImageTranslationResult> {
+    const { to, refresh, signal } = options ?? {};
     const query = new URLSearchParams({ page: String(page) });
     if (to) {
       query.set('to', to);
+    }
+    if (refresh) {
+      // Asked again on purpose, so the server's own copy is not the answer.
+      query.set('refresh', '1');
     }
     const response = await apiFetch(
       `/api/media/${mediaId}/pdf-image-translation?${query.toString()}`,

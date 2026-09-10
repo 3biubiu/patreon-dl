@@ -314,7 +314,14 @@ export default class PdfTranslationRequestHandler extends Basehandler {
 
     // On file already: a reader turning back through a chapter must not be
     // charged for it a second time.
-    const cached = imageStore.get(mediaId, to, page);
+    //
+    // `refresh` is how the reader's "try again" gets past it. What is stored
+    // may be the answer to a question that should never have been asked - a
+    // page photographed while it was being redrawn is a blank page, and
+    // "nothing on this page" is a perfectly cacheable answer to a blank page.
+    // Only a person clicking the button sets it, so it cannot loop.
+    const refresh = req.query.refresh === '1';
+    const cached = refresh ? null : imageStore.get(mediaId, to, page);
     if (cached) {
       this.log('debug', `Page ${page} of "${mediaId}" came from the image store`);
       this.#sendPageImage(res, cached.image, cached.contentType, true);

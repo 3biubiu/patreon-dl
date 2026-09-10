@@ -442,10 +442,11 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const canTranslatePdf = readPermission(req.body, 'canTranslatePdf');
       const canUploadTranscription = readPermission(req.body, 'canUploadTranscription');
       const canTranscribeVideo = readPermission(req.body, 'canTranscribeVideo');
+      const canViewSubtitles = readPermission(req.body, 'canViewSubtitles');
       res.json({
         user: this.#store.createUser({
           username, password, role, visibleCampaigns, quota, loginRegions,
-          canTranslatePdf, canUploadTranscription, canTranscribeVideo
+          canTranslatePdf, canUploadTranscription, canTranscribeVideo, canViewSubtitles
         })
       });
     }
@@ -464,9 +465,10 @@ export default class AuthAPIRequestHandler extends Basehandler {
       const canTranslatePdf = readPermission(req.body, 'canTranslatePdf');
       const canUploadTranscription = readPermission(req.body, 'canUploadTranscription');
       const canTranscribeVideo = readPermission(req.body, 'canTranscribeVideo');
+      const canViewSubtitles = readPermission(req.body, 'canViewSubtitles');
       const user = this.#store.updateUser(id, {
         password, role, visibleCampaigns, quota, loginRegions,
-        canTranslatePdf, canUploadTranscription, canTranscribeVideo
+        canTranslatePdf, canUploadTranscription, canTranscribeVideo, canViewSubtitles
       });
       // Changing your own password does not sign you out: the session names a
       // user id, and that has not changed.

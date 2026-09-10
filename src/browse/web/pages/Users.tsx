@@ -7,6 +7,7 @@ import {
   DEFAULT_CAN_TRANSCRIBE_VIDEO,
   DEFAULT_CAN_TRANSLATE_PDF,
   DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
+  DEFAULT_CAN_VIEW_SUBTITLES,
   type AuthUser,
   type LoginLogEntry,
   type Registration,
@@ -60,6 +61,7 @@ interface UserFormValues {
   canTranslatePdf: boolean;
   canUploadTranscription: boolean;
   canTranscribeVideo: boolean;
+  canViewSubtitles: boolean;
 }
 
 const ROLE_OPTIONS = [
@@ -381,7 +383,9 @@ function Users() {
       canUploadTranscription:
         target === 'new' ? DEFAULT_CAN_UPLOAD_TRANSCRIPTION : target.canUploadTranscription,
       canTranscribeVideo:
-        target === 'new' ? DEFAULT_CAN_TRANSCRIBE_VIDEO : target.canTranscribeVideo
+        target === 'new' ? DEFAULT_CAN_TRANSCRIBE_VIDEO : target.canTranscribeVideo,
+      canViewSubtitles:
+        target === 'new' ? DEFAULT_CAN_VIEW_SUBTITLES : target.canViewSubtitles
     });
   }, [form]);
 
@@ -431,6 +435,8 @@ function Users() {
     // reason - an administrator has it whatever the switch was left on.
     const canTranscribeVideo =
       values.role === 'admin' || values.canTranscribeVideo === true;
+    const canViewSubtitles =
+      values.role === 'admin' || values.canViewSubtitles === true;
     try {
       if (editing === 'new') {
         await api.createUser({
@@ -442,7 +448,8 @@ function Users() {
           loginRegions,
           canTranslatePdf,
           canUploadTranscription,
-          canTranscribeVideo
+          canTranscribeVideo,
+          canViewSubtitles
         });
       }
       else {
@@ -456,7 +463,8 @@ function Users() {
           loginRegions,
           canTranslatePdf,
           canUploadTranscription,
-          canTranscribeVideo
+          canTranscribeVideo,
+          canViewSubtitles
         });
       }
       setEditing(null);
@@ -640,6 +648,13 @@ function Users() {
                     dataIndex: 'canTranscribeVideo',
                     render: (canTranscribeVideo: boolean) => (
                       canTranscribeVideo ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                    )
+                  },
+                  {
+                    title: 'Subtitles',
+                    dataIndex: 'canViewSubtitles',
+                    render: (canViewSubtitles: boolean) => (
+                      canViewSubtitles ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
                     )
                   },
                   {
@@ -1007,6 +1022,7 @@ function PermissionFields(props: {
       <PdfTranslationField form={form} />
       <UploadTranscriptionField form={form} />
       <TranscribeVideoField form={form} />
+      <ViewSubtitlesField form={form} />
     </>
   );
 }
@@ -1032,6 +1048,7 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
   const canTranslatePdf = Form.useWatch('canTranslatePdf', form);
   const canUploadTranscription = Form.useWatch('canUploadTranscription', form);
   const canTranscribeVideo = Form.useWatch('canTranscribeVideo', form);
+  const canViewSubtitles = Form.useWatch('canViewSubtitles', form);
 
   if (role === 'admin') {
     return <Tag color="green">Unrestricted</Tag>;
@@ -1068,6 +1085,9 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
       </Tag>
       <Tag color={canTranscribeVideo ? 'blue' : undefined}>
         {canTranscribeVideo ? 'Transcribe on' : 'Transcribe off'}
+      </Tag>
+      <Tag color={canViewSubtitles ? 'blue' : undefined}>
+        {canViewSubtitles ? 'Subtitles on' : 'Subtitles off'}
       </Tag>
     </Space>
   );
@@ -1158,6 +1178,37 @@ function TranscribeVideoField(props: { form: FormInstance<UserFormValues>; }) {
           'It does not get the transcription page - only the button.' :
           'The button is kept off the tiles and the route behind it is refused. ' +
           'Subtitles that already exist are unaffected.'
+      }
+    >
+      <Switch checkedChildren="On" unCheckedChildren="Off" />
+    </Form.Item>
+  );
+}
+
+/**
+ * Whether the videos this account watches come with subtitles.
+ *
+ * The one permission here that costs nothing to grant - the captions are
+ * already written, and serving a file that is sitting there is not metered.
+ * It is a switch anyway, because who gets to read them is still a decision,
+ * and it is the switch above that decides who gets to make them.
+ */
+function ViewSubtitlesField(props: { form: FormInstance<UserFormValues>; }) {
+  const { form } = props;
+  const canViewSubtitles = Form.useWatch('canViewSubtitles', form);
+
+  return (
+    <Form.Item
+      name="canViewSubtitles"
+      label="Subtitles"
+      valuePropName="checked"
+      extra={
+        canViewSubtitles ?
+          'Videos play with their captions, and the player offers a picker for ' +
+          'whichever languages a video has.' :
+          'The caption picker is kept off both players and the subtitle routes ' +
+          'are refused. The account still watches every video it may see - ' +
+          'without captions.'
       }
     >
       <Switch checkedChildren="On" unCheckedChildren="Off" />

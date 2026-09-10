@@ -60,8 +60,9 @@ function looksLikeVideo(filePath: string, mimeType?: string | null) {
  *
  * Starting and cancelling are for administrators, and for an ordinary account
  * that has been given the permission - which is where the daily ceiling in
- * `TranscriptionQuotaStore` comes in. Reading is for everyone, so that any
- * viewer's player can list and load the captions that exist.
+ * `TranscriptionQuotaStore` comes in. Reading is its own permission and a
+ * cheaper one - `AuthUser.canViewSubtitles`, enforced by the router in front
+ * of the two subtitle routes rather than here.
  */
 export default class TranscriptionAPIRequestHandler extends Basehandler {
   name = 'TranscriptionAPIRequestHandler';

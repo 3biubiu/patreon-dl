@@ -7,6 +7,7 @@ import {
   DEFAULT_CAN_TRANSCRIBE_VIDEO,
   DEFAULT_CAN_TRANSLATE_PDF,
   DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
+  DEFAULT_CAN_VIEW_SUBTITLES,
   type AuthUser,
   type Registration,
   type UserRole
@@ -225,6 +226,21 @@ function normalizeCanTranscribeVideo(
   return typeof canTranscribeVideo === 'boolean' ? canTranscribeVideo : fallback;
 }
 
+/**
+ * The stored form of the permission to watch with subtitles. An administrator
+ * always has it, for the reason they always have the rest.
+ */
+function normalizeCanViewSubtitles(
+  canViewSubtitles: boolean | undefined,
+  role: UserRole,
+  fallback: boolean
+): boolean {
+  if (role === 'admin') {
+    return true;
+  }
+  return typeof canViewSubtitles === 'boolean' ? canViewSubtitles : fallback;
+}
+
 function hashPassword(password: string, salt: string) {
   return crypto.scryptSync(password, salt, SCRYPT_KEY_LENGTH).toString('base64');
 }
@@ -295,6 +311,12 @@ export default class AuthStore {
         user.canTranscribeVideo = normalizeCanTranscribeVideo(
           user.canTranscribeVideo, user.role, DEFAULT_CAN_TRANSCRIBE_VIDEO
         );
+        // Back to the first decision rather than the two above it: the
+        // accounts on file have been watching with subtitles up to this point,
+        // and a migration that switched them off would take away something
+        // they were using and cost nothing to give. Only accounts made from
+        // here on start on `DEFAULT_CAN_VIEW_SUBTITLES`.
+        user.canViewSubtitles = normalizeCanViewSubtitles(user.canViewSubtitles, user.role, true);
         // Accounts written before bans existed are not banned; a reason with
         // no ban behind it is stale and dropped.
         user.banned = user.banned === true && user.role !== 'admin';
@@ -327,6 +349,7 @@ export default class AuthStore {
           canTranslatePdf: true,
           canUploadTranscription: true,
           canTranscribeVideo: true,
+          canViewSubtitles: true,
           banned: false,
           banReason: null,
           salt,
@@ -462,6 +485,7 @@ export default class AuthStore {
     canTranslatePdf?: boolean;
     canUploadTranscription?: boolean;
     canTranscribeVideo?: boolean;
+    canViewSubtitles?: boolean;
   }): AuthUser {
     const username = params.username.trim();
     if (!username) {
@@ -500,6 +524,12 @@ export default class AuthStore {
       canTranscribeVideo: normalizeCanTranscribeVideo(
         params.canTranscribeVideo, params.role, DEFAULT_CAN_TRANSCRIBE_VIDEO
       ),
+      // Off unless it is asked for, like the three above - not because it
+      // spends anything, but so that every permission on a new account starts
+      // in the same place and is handed out on purpose.
+      canViewSubtitles: normalizeCanViewSubtitles(
+        params.canViewSubtitles, params.role, DEFAULT_CAN_VIEW_SUBTITLES
+      ),
       banned: false,
       banReason: null,
       salt,
@@ -519,6 +549,7 @@ export default class AuthStore {
     canTranslatePdf?: boolean;
     canUploadTranscription?: boolean;
     canTranscribeVideo?: boolean;
+    canViewSubtitles?: boolean;
   }): AuthUser {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
@@ -572,6 +603,9 @@ export default class AuthStore {
     );
     user.canTranscribeVideo = normalizeCanTranscribeVideo(
       params.canTranscribeVideo, user.role, user.canTranscribeVideo
+    );
+    user.canViewSubtitles = normalizeCanViewSubtitles(
+      params.canViewSubtitles, user.role, user.canViewSubtitles
     );
     if (params.password !== undefined) {
       this.#assertPassword(params.password);
@@ -672,6 +706,7 @@ export default class AuthStore {
       canTranslatePdf: DEFAULT_CAN_TRANSLATE_PDF,
       canUploadTranscription: DEFAULT_CAN_UPLOAD_TRANSCRIPTION,
       canTranscribeVideo: DEFAULT_CAN_TRANSCRIBE_VIDEO,
+      canViewSubtitles: DEFAULT_CAN_VIEW_SUBTITLES,
       banned: false,
       banReason: null,
       salt: registration.salt,
@@ -734,7 +769,8 @@ export default class AuthStore {
   #toAuthUser(user: StoredUser): AuthUser {
     const {
       id, username, role, createdAt, visibleCampaigns, quota, loginRegions,
-      canTranslatePdf, canUploadTranscription, canTranscribeVideo, banned, banReason
+      canTranslatePdf, canUploadTranscription, canTranscribeVideo, canViewSubtitles,
+      banned, banReason
     } = user;
     // A copy, so a caller cannot reach into the store and edit a permission
     // in place - the array would otherwise be the live one.
@@ -746,6 +782,7 @@ export default class AuthStore {
       canTranslatePdf,
       canUploadTranscription,
       canTranscribeVideo,
+      canViewSubtitles,
       banned,
       banReason
     };

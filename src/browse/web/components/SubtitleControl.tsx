@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Slider } from "antd";
 import { useAPI } from "../contexts/APIProvider";
+import { useAuth } from "../contexts/AuthProvider";
 import { getMediaIdFromVideo } from "../utils/useActiveVideo";
 import PlayerMenuButton, { type PlayerControlVariant } from "./PlayerMenuButton";
 import { type SubtitleFile } from "../../types/Transcription";
@@ -115,10 +116,17 @@ interface SubtitleControlProps {
  * Tracks are attached to the element directly. The player is lightgallery's,
  * built from a JSON attribute long before this runs, so waiting for a chance
  * to render into it would mean waiting forever.
+ *
+ * An account without the subtitle permission gets none of this - no list is
+ * asked for, so no track is ever attached and there is nothing for the menu
+ * or for `SubtitleOverlay` to draw. The routes refuse it too; this only keeps
+ * the request, and a picker that could never fill, out of the way.
  */
 function SubtitleControl(props: SubtitleControlProps) {
   const { video, variant, hideNativeCues = false, settings, getPopupContainer } = props;
   const { api } = useAPI();
+  const { user } = useAuth();
+  const canViewSubtitles = user?.role === 'admin' || !!user?.canViewSubtitles;
   const mediaId = getMediaIdFromVideo(video);
   const [ subtitles, setSubtitles ] = useState<SubtitleFile[]>([]);
   const [ selected, setSelected ] = useState<string>(OFF);
@@ -158,7 +166,7 @@ function SubtitleControl(props: SubtitleControlProps) {
   }, [ api, hideNativeCues, mediaId, subtitles, video ]);
 
   useEffect(() => {
-    if (!mediaId) {
+    if (!mediaId || !canViewSubtitles) {
       setSubtitles([]);
       return;
     }
@@ -180,7 +188,7 @@ function SubtitleControl(props: SubtitleControlProps) {
       }
     })();
     return () => { cancelled = true; };
-  }, [ api, mediaId ]);
+  }, [ api, canViewSubtitles, mediaId ]);
 
   useEffect(() => {
     applyTrack(selected);

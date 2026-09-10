@@ -252,6 +252,27 @@ class _Router {
     };
 
     /**
+     * Watching with subtitles, which not every account may do.
+     *
+     * The players draw no caption picker for an account without it, but that
+     * is only tidiness in the way the rest is: this is what refuses the
+     * captions themselves, and it stands in front of both listing them and
+     * reading one. Without the second half the picker would be gone and the
+     * files still there for anyone who guessed a URL.
+     *
+     * It says nothing about the video: an account without this watches
+     * everything it may see, without captions.
+     */
+    const requireViewSubtitles: RequestHandler = (req, res, next) => {
+      const user = (req as AuthenticatedRequest).authUser;
+      if (user?.role !== 'admin' && !user?.canViewSubtitles) {
+        res.status(403).json({ error: 'Subtitles are not enabled for this account' });
+        return;
+      }
+      next();
+    };
+
+    /**
      * Stopping one, which is the same permission plus a question of whose job
      * it is.
      *
@@ -390,9 +411,9 @@ class _Router {
     // Making captions is an administrator's job, and an ordinary account's when
     // it has been given the permission - capped at a few videos a day, and
     // never for a creator the account may not see, which is what `inScope` is
-    // doing on a route that used to be an administrator's alone. Reading
-    // captions is nobody's permission: any viewer's player can list and load
-    // what is already there.
+    // doing on a route that used to be an administrator's alone. Reading them
+    // is a permission of its own and a much cheaper one - see
+    // `requireViewSubtitles` on the two routes further down.
     //
     // Answered rather than left to hang if the handler falls over: it is
     // asynchronous now that the video has to be measured before it is queued.
@@ -490,17 +511,29 @@ class _Router {
       this.#handlers.transcription.handleJobRequest(req, res, req.params.id)
     );
 
-    this.#router.get('/api/media/:id/subtitles', inScope(byMediaParam), (req, res) =>
-      this.#handlers.transcription.handleSubtitleListRequest(req, res, req.params.id)
+    // Behind the viewing permission as well as the creator restriction: the
+    // captions belong to a video, so an account has to be allowed both this
+    // video and captions at all before either of these answers.
+    this.#router.get(
+      '/api/media/:id/subtitles',
+      requireViewSubtitles,
+      inScope(byMediaParam),
+      (req, res) => this.#handlers.transcription.handleSubtitleListRequest(req, res, req.params.id)
     );
 
-    this.#router.get('/api/media/:id/subtitles/:filename', inScope(byMediaParam), (req, res) =>
-      this.#handlers.transcription.handleSubtitleRequest(req, res, req.params.id, req.params.filename)
+    this.#router.get(
+      '/api/media/:id/subtitles/:filename',
+      requireViewSubtitles,
+      inScope(byMediaParam),
+      (req, res) => this.#handlers.transcription.handleSubtitleRequest(
+        req, res, req.params.id, req.params.filename
+      )
     );
 
     // Translation is an administrator's job for the same reasons transcription
     // is: it spends a metered API and writes into the library. What comes out
-    // is served by the subtitle endpoints above, to anyone whose player asks.
+    // is served by the subtitle endpoints above, to the accounts allowed
+    // captions.
     this.#router.post('/api/media/:id/translate', requireAdmin, (req, res) =>
       this.#handlers.translation.handleTranslateRequest(req, res, req.params.id)
     );

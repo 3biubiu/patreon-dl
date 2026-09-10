@@ -37,6 +37,19 @@ export const DEFAULT_CAN_UPLOAD_TRANSCRIPTION = false;
 export const DEFAULT_CAN_TRANSCRIBE_VIDEO = false;
 
 /**
+ * Whether a newly created ordinary account sees subtitles on the videos it
+ * watches.
+ *
+ * Off, and unlike the three above this one is not about what an account may
+ * spend - the captions are already written and cost nothing to serve. It is
+ * off because it is the same shape of decision as the rest: a permission
+ * nobody has thought about yet should start closed, and handing it out is one
+ * switch. Accounts that already existed when this arrived keep their subtitles
+ * - see `AuthStore.load`.
+ */
+export const DEFAULT_CAN_VIEW_SUBTITLES = false;
+
+/**
  * A user as the browser is allowed to see them - no salt, no password hash.
  *
  * The permissions live here rather than anywhere else because the auth guard
@@ -97,8 +110,9 @@ export interface AuthUser {
    * Whether this account may upload its own video to be transcribed.
    *
    * `false` hides the upload page and is refused by every route behind it.
-   * What the account can already do is unaffected: the captions on the videos
-   * in the library are read by anyone whose player asks for them.
+   * What the account can already do is unaffected: whether it reads the
+   * captions on the videos in the library is
+   * {@link AuthUser.canViewSubtitles}, and neither decides the other.
    *
    * Always `true` for administrators, for the reason every other permission
    * is: they can edit their own.
@@ -108,8 +122,8 @@ export interface AuthUser {
    * Whether this account may ask for a video in the library to be transcribed.
    *
    * `false` keeps the button off the video tiles and is refused by the route
-   * behind it. What the account can already do is unaffected: subtitles that
-   * exist are read by anyone whose player asks for them.
+   * behind it. Whether the account then reads what it asked for is a separate
+   * permission - see {@link AuthUser.canViewSubtitles}.
    *
    * It does not carry the transcription history page with it - that stays an
    * administrator's, because it is every account's jobs and it can stop and
@@ -120,6 +134,22 @@ export interface AuthUser {
    * is: they can edit their own.
    */
   canTranscribeVideo: boolean;
+  /**
+   * Whether the players offer subtitles on the videos this account watches.
+   *
+   * `false` keeps the caption picker off both players and is refused by the
+   * routes that list and serve the subtitle files - the account still watches
+   * every video it may see, it just watches them without captions.
+   *
+   * Not the same thing as {@link AuthUser.canTranscribeVideo}, which is about
+   * making captions rather than reading them. The two are set apart because
+   * they cost different things: transcribing spends an API key, watching
+   * spends nothing.
+   *
+   * Always `true` for administrators, for the reason every other permission
+   * is: they can edit their own.
+   */
+  canViewSubtitles: boolean;
   /**
    * Locked out entirely - no session survives it and no sign-in gets past it.
    * Put on by the sign-in anomaly rule, taken off only by an administrator.
@@ -178,6 +208,8 @@ export interface CreateUserRequest {
   canUploadTranscription?: boolean;
   /** Omit to start the account on {@link DEFAULT_CAN_TRANSCRIBE_VIDEO}. */
   canTranscribeVideo?: boolean;
+  /** Omit to start the account on {@link DEFAULT_CAN_VIEW_SUBTITLES}. */
+  canViewSubtitles?: boolean;
 }
 
 export interface UpdateUserRequest {
@@ -195,6 +227,8 @@ export interface UpdateUserRequest {
   canUploadTranscription?: boolean;
   /** Omit to leave as it is. */
   canTranscribeVideo?: boolean;
+  /** Omit to leave as it is. */
+  canViewSubtitles?: boolean;
 }
 
 /**

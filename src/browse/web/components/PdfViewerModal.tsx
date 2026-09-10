@@ -23,6 +23,7 @@ import {
 import { Document, Page, pdfjs } from "react-pdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useAPI } from "../contexts/APIProvider";
+import { useLanguage } from "../contexts/LanguageProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { useDownload } from "../contexts/DownloadProvider";
 import { extractPageBlocks, type PdfTextBlock } from "../utils/PdfText";
@@ -442,6 +443,7 @@ interface PageSlotProps {
 
 const PageSlot = memo(function PageSlot(props: PageSlotProps) {
   const { pageNumber, aspect, hidden, slotRef, children, showSide, sideUrl, sideBusy } = props;
+  const { t } = useLanguage();
   return (
     <div
       className="pdf-viewer__slot"
@@ -458,23 +460,21 @@ const PageSlot = memo(function PageSlot(props: PageSlotProps) {
       {
         showSide ? (
           <div className="pdf-viewer__page pdf-viewer__page--side">
-            {
-              sideUrl ? (
+            {sideUrl ? (
                 <img
                   className="pdf-viewer__side-image"
                   src={sideUrl}
-                  alt={`Page ${pageNumber}, translated`}
+                  alt={t('pdf_alt_page_translated', { page: pageNumber })}
                   draggable={false}
                 />
               ) : (
                 <div className="pdf-viewer__placeholder">
                   {
-                    sideUrl === null ? 'No text on this page' :
-                      sideBusy ? <Spin /> : 'Waiting for the page'
+                    sideUrl === null ? t('pdf_no_text_on_page') :
+                      sideBusy ? <Spin /> : t('pdf_waiting_for_page')
                   }
                 </div>
-              )
-            }
+              )}
           </div>
         ) : null
       }
@@ -551,6 +551,7 @@ interface PdfViewerModalProps {
 function PdfViewerModal(props: PdfViewerModalProps) {
   const { target, onClose, preloadPages = DEFAULT_PRELOAD_PAGES } = props;
   const { api } = useAPI();
+  const { t } = useLanguage();
   const { user } = useAuth();
   const { canDownload, requestDownload } = useDownload();
   const [ numPages, setNumPages ] = useState(0);
@@ -941,7 +942,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     }
     catch (error) {
       if (!signal.aborted) {
-        setTranslationError(error instanceof Error ? error.message : 'Could not translate this page');
+        setTranslationError(error instanceof Error ? error.message : t('pdf_could_not_translate_page'));
       }
     }
     finally {
@@ -954,7 +955,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         return next;
       });
     }
-  }, [api]);
+  }, [api, t]);
 
   /**
    * The pages on screen, in the order they are laid out.
@@ -1081,7 +1082,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     catch (error) {
       if (!signal.aborted) {
         setImageError(
-          error instanceof Error ? error.message : 'Could not translate this page as an image'
+          error instanceof Error ? error.message : t('pdf_could_not_translate_image')
         );
       }
     }
@@ -1095,7 +1096,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         return next;
       });
     }
-  }, [api]);
+  }, [api, t]);
 
   /**
    * Sends the pages on screen to be translated as pictures.
@@ -1537,7 +1538,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           type="text"
           size="small"
           icon={<LeftOutlined />}
-          aria-label="Previous page"
+          aria-label={t('pdf_previous_page')}
           disabled={page <= 1}
           onClick={() => goToPage(page - 1)}
         />
@@ -1546,7 +1547,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
             className="pdf-viewer__page-input"
             size="small"
             value={pageInput}
-            aria-label="Go to page"
+            aria-label={t('pdf_go_to_page')}
             inputMode="numeric"
             disabled={numPages === 0}
             onChange={(e) => setPageInput(e.target.value)}
@@ -1566,25 +1567,25 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           type="text"
           size="small"
           icon={<RightOutlined />}
-          aria-label="Next page"
+          aria-label={t('pdf_next_page')}
           disabled={numPages === 0 || page >= lastStart}
           onClick={() => goToPage(page + 1)}
         />
         <span className="pdf-viewer__divider" />
-        {modeButton('single', <FileOutlined />, 'Single page', 'One page at a time')}
+        {modeButton('single', <FileOutlined />, t('pdf_single_page'), t('pdf_single_page_tip'))}
         {modeButton(
           'scroll',
           <ColumnHeightOutlined />,
-          'Continuous scroll',
-          'Every page in one column - scroll straight through'
+          t('pdf_continuous_scroll'),
+          t('pdf_continuous_scroll_tip')
         )}
         {modeButton(
           'spread',
           <ReadOutlined />,
-          'Two-page spread',
+          t('pdf_two_page_spread'),
           sideBySideImages ?
-            'Not available while a page is shown beside its translated picture - the two want the same two columns' :
-            'Two pages side by side, sliding one page at a time (1-2, 2-3, 3-4)',
+            t('pdf_spread_not_with_side_image') :
+            t('pdf_spread_tip'),
           sideBySideImages
         )}
         <span className="pdf-viewer__divider" />
@@ -1592,7 +1593,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           type="text"
           size="small"
           icon={<ZoomOutOutlined />}
-          aria-label="Narrower"
+          aria-label={t('pdf_narrower')}
           disabled={widthPercent <= MIN_WIDTH_PERCENT}
           onClick={() => changeWidth(-WIDTH_STEP)}
         />
@@ -1600,26 +1601,26 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           type="text"
           size="small"
           icon={<ColumnWidthOutlined />}
-          aria-label="Reset width"
+          aria-label={t('pdf_reset_width')}
           onClick={() => changeWidth(getDefaultWidthPercent() - widthPercent)}
         />
         <Button
           type="text"
           size="small"
           icon={<ZoomInOutlined />}
-          aria-label="Wider"
+          aria-label={t('pdf_wider')}
           disabled={widthPercent >= MAX_WIDTH_PERCENT}
           onClick={() => changeWidth(WIDTH_STEP)}
         />
         <Tooltip
-          title={fullscreen ? 'Leave fullscreen' : 'Fullscreen'}
+          title={fullscreen ? t('leave_fullscreen') : t('fullscreen')}
           getPopupContainer={popupContainer}
         >
           <Button
             type={fullscreen ? 'primary' : 'text'}
             size="small"
             icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-            aria-label={fullscreen ? 'Leave fullscreen' : 'Fullscreen'}
+            aria-label={fullscreen ? t('leave_fullscreen') : t('fullscreen')}
             aria-pressed={fullscreen}
             onClick={toggleFullscreen}
           />
@@ -1629,8 +1630,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
             <Tooltip
               title={
                 imageMode === 'immersive' ?
-                  'Covered by the translated picture of the page - turn that off to lay the text translation over it instead' :
-                  'Overlay the translation on the page - hold the left mouse button to see the original'
+                  t('pdf_immersive_covered_by_image') :
+                  t('pdf_immersive_tip')
               }
               getPopupContainer={popupContainer}
             >
@@ -1641,7 +1642,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                 type={immersiveShown ? 'primary' : 'text'}
                 size="small"
                 icon={<TranslationOutlined />}
-                aria-label="Immersive translation"
+                aria-label={t('pdf_immersive_translation')}
                 aria-pressed={immersiveShown}
                 disabled={imageMode === 'immersive'}
                 onClick={() => setImmersive((on) => {
@@ -1657,8 +1658,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
             <Tooltip
               title={
                 panelAvailable ?
-                  'Show the translation beside the page' :
-                  'Not available in the two-page spread - use the overlay instead'
+                  t('pdf_panel_show') :
+                  t('pdf_panel_not_in_spread')
               }
               getPopupContainer={popupContainer}
             >
@@ -1666,7 +1667,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                 type={panelVisible ? 'primary' : 'text'}
                 size="small"
                 icon={<ProfileOutlined />}
-                aria-label="Translation panel"
+                aria-label={t('pdf_translation_panel')}
                 aria-pressed={panelVisible}
                 disabled={!panelAvailable}
                 onClick={() => setPanelOpen((on) => {
@@ -1680,14 +1681,14 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         {
           canTranslate ? (
             <Tooltip
-              title="Translate the page as a picture and lay it over the original - for scans and comics, which have no text to translate. Hold the left mouse button to see the original."
+              title={t('pdf_image_immersive_tip')}
               getPopupContainer={popupContainer}
             >
               <Button
                 type={imageMode === 'immersive' ? 'primary' : 'text'}
                 size="small"
                 icon={<FileImageOutlined />}
-                aria-label="Immersive image translation"
+                aria-label={t('pdf_image_immersive_translation')}
                 aria-pressed={imageMode === 'immersive'}
                 onClick={() => changeImageMode('immersive')}
               />
@@ -1699,8 +1700,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
             <Tooltip
               title={
                 viewMode === 'spread' ?
-                  'Not available in the two-page spread - the two want the same two columns' :
-                  'Show the translated picture of the page beside the original'
+                  t('pdf_side_img_not_in_spread') :
+                  t('pdf_side_img_show')
               }
               getPopupContainer={popupContainer}
             >
@@ -1708,7 +1709,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                 type={sideBySideImages ? 'primary' : 'text'}
                 size="small"
                 icon={<SplitCellsOutlined />}
-                aria-label="Side-by-side image translation"
+                aria-label={t('pdf_side_img_translation')}
                 aria-pressed={sideBySideImages}
                 disabled={viewMode === 'spread'}
                 onClick={() => changeImageMode('side')}
@@ -1720,12 +1721,12 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           // Same reasoning as the download button: the routes behind it are
           // what refuse everyone else, this only keeps the toolbar honest.
           canDownload ? (
-            <Tooltip title="Translation settings" getPopupContainer={popupContainer}>
+            <Tooltip title={t('translation_settings')} getPopupContainer={popupContainer}>
               <Button
                 type="text"
                 size="small"
                 icon={<SettingOutlined />}
-                aria-label="Translation settings"
+                aria-label={t('translation_settings')}
                 onClick={() => setSettingsOpen(true)}
               />
             </Tooltip>
@@ -1739,7 +1740,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
               type="text"
               size="small"
               icon={<DownloadOutlined />}
-              aria-label="Download"
+              aria-label={t('download')}
               onClick={() => requestDownload({
                 url: target.url,
                 mediaId: target.mediaId,
@@ -1920,7 +1921,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const panel = panelVisible ? (
     <aside className="pdf-viewer__panel">
       <div className="pdf-viewer__panel-head">
-        <span>Translation</span>
+        <span>{t('translation')}</span>
         {translatingPages.has(page) ? <Spin size="small" /> : null}
       </div>
       {
@@ -1939,15 +1940,17 @@ function PdfViewerModal(props: PdfViewerModalProps) {
               {
                 translation.complete && translation.failed > 0 ? (
                   <p className="pdf-viewer__panel-empty">
-                    {translation.failed} of {translation.blocks.length} blocks could not be
-                    translated - the original is shown for those.
+                    {t('pdf_blocks_failed', {
+                      failed: translation.failed,
+                      total: translation.blocks.length
+                    })}
                   </p>
                 ) : null
               }
               {
                 translation.blocks.length === 0 && !translatingPages.has(page) ? (
                   <p className="pdf-viewer__panel-empty">
-                    No text on this page - a scanned page has nothing to translate.
+                    {t('pdf_panel_no_text')}
                   </p>
                 ) : null
               }
@@ -2007,13 +2010,13 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       <div
         className="pdf-viewer__resize-handle pdf-viewer__resize-handle--left"
         role="separator"
-        aria-label="Drag to resize"
+        aria-label={t('pdf_drag_to_resize')}
         onPointerDown={(e) => startResize(e, -1)}
       />
       <div
         className="pdf-viewer__resize-handle pdf-viewer__resize-handle--right"
         role="separator"
-        aria-label="Drag to resize"
+        aria-label={t('pdf_drag_to_resize')}
         onPointerDown={(e) => startResize(e, 1)}
       />
       <div className="pdf-viewer__body">
@@ -2056,7 +2059,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                   file={target.url}
                   options={PDF_OPTIONS}
                   loading={<Spin size="large" />}
-                  error={<div className="pdf-viewer__error">Could not open this PDF.</div>}
+                  error={<div className="pdf-viewer__error">{t('pdf_could_not_open')}</div>}
                   onLoadError={() => setFailed(true)}
                   onLoadSuccess={handleLoadSuccess}
                 >

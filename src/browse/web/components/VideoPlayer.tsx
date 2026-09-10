@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { Slider } from "antd";
 import Icon from "./Icon";
 import PlaybackRateControl from "./PlaybackRateControl";
+import { useLanguage } from "../contexts/LanguageProvider";
 import PlayerSizeControl, {
   DEFAULT_SIZE_PERCENT,
   MAX_SIZE_PERCENT,
@@ -146,6 +147,7 @@ function storeVolume(volume: number, muted: boolean) {
  */
 function VideoPlayer(props: VideoPlayerProps) {
   const { source, autoPlay = false, onClose } = props;
+  const { t } = useLanguage();
 
   const rootRef = useRef<HTMLDivElement>(null);
   const seekRef = useRef<HTMLDivElement>(null);
@@ -696,8 +698,8 @@ function VideoPlayer(props: VideoPlayerProps) {
           type="button"
           className="player-menu player-menu--player"
           onClick={togglePlay}
-          title={playing ? 'Pause' : 'Play'}
-          aria-label={playing ? 'Pause' : 'Play'}
+          title={playing ? t('pause') : t('play')}
+          aria-label={playing ? t('pause') : t('play')}
         >
           <Icon name={playing ? 'pause' : 'play_arrow'} />
         </button>
@@ -713,7 +715,7 @@ function VideoPlayer(props: VideoPlayerProps) {
           className="video-player__seek"
           role="slider"
           tabIndex={-1}
-          aria-label="Seek"
+          aria-label={t('seek')}
           aria-valuemin={0}
           aria-valuemax={Math.round(duration)}
           aria-valuenow={Math.round(currentTime)}
@@ -744,8 +746,8 @@ function VideoPlayer(props: VideoPlayerProps) {
               // is what puts the column on screen.
               setVolumeOpen(true);
             }}
-            title={muted ? 'Unmute' : 'Mute'}
-            aria-label={muted ? 'Unmute' : 'Mute'}
+            title={muted ? t('unmute') : t('mute')}
+            aria-label={muted ? t('unmute') : t('mute')}
           >
             <Icon name={muted || volume === 0 ? 'volume_off' : volume < 0.5 ? 'volume_down' : 'volume_up'} />
           </button>
@@ -799,8 +801,8 @@ function VideoPlayer(props: VideoPlayerProps) {
           type="button"
           className="player-menu player-menu--player"
           onClick={toggleFullscreen}
-          title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-          aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          title={fullscreen ? t('exit_fullscreen') : t('fullscreen')}
+          aria-label={fullscreen ? t('exit_fullscreen') : t('fullscreen')}
         >
           <Icon name={fullscreen ? 'fullscreen_exit' : 'fullscreen'} />
         </button>
@@ -811,8 +813,8 @@ function VideoPlayer(props: VideoPlayerProps) {
               type="button"
               className="player-menu player-menu--player"
               onClick={onClose}
-              title="Close player"
-              aria-label="Close player"
+              title={t('close_player')}
+              aria-label={t('close_player')}
             >
               <Icon name="close" />
             </button>

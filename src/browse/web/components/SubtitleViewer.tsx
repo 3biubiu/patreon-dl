@@ -2,6 +2,7 @@ import "../assets/styles/SubtitleViewer.scss";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Button, Drawer, Empty, Input, Segmented, Space } from "antd";
 import { useAPI } from "../contexts/APIProvider";
+import { useLanguage } from "../contexts/LanguageProvider";
 import { LoadingBlock } from "./Loading";
 import Icon from "./Icon";
 import { useMediaQuery, DESKTOP_QUERY } from "../utils/useMediaQuery";
@@ -45,6 +46,7 @@ interface SubtitleViewerProps {
 function SubtitleViewer(props: SubtitleViewerProps) {
   const { open, mediaId, title, onClose } = props;
   const { api } = useAPI();
+  const { t } = useLanguage();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [ loaded, setLoaded ] = useState<Loaded | null>(null);
   const [ error, setError ] = useState<string | null>(null);
@@ -83,12 +85,12 @@ function SubtitleViewer(props: SubtitleViewerProps) {
       }
       catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Could not read the subtitles for this video');
+          setError(e instanceof Error ? e.message : t('subtitle_viewer_could_not_read'));
         }
       }
     })();
     return () => { cancelled = true; };
-  }, [ api, mediaId, open ]);
+  }, [ api, mediaId, open, t ]);
 
   const rows = useMemo(() => {
     if (!loaded) {
@@ -127,10 +129,10 @@ function SubtitleViewer(props: SubtitleViewerProps) {
         setTimeout(() => setCopied(false), 1500);
       }
       catch {
-        setError('The browser would not let the transcript be copied');
+        setError(t('subtitle_viewer_copy_denied'));
       }
     })();
-  }, [ mode, rows ]);
+  }, [ mode, rows, t ]);
 
   const renderBody = () => {
     if (error) {
@@ -140,7 +142,7 @@ function SubtitleViewer(props: SubtitleViewerProps) {
       return <LoadingBlock />;
     }
     if (loaded.pairs.length === 0) {
-      return <Empty description="There is no subtitle file beside this video any more." />;
+      return <Empty description={t('subtitle_viewer_no_file')} />;
     }
     return (
       <>
@@ -165,16 +167,16 @@ function SubtitleViewer(props: SubtitleViewerProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             allowClear
-            placeholder="Search this transcript"
+            placeholder={t('subtitle_viewer_search')}
             prefix={<Icon name="search" />}
           />
           <Button icon={<Icon name={copied ? 'check' : 'content_copy'} />} onClick={copy}>
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? t('copied') : t('copy')}
           </Button>
         </div>
         {
           rows.length === 0 ?
-            <Empty description="No line says that." />
+            <Empty description={t('subtitle_viewer_no_match')} />
             : (
               <ol className="subtitle-viewer__lines">
                 {

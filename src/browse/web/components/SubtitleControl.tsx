@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Slider } from "antd";
 import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
+import { useLanguage } from "../contexts/LanguageProvider";
 import { getMediaIdFromVideo } from "../utils/useActiveVideo";
 import PlayerMenuButton, { type PlayerControlVariant } from "./PlayerMenuButton";
 import { type SubtitleFile } from "../../types/Transcription";
@@ -126,6 +127,7 @@ function SubtitleControl(props: SubtitleControlProps) {
   const { video, variant, hideNativeCues = false, settings, getPopupContainer } = props;
   const { api } = useAPI();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const canViewSubtitles = user?.role === 'admin' || !!user?.canViewSubtitles;
   const mediaId = getMediaIdFromVideo(video);
   const [ subtitles, setSubtitles ] = useState<SubtitleFile[]>([]);
@@ -204,7 +206,7 @@ function SubtitleControl(props: SubtitleControlProps) {
   const settingsPanel = settings && selected ? (
     <div className="caption-settings" onKeyDown={(e) => e.stopPropagation()}>
       <div className="caption-settings__row">
-        <span className="caption-settings__label">Text size</span>
+        <span className="caption-settings__label">{t('caption_text_size')}</span>
         <span className="caption-settings__value">{settings.scale}%</span>
       </div>
       <Slider
@@ -216,7 +218,7 @@ function SubtitleControl(props: SubtitleControlProps) {
         tooltip={{ open: false }}
       />
       <div className="caption-settings__row">
-        <span className="caption-settings__label">Above bottom</span>
+        <span className="caption-settings__label">{t('caption_above_bottom')}</span>
         <span className="caption-settings__value">{settings.bottom}%</span>
       </div>
       <Slider
@@ -233,10 +235,10 @@ function SubtitleControl(props: SubtitleControlProps) {
   return (
     <PlayerMenuButton
       icon={selected ? 'closed_caption' : 'closed_caption_disabled'}
-      label="Subtitles"
+      label={t('subtitles')}
       value={selected}
       items={[
-        { key: OFF, label: 'Off' },
+        { key: OFF, label: t('off') },
         ...subtitles.map((subtitle) => ({ key: subtitle.filename, label: subtitle.label }))
       ]}
       onSelect={setSelected}

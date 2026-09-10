@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Form, Input, Modal, Radio, Space, Tag } from "antd";
 import { useAPI } from "../../contexts/APIProvider";
+import { useLanguage } from "../../contexts/LanguageProvider";
 import { LoadingBlock } from "../Loading";
 import {
   type PdfTranslationEngine,
@@ -37,6 +38,7 @@ interface PdfTranslationSettingsModalProps {
 function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
   const { open, onClose, onSaved } = props;
   const { api } = useAPI();
+  const { t } = useLanguage();
   const [ settings, setSettings ] = useState<Settings | null>(null);
   const [ error, setError ] = useState<string | null>(null);
   const [ notice, setNotice ] = useState<string | null>(null);
@@ -69,10 +71,10 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
         apply(await api.getPdfTranslationSettings());
       }
       catch (e) {
-        setError(e instanceof Error ? e.message : 'Could not load the settings');
+        setError(e instanceof Error ? e.message : t('pdf_set_could_not_load'));
       }
     })();
-  }, [ api, apply, open ]);
+  }, [ api, apply, open, t ]);
 
   const save = useCallback(async () => {
     const values = form.getFieldsValue();
@@ -92,17 +94,17 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
         proxyUrl: values.proxyUrl ?? ''
       });
       apply(result);
-      setNotice('Saved.');
+      setNotice(t('pdf_set_saved'));
       onSaved?.(result);
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save the settings');
+      setError(e instanceof Error ? e.message : t('pdf_set_could_not_save'));
     }
     finally {
       setSaving(false);
     }
     // `settings` is read for the flags that say what may be written at all.
-  }, [ api, apply, form, onSaved, settings ]);
+  }, [ api, apply, form, onSaved, settings, t ]);
 
   /** Checks the key in the box, or the stored one when the box is empty. */
   const check = useCallback(async () => {
@@ -113,30 +115,33 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
       const typed = form.getFieldValue('deepLApiKey') as string;
       const status = await api.checkDeepLKey(typed || undefined);
       if (!status.ok) {
-        setError(status.error || 'DeepL would not accept that key');
+        setError(status.error || t('pdf_set_deepl_rejected'));
         return;
       }
       const used = status.characterCount ?? null;
       const limit = status.characterLimit ?? null;
       setNotice(
-        `The key works (${status.plan === 'free' ? 'free' : 'pro'} plan)` +
+        t(status.plan === 'free' ? 'pdf_set_key_works_free' : 'pdf_set_key_works_pro') +
         (used !== null && limit !== null ?
-          ` - ${used.toLocaleString()} of ${limit.toLocaleString()} characters used.` : '.')
+          t('pdf_set_chars_used', {
+            used: used.toLocaleString(),
+            limit: limit.toLocaleString()
+          }) : '.')
       );
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not reach DeepL');
+      setError(e instanceof Error ? e.message : t('pdf_set_could_not_reach_deepl'));
     }
     finally {
       setChecking(false);
     }
-  }, [ api, form ]);
+  }, [ api, form, t ]);
 
   return (
     <Modal
       open={open}
-      title="PDF translation"
-      okText="Save"
+      title={t('pdf_translation')}
+      okText={t('save')}
       confirmLoading={saving}
       onOk={() => void save()}
       onCancel={onClose}
@@ -148,8 +153,8 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
           <Form form={form} layout="vertical" className="mt-3">
             <Form.Item
               name="engine"
-              label="Engine"
-              extra="Only the PDF reader uses this. Subtitle translation is a separate setting and is unaffected."
+              label={t('engine')}
+              extra={t('pdf_set_engine_extra')}
             >
               <Radio.Group
                 options={[
@@ -164,22 +169,22 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
               name="deepLApiKey"
               label={
                 <Space size={8}>
-                  <span>DeepL API key</span>
+                  <span>{t('deepl_api_key')}</span>
                   {
                     settings.hasDeepLKey ?
-                      <Tag color="green">set</Tag> : <Tag>not set</Tag>
+                      <Tag color="green">{t('pdf_tag_set')}</Tag> : <Tag>{t('pdf_tag_not_set')}</Tag>
                   }
-                  {settings.deepLKeyFromConfig ? <Tag color="blue">from the command line</Tag> : null}
+                  {settings.deepLKeyFromConfig ? <Tag color="blue">{t('pdf_from_command_line')}</Tag> : null}
                 </Space>
               }
               extra={
                 settings.deepLKeyFromConfig ?
-                  'Set when the server was started, so it cannot be changed here.'
-                  : 'Stored on the server and never sent back. Leave blank to keep the current one; a free key ends in ":fx".'
+                  t('pdf_set_from_config_extra')
+                  : t('pdf_set_deepl_key_extra')
               }
             >
               <Input.Password
-                placeholder={settings.hasDeepLKey ? '••••••••  (unchanged)' : 'Paste a DeepL key'}
+                placeholder={settings.hasDeepLKey ? t('pdf_placeholder_unchanged') : t('deepl_key_paste')}
                 disabled={settings.deepLKeyFromConfig}
                 autoComplete="off"
               />
@@ -191,16 +196,16 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
                 loading={checking}
                 disabled={!settings.hasDeepLKey && !typedKey}
               >
-                Test the DeepL key
+                {t('pdf_test_deepl_key')}
               </Button>
             </Form.Item>
 
             <Form.Item
-              label="Image translation (Baidu)"
+              label={t('pdf_image_translation_baidu')}
               extra={
                 settings.baiduFromConfig ?
-                  'Set when the server was started, so it cannot be changed here.'
-                  : 'For translating a page as a picture - a scan, a comic, a diagram - which the engines above cannot help with. Sign up at fanyi-api.baidu.com and enable 图片翻译; the reader shows the two image buttons to anyone allowed to translate, and says so there when this is not set.'
+                  t('pdf_set_from_config_extra')
+                  : t('pdf_set_baidu_extra')
               }
               className="mb-2"
             >
@@ -214,7 +219,7 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
                 </Form.Item>
                 <Form.Item name="baiduSecretKey" noStyle>
                   <Input.Password
-                    placeholder={settings.hasBaiduSecretKey ? '••••••••  (unchanged)' : 'Secret key'}
+                    placeholder={settings.hasBaiduSecretKey ? t('pdf_placeholder_unchanged') : t('secret_key')}
                     disabled={settings.baiduFromConfig}
                     autoComplete="off"
                   />
@@ -225,27 +230,27 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
             <Form.Item className="mb-3">
               {
                 settings.hasBaiduSecretKey ?
-                  <Tag color="green">image translation is set up</Tag> :
-                  <Tag>image translation is not set up</Tag>
+                  <Tag color="green">{t('pdf_set_image_set_up')}</Tag> :
+                  <Tag>{t('pdf_set_image_not_set_up')}</Tag>
               }
-              {settings.baiduFromConfig ? <Tag color="blue">from the command line</Tag> : null}
+              {settings.baiduFromConfig ? <Tag color="blue">{t('pdf_from_command_line')}</Tag> : null}
             </Form.Item>
 
             <Form.Item
               name="targetLanguage"
-              label="Translate into"
-              extra='A language code - "zh-CN", "en", "ja". DeepL and Baidu are each given the code they expect for the same language. Changing it discards the page images translated into the old one.'
+              label={t('pdf_set_translate_into')}
+              extra={t('pdf_set_translate_into_extra')}
             >
               <Input placeholder="zh-CN" />
             </Form.Item>
 
             <Form.Item
               name="proxyUrl"
-              label="Proxy"
+              label={t('proxy')}
               extra={
                 settings.proxyFromConfig ?
-                  'Set when the server was started, so it cannot be changed here.'
-                  : 'Used by whichever engine is selected, and by the image translation. Leave blank to connect directly.'
+                  t('pdf_set_from_config_extra')
+                  : t('pdf_set_proxy_extra')
               }
             >
               <Input placeholder="http://127.0.0.1:7890" disabled={settings.proxyFromConfig} />
@@ -257,7 +262,7 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
                   className="mb-3"
                   type="warning"
                   showIcon
-                  title="DeepL is selected but has no key - nothing will be translated until one is set."
+                  title={t('pdf_set_deepl_no_key_warning')}
                 />
               ) : null
             }

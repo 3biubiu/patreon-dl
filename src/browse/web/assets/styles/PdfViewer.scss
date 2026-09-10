@@ -221,16 +221,35 @@
   // layer and sizes it itself; where that was refused the same class grows it
   // to the window instead, and the two look the same from here.
   &--fullscreen {
+    // A centred dialog is an inline-block next to a full-height pseudo-element
+    // that does the centring. At the size of the screen those two on one line
+    // come to more than a screen, and the difference is a page that scrolls
+    // the dialog instead of the pages. Nothing needs centring when the dialog
+    // is the screen.
+    .ant-modal-wrap {
+      overflow: hidden;
+
+      &::before {
+        display: none;
+      }
+    }
+
     .ant-modal {
+      width: 100vw !important;
       max-width: 100vw !important;
       height: 100vh !important;
       top: 0 !important;
       margin: 0 !important;
       padding: 0 !important;
+      vertical-align: top;
       background-color: var(--bs-body-bg);
     }
 
-    .ant-modal-content {
+    // Everything below hangs off this height. Without it the body is as tall
+    // as whatever is in it, the stage never has a height to overflow, and a
+    // long document simply runs off the bottom of the screen with nothing to
+    // scroll.
+    .ant-modal-container {
       height: 100%;
       display: flex;
       flex-direction: column;
@@ -284,12 +303,16 @@
   }
 
   .ant-modal-body {
-    // The handles live in here but are placed against the content box, so
-    // they run the full height of the dialog rather than the body's.
+    // The handles live in here but are placed against the dialog itself, so
+    // they run its full height rather than the body's.
     position: static;
   }
 
-  .ant-modal-content {
+  // The panel inside the dialog: header, body and the padding around them.
+  // Named `-container` rather than `-content`, which is what it was called
+  // before antd 6 - a rule written against the old name matches nothing at
+  // all, silently, which is how the fullscreen layout lost its height.
+  .ant-modal-container {
     position: relative;
     // The dialog is only ever as wide as the viewport allows, and everything
     // in it is laid out to that width.

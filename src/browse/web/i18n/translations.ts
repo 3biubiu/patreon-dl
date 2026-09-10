@@ -503,6 +503,7 @@ export const translations = {
   pdf_panel_no_text: { en: 'No text on this page - a scanned page has nothing to translate.', zh: '本页没有可翻译的文本——扫描页没有文字可供翻译。' },
   pdf_no_text_on_page: { en: 'No text on this page', zh: '本页没有文本' },
   pdf_waiting_for_page: { en: 'Waiting for the page', zh: '正在等待页面' },
+  pdf_try_again: { en: 'Try again', zh: '重试' },
   pdf_alt_page_translated: { en: 'Page {page}, translated', zh: '第 {page} 页（已翻译）' },
   pdf_could_not_translate_page: { en: 'Could not translate this page', zh: '无法翻译此页' },
   pdf_could_not_translate_image: { en: 'Could not translate this page as an image', zh: '无法以图片方式翻译此页' },

@@ -439,10 +439,17 @@ interface PageSlotProps {
   showSide?: boolean;
   sideUrl?: string | null;
   sideBusy?: boolean;
+  /** Set when this page's picture came back as a failure rather than a page. */
+  sideFailed?: boolean;
+  /** Asks for this page again. Stable, so the memo above still holds. */
+  onRetry?: (pageNumber: number) => void;
 }
 
 const PageSlot = memo(function PageSlot(props: PageSlotProps) {
-  const { pageNumber, aspect, hidden, slotRef, children, showSide, sideUrl, sideBusy } = props;
+  const {
+    pageNumber, aspect, hidden, slotRef, children,
+    showSide, sideUrl, sideBusy, sideFailed, onRetry
+  } = props;
   const { t } = useLanguage();
   return (
     <div
@@ -471,7 +478,14 @@ const PageSlot = memo(function PageSlot(props: PageSlotProps) {
                 <div className="pdf-viewer__placeholder">
                   {
                     sideUrl === null ? t('pdf_no_text_on_page') :
-                      sideBusy ? <Spin /> : t('pdf_waiting_for_page')
+                      sideBusy ? <Spin /> :
+                        // The page it belongs to is right there beside it, so
+                        // this is where the offer to try again belongs.
+                        sideFailed ? (
+                          <Button size="small" onClick={() => onRetry?.(pageNumber)}>
+                            {t('pdf_try_again')}
+                          </Button>
+                        ) : t('pdf_waiting_for_page')
                   }
                 </div>
               )}
@@ -596,7 +610,22 @@ function PdfViewerModal(props: PdfViewerModalProps) {
    */
   const [ pageImages, setPageImages ] = useState(new Map<number, string | null>());
   const [ imageTranslating, setImageTranslating ] = useState(new Set<number>());
-  const [ imageError, setImageError ] = useState<string | null>(null);
+  /**
+   * What went wrong, per page.
+   *
+   * Kept per page rather than as one message because that is the shape the
+   * reader needs it in: the page that failed is the one that gets the offer
+   * to try again, and a failure on a page that has since been scrolled past
+   * should stop being reported.
+   */
+  const [ imageErrors, setImageErrors ] = useState(new Map<number, string>());
+  /**
+   * Bumped by "try again". Nothing here retries on its own: an engine that
+   * has just refused a page will refuse it again, and Baidu charges for the
+   * asking - so a retry is a person deciding to spend it, and this is what
+   * carries that decision into the two effects that do the work.
+   */
+  const [ retryEpoch, setRetryEpoch ] = useState(0);
   /** Pages whose canvas has finished drawing, and so can be photographed. */
   const [ paintedPages, setPaintedPages ] = useState(new Set<number>());
   /** Which pages are actually in view. Only the scrolling layout can't say up front. */
@@ -770,7 +799,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setPageTranslations(new Map());
     setTranslatingPages(new Set());
     setTranslationError(null);
-    setImageError(null);
+    setImageErrors(new Map());
     setPaintedPages(new Set());
     releaseImages();
     setVisiblePages([]);
@@ -842,8 +871,49 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     setImageMode((current) => {
       const next = current === mode ? 'off' : mode;
       storeImageMode(next);
+      // Switched off, so what it could not do is no longer worth reporting.
+      if (next === 'off') {
+        setImageErrors(new Map());
+      }
       return next;
     });
+  }, []);
+
+  /**
+   * Asks for these pages again.
+   *
+   * Both kinds of translation at once, because the reader is looking at one
+   * page and does not think of them as two features: what it clears is
+   * whatever did not finish - a picture that failed, a page of text that
+   * failed or came back with blocks missing - and leaves alone what did.
+   *
+   * The server keeps its own copy of everything that has already succeeded,
+   * so a retry costs only what actually has to be asked for again.
+   */
+  const retryPages = useCallback((pages: number[]) => {
+    for (const pageNumber of pages) {
+      const url = imageUrls.current.get(pageNumber);
+      if (url) {
+        URL.revokeObjectURL(url);
+      }
+      imageUrls.current.delete(pageNumber);
+      const cached = translationCache.current.get(pageNumber);
+      // A finished page with nothing missing is not what "try again" is for.
+      if (cached && (!cached.complete || cached.failed > 0)) {
+        translationCache.current.delete(pageNumber);
+      }
+    }
+    setPageImages(new Map(imageUrls.current));
+    setPageTranslations(new Map(translationCache.current));
+    setImageErrors((current) => {
+      const next = new Map(current);
+      for (const pageNumber of pages) {
+        next.delete(pageNumber);
+      }
+      return next;
+    });
+    setTranslationError(null);
+    setRetryEpoch((current) => current + 1);
   }, []);
 
   // The one thing a scroll of the reader's own has to do: give up on a jump
@@ -1037,7 +1107,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     // `translationEpoch` is listed so that changing the engine does not just
     // empty the cache but fills it again from the pages on screen - otherwise
     // the translation would vanish until the next page turn.
-  }, [ target, translationTargets, loadedPages, translatePage, translationEpoch ]);
+  }, [ target, translationTargets, loadedPages, translatePage, translationEpoch, retryEpoch ]);
 
   /**
    * The picture translation's own controller, on the same terms as the text
@@ -1078,12 +1148,22 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       }
       imageUrls.current.set(pageNumber, result.url);
       setPageImages(new Map(imageUrls.current));
+      // Arrived, so whatever it said last time no longer applies.
+      setImageErrors((current) => {
+        if (!current.has(pageNumber)) {
+          return current;
+        }
+        const next = new Map(current);
+        next.delete(pageNumber);
+        return next;
+      });
     }
     catch (error) {
       if (!signal.aborted) {
-        setImageError(
+        setImageErrors((current) => new Map(current).set(
+          pageNumber,
           error instanceof Error ? error.message : t('pdf_could_not_translate_image')
-        );
+        ));
       }
     }
     finally {
@@ -1128,7 +1208,10 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           }
         });
     }
-  }, [ target, imageWanted, shownPages, paintedPages, translatePageImage, translationEpoch ]);
+  }, [
+    target, imageWanted, shownPages, paintedPages, translatePageImage,
+    translationEpoch, retryEpoch
+  ]);
 
   /**
    * Reads what is in the page box and turns to it.
@@ -1870,6 +1953,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         showSide={sideBySideImages && !options.hidden}
         sideUrl={pageImages.get(pageNumber)}
         sideBusy={imageTranslating.has(pageNumber)}
+        sideFailed={imageErrors.has(pageNumber)}
+        onRetry={retryPage}
       >
         {
           options.drawn ? (
@@ -1925,8 +2010,14 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         {translatingPages.has(page) ? <Spin size="small" /> : null}
       </div>
       {
+        // The banner over the page carries the message; here it is only worth
+        // the offer to ask again for the page the panel is showing.
         translationError ? (
-          <Alert type="error" showIcon title={translationError} className="m-2" />
+          <p className="pdf-viewer__panel-empty">
+            <Button size="small" onClick={() => retryPages([page])}>
+              {t('pdf_try_again')}
+            </Button>
+          </p>
         ) : null
       }
       {
@@ -1944,6 +2035,15 @@ function PdfViewerModal(props: PdfViewerModalProps) {
                       failed: translation.failed,
                       total: translation.blocks.length
                     })}
+                    {' '}
+                    <Button
+                      type="link"
+                      size="small"
+                      className="p-0"
+                      onClick={() => retryPages([page])}
+                    >
+                      {t('pdf_try_again')}
+                    </Button>
                   </p>
                 ) : null
               }
@@ -1977,6 +2077,23 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       }
     </aside>
   ) : null;
+
+  /**
+   * The message the banner carries: whatever went wrong with a page that is
+   * actually on screen. A failure on a page long since scrolled past is not
+   * something to keep complaining about - which is also why the banner has no
+   * close button. Turning the page puts it away, and closing it would have to
+   * forget which pages failed, taking their "try again" with it.
+   */
+  const failureNotice = shownPages.reduce<string | null>(
+    (found, pageNumber) => found ?? imageErrors.get(pageNumber) ?? null,
+    null
+  ) ?? translationError;
+
+  const retryPage = useCallback(
+    (pageNumber: number) => retryPages([pageNumber]),
+    [retryPages]
+  );
 
   const rootClassName = [
     'pdf-viewer',
@@ -2036,17 +2153,22 @@ function PdfViewerModal(props: PdfViewerModalProps) {
             style={fullscreen ? { maxWidth: `${widthPercent}%` } : undefined}
           >
             {
-              // Where an image translation went wrong. The text one reports
-              // itself in the panel, which is beside the page it belongs to;
-              // this one has nowhere to say so, and a misconfigured account is
-              // exactly the case that must not fail silently.
-              imageError ? (
+              // Where a translation went wrong, either kind. The panel says so
+              // too for the text, but the panel is often closed and the
+              // overlay has nowhere of its own to say anything - and a
+              // misconfigured account is exactly the case that must not fail
+              // silently.
+              failureNotice ? (
                 <Alert
                   className="pdf-viewer__notice"
                   type="error"
                   showIcon
-                  closable={{ onClose: () => setImageError(null) }}
-                  title={imageError}
+                  title={failureNotice}
+                  action={
+                    <Button size="small" onClick={() => retryPages(shownPages)}>
+                      {t('pdf_try_again')}
+                    </Button>
+                  }
                 />
               ) : null
             }
@@ -2107,7 +2229,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
         // language; the server drops its own copies when the language
         // changes, and these are the reader's.
         releaseImages();
-        setImageError(null);
+        setImageErrors(new Map());
         setTranslationEpoch((current) => current + 1);
       }}
     />

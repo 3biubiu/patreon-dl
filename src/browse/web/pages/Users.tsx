@@ -23,6 +23,7 @@ import { useAPI } from "../contexts/APIProvider";
 import { useAuth } from "../contexts/AuthProvider";
 import { useDocument } from "../contexts/DocumentProvider";
 import { LoadingBlock } from "../components/Loading";
+import { useLanguage } from "../contexts/LanguageProvider";
 
 /**
  * The permission is two fields in the form and one on the wire: "all" sends
@@ -64,26 +65,6 @@ interface UserFormValues {
   canViewSubtitles: boolean;
 }
 
-const ROLE_OPTIONS = [
-  { value: 'user', label: 'User' },
-  { value: 'admin', label: 'Administrator' }
-];
-
-const CAMPAIGN_ACCESS_OPTIONS = [
-  { value: 'all', label: 'All creators' },
-  { value: 'selected', label: 'Only selected' }
-];
-
-const QUOTA_MODE_OPTIONS = [
-  { value: 'unlimited', label: 'Unlimited' },
-  { value: 'limited', label: 'Limit to' }
-];
-
-const LOGIN_REGION_ACCESS_OPTIONS = [
-  { value: 'anywhere', label: 'Anywhere' },
-  { value: 'selected', label: 'Only selected' }
-];
-
 /**
  * How much of the sign-in log is read to build the list of places to choose
  * from. The server keeps this many at most, so this is all of it.
@@ -112,7 +93,8 @@ function quotaFields(limit: number | null, fallback: number) {
 
 /** How a limit reads in the table. */
 function describeLimit(limit: number | null) {
-  return limit === null ? 'Unlimited' : `${limit}/day`;
+  const { t } = useLanguage();
+  return limit === null ? t('quota_unlimited') : t('per_day', { value: limit });
 }
 
 /** Enough to hold every creator in one go for all but the largest libraries. */
@@ -164,10 +146,16 @@ function Users() {
   /** The places to choose from, read out of the sign-in log. `null` until asked for. */
   const [ knownRegions, setKnownRegions ] = useState<string[] | null>(null);
   const [ form ] = Form.useForm<UserFormValues>();
+  const { t } = useLanguage();
+
+  const roleOptions = useMemo(() => [
+    { value: 'user', label: t('role_user') },
+    { value: 'admin', label: t('role_admin') }
+  ], [t]);
 
   useEffect(() => {
-    setTitle('Users');
-  }, [setTitle]);
+    setTitle(t('users_heading'));
+  }, [setTitle, t]);
 
   /**
    * Both lists together: approving an application removes it from one and adds
@@ -185,9 +173,9 @@ function Users() {
       setError(null);
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load users');
+      setError(e instanceof Error ? e.message : t('could_not_load_users'));
     }
-  }, [api]);
+  }, [api, t]);
 
   const handleApprove = useCallback(async (registration: Registration) => {
     setAnswering(registration.id);
@@ -196,12 +184,12 @@ function Users() {
       await refresh();
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not approve the application');
+      setError(e instanceof Error ? e.message : t('could_not_approve'));
     }
     finally {
       setAnswering(null);
     }
-  }, [api, refresh]);
+  }, [api, refresh, t]);
 
   const handleReject = useCallback(async (registration: Registration) => {
     setAnswering(registration.id);
@@ -210,12 +198,12 @@ function Users() {
       await refresh();
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not reject the application');
+      setError(e instanceof Error ? e.message : t('could_not_reject'));
     }
     finally {
       setAnswering(null);
     }
-  }, [api, refresh]);
+  }, [api, refresh, t]);
 
   useEffect(() => {
     void refresh();
@@ -234,12 +222,12 @@ function Users() {
       setLoginLogError(null);
     }
     catch (e) {
-      setLoginLogError(e instanceof Error ? e.message : 'Could not load sign-ins');
+      setLoginLogError(e instanceof Error ? e.message : t('could_not_load_signins'));
     }
     finally {
       setLoginLogLoading(false);
     }
-  }, [api]);
+  }, [api, t]);
 
   const openSignIns = useCallback((user: AuthUser) => {
     // Cleared rather than left showing the previous account's rows while the
@@ -272,14 +260,14 @@ function Users() {
       }
       catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Could not load creators');
+          setError(e instanceof Error ? e.message : t('could_not_load_creators'));
           setCampaigns([]);
         }
       }
     })();
 
     return () => { cancelled = true; };
-  }, [api]);
+  }, [api, t]);
 
   /**
    * The places this server has actually seen anybody sign in from, which is
@@ -472,12 +460,12 @@ function Users() {
       await refresh();
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save user');
+      setError(e instanceof Error ? e.message : t('could_not_save_user'));
     }
     finally {
       setSubmitting(false);
     }
-  }, [api, editing, refresh]);
+  }, [api, editing, refresh, t]);
 
   const handleDelete = useCallback(async (target: AuthUser) => {
     try {
@@ -485,9 +473,9 @@ function Users() {
       await refresh();
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not remove user');
+      setError(e instanceof Error ? e.message : t('could_not_remove_user'));
     }
-  }, [api, refresh]);
+  }, [api, refresh, t]);
 
   const handleUnban = useCallback(async (target: AuthUser) => {
     try {
@@ -495,9 +483,9 @@ function Users() {
       await refresh();
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not lift the ban');
+      setError(e instanceof Error ? e.message : t('could_not_lift_ban'));
     }
-  }, [api, refresh]);
+  }, [api, refresh, t]);
 
   if (!users) {
     return <LoadingBlock className="mt-5" minHeight="60vh" />;
@@ -506,13 +494,13 @@ function Users() {
   return (
     <div className="users">
       <div className="users__header">
-        <h2 className="m-0">Users</h2>
+        <h2 className="m-0">{t('users_heading')}</h2>
         <Button
           type="primary"
           icon={<UserAddOutlined />}
           onClick={() => openEditor('new')}
         >
-          Add user
+          {t('add_user')}
         </Button>
       </div>
       {
@@ -527,7 +515,7 @@ function Users() {
         items={[
           {
             key: 'users',
-            label: 'Users',
+            label: t('users_heading'),
             children: (
               <Table<AuthUser>
                 className="users__table"
@@ -536,19 +524,19 @@ function Users() {
                 pagination={false}
                 columns={[
                   {
-                    title: 'Username',
+                    title: t('login_username'),
                     dataIndex: 'username',
                     render: (username: string, user) => (
                       <Space size={8}>
                         <span>{username}</span>
-                        {user.id === currentUser?.id ? <Tag>you</Tag> : null}
+                        {user.id === currentUser?.id ? <Tag>{t('tag_you')}</Tag> : null}
                         {
                           // The reason - which sign-ins tripped the rule - is
                           // a hover away rather than a column, since almost
                           // every row has nothing to say.
                           user.banned ? (
                             <Tooltip title={user.banReason || undefined}>
-                              <Tag color="red">Banned</Tag>
+                              <Tag color="red">{t('banned')}</Tag>
                             </Tooltip>
                           ) : null
                         }
@@ -556,53 +544,53 @@ function Users() {
                     )
                   },
                   {
-                    title: 'Role',
+                    title: t('role'),
                     dataIndex: 'role',
                     render: (role: UserRole) => (
                       <Tag color={role === 'admin' ? 'green' : undefined}>
-                        {role === 'admin' ? 'Administrator' : 'User'}
+                        {role === 'admin' ? t('role_admin') : t('role_user')}
                       </Tag>
                     )
                   },
                   {
-                    title: 'Creators',
+                    title: t('nav_creators'),
                     dataIndex: 'visibleCampaigns',
                     render: (visibleCampaigns: string[] | null) => {
                       if (!visibleCampaigns) {
-                        return <Tag>All</Tag>;
+                        return <Tag>{t('access_all')}</Tag>;
                       }
                       if (visibleCampaigns.length === 0) {
-                        return <Tag color="red">None</Tag>;
+                        return <Tag color="red">{t('access_none')}</Tag>;
                       }
                       const names = describeScope(visibleCampaigns);
                       return (
                         <Tooltip title={names.join(', ')}>
                           <Tag color="blue">
-                            {names.length === 1 ? names[0] : `${names.length} creators`}
+                            {names.length === 1 ? names[0] : t('creators_count', { count: names.length })}
                           </Tag>
                         </Tooltip>
                       );
                     }
                   },
                   {
-                    title: 'Daily limit',
+                    title: t('daily_limit'),
                     key: 'quota',
                     render: (_, user) => {
                       if (user.role === 'admin') {
-                        return <Tag>Unlimited</Tag>;
+                        return <Tag>{t('quota_unlimited')}</Tag>;
                       }
                       const { posts, videos } = user.quota;
                       if (posts === null && videos === null) {
-                        return <Tag>Unlimited</Tag>;
+                        return <Tag>{t('quota_unlimited')}</Tag>;
                       }
                       return (
-                        <Tooltip title={`Posts: ${describeLimit(posts)} · Videos: ${describeLimit(videos)}`}>
+                        <Tooltip title={t('quota_posts_videos', { posts: describeLimit(posts), videos: describeLimit(videos) })}>
                           <Space size={4}>
                             <Tag color={posts === null ? undefined : 'blue'}>
-                              {`Posts ${describeLimit(posts)}`}
+                              {t('posts_limit', { limit: describeLimit(posts) })}
                             </Tag>
                             <Tag color={videos === null ? undefined : 'blue'}>
-                              {`Videos ${describeLimit(videos)}`}
+                              {t('videos_limit', { limit: describeLimit(videos) })}
                             </Tag>
                           </Space>
                         </Tooltip>
@@ -610,55 +598,55 @@ function Users() {
                     }
                   },
                   {
-                    title: 'Sign-in region',
+                    title: t('signin_region'),
                     dataIndex: 'loginRegions',
                     render: (loginRegions: string[] | null) => {
                       if (!loginRegions) {
-                        return <Tag>Anywhere</Tag>;
+                        return <Tag>{t('access_anywhere')}</Tag>;
                       }
                       if (loginRegions.length === 0) {
-                        return <Tag color="red">Nowhere</Tag>;
+                        return <Tag color="red">{t('access_nowhere')}</Tag>;
                       }
                       const names = loginRegions.map(describeLoginRegion);
                       return (
                         <Tooltip title={names.join(', ')}>
                           <Tag color="blue">
-                            {names.length === 1 ? names[0] : `${names.length} regions`}
+                            {names.length === 1 ? names[0] : t('regions_count', { count: names.length })}
                           </Tag>
                         </Tooltip>
                       );
                     }
                   },
                   {
-                    title: 'PDF translation',
+                    title: t('pdf_translation'),
                     dataIndex: 'canTranslatePdf',
                     render: (canTranslatePdf: boolean) => (
-                      canTranslatePdf ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                      canTranslatePdf ? <Tag color="blue">{t('tag_on')}</Tag> : <Tag>{t('tag_off')}</Tag>
                     )
                   },
                   {
-                    title: 'Uploads',
+                    title: t('uploads_column'),
                     dataIndex: 'canUploadTranscription',
                     render: (canUploadTranscription: boolean) => (
-                      canUploadTranscription ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                      canUploadTranscription ? <Tag color="blue">{t('tag_on')}</Tag> : <Tag>{t('tag_off')}</Tag>
                     )
                   },
                   {
-                    title: 'Transcribe',
+                    title: t('transcribe_column'),
                     dataIndex: 'canTranscribeVideo',
                     render: (canTranscribeVideo: boolean) => (
-                      canTranscribeVideo ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                      canTranscribeVideo ? <Tag color="blue">{t('tag_on')}</Tag> : <Tag>{t('tag_off')}</Tag>
                     )
                   },
                   {
-                    title: 'Subtitles',
+                    title: t('subtitles'),
                     dataIndex: 'canViewSubtitles',
                     render: (canViewSubtitles: boolean) => (
-                      canViewSubtitles ? <Tag color="blue">On</Tag> : <Tag>Off</Tag>
+                      canViewSubtitles ? <Tag color="blue">{t('tag_on')}</Tag> : <Tag>{t('tag_off')}</Tag>
                     )
                   },
                   {
-                    title: 'Added',
+                    title: t('added'),
                     dataIndex: 'createdAt',
                     render: (createdAt: string) => new Date(createdAt).toLocaleDateString()
                   },
@@ -671,28 +659,28 @@ function Users() {
                         {
                           user.banned ? (
                             <Popconfirm
-                              title={`Lift the ban on ${user.username}?`}
+                              title={t('lift_ban_confirm', { name: user.username })}
                               description={user.banReason || undefined}
-                              okText="Unban"
+                              okText={t('unban')}
                               onConfirm={() => void handleUnban(user)}
                             >
-                              <Tooltip title="Lift ban">
+                              <Tooltip title={t('lift_ban_tooltip')}>
                                 <Button
                                   type="text"
                                   size="small"
                                   icon={<UnlockOutlined />}
-                                  aria-label={`Lift the ban on ${user.username}`}
+                                  aria-label={t('lift_ban_aria', { name: user.username })}
                                 />
                               </Tooltip>
                             </Popconfirm>
                           ) : null
                         }
-                        <Tooltip title="Recent sign-ins">
+                        <Tooltip title={t('recent_signins')}>
                           <Button
                             type="text"
                             size="small"
                             icon={<HistoryOutlined />}
-                            aria-label={`Recent sign-ins for ${user.username}`}
+                            aria-label={t('recent_signins_for', { name: user.username })}
                             onClick={() => openSignIns(user)}
                           />
                         </Tooltip>
@@ -700,12 +688,12 @@ function Users() {
                           type="text"
                           size="small"
                           icon={<EditOutlined />}
-                          aria-label={`Edit ${user.username}`}
+                          aria-label={t('edit_aria', { name: user.username })}
                           onClick={() => openEditor(user)}
                         />
                         <Popconfirm
-                          title={`Remove ${user.username}?`}
-                          okText="Remove"
+                          title={t('remove_confirm', { name: user.username })}
+                          okText={t('remove')}
                           okButtonProps={{ danger: true }}
                           onConfirm={() => void handleDelete(user)}
                         >
@@ -714,7 +702,7 @@ function Users() {
                             size="small"
                             danger
                             icon={<DeleteOutlined />}
-                            aria-label={`Remove ${user.username}`}
+                            aria-label={t('remove_aria', { name: user.username })}
                             disabled={user.id === currentUser?.id}
                           />
                         </Popconfirm>
@@ -732,7 +720,7 @@ function Users() {
             // when there is nothing waiting.
             label: (
               <Badge count={registrations?.length || 0} size="small" offset={[ 10, -2 ]}>
-                Applications
+                {t('pending_applications')}
               </Badge>
             ),
             children: (
@@ -742,14 +730,14 @@ function Users() {
                 dataSource={registrations || []}
                 loading={registrations === null}
                 pagination={false}
-                locale={{ emptyText: 'No applications waiting' }}
+                locale={{ emptyText: t('no_applications_waiting') }}
                 columns={[
                   {
-                    title: 'Username',
+                    title: t('login_username'),
                     dataIndex: 'username'
                   },
                   {
-                    title: 'Applied',
+                    title: t('applied'),
                     dataIndex: 'requestedAt',
                     render: (requestedAt: string) => describeLoginTime(requestedAt)
                   },
@@ -760,9 +748,9 @@ function Users() {
                     render: (_, registration) => (
                       <Space size={4} wrap>
                         <Popconfirm
-                          title={`Approve ${registration.username}?`}
-                          description="The account is created as an ordinary user on the default daily limit. You can change that afterwards."
-                          okText="Approve"
+                          title={t('approve_confirm', { name: registration.username })}
+                          description={t('approve_desc')}
+                          okText={t('approve')}
                           onConfirm={() => void handleApprove(registration)}
                         >
                           <Button
@@ -770,15 +758,15 @@ function Users() {
                             size="small"
                             icon={<CheckOutlined />}
                             loading={answering === registration.id}
-                            aria-label={`Approve ${registration.username}`}
+                            aria-label={t('approve_aria', { name: registration.username })}
                           >
-                            Approve
+                            {t('approve')}
                           </Button>
                         </Popconfirm>
                         <Popconfirm
-                          title={`Reject ${registration.username}?`}
-                          description="The application is discarded. No account is created, and they can apply again."
-                          okText="Reject"
+                          title={t('reject_confirm', { name: registration.username })}
+                          description={t('reject_desc')}
+                          okText={t('reject')}
                           okButtonProps={{ danger: true }}
                           onConfirm={() => void handleReject(registration)}
                         >
@@ -788,9 +776,9 @@ function Users() {
                             danger
                             icon={<CloseOutlined />}
                             loading={answering === registration.id}
-                            aria-label={`Reject ${registration.username}`}
+                            aria-label={t('reject_aria', { name: registration.username })}
                           >
-                            Reject
+                            {t('reject')}
                           </Button>
                         </Popconfirm>
                       </Space>
@@ -804,8 +792,8 @@ function Users() {
       />
       <Modal
         open={!!editing}
-        title={editing === 'new' ? 'Add user' : `Edit ${editing ? editing.username : ''}`}
-        okText="Save"
+        title={editing === 'new' ? t('add_user') : t('edit_user', { name: editing ? editing.username : '' })}
+        okText={t('save')}
         confirmLoading={submitting}
         onCancel={() => {
           setEditing(null);
@@ -821,8 +809,8 @@ function Users() {
         >
           <Form.Item
             name="username"
-            label="Username"
-            rules={editing === 'new' ? [ { required: true, message: 'Enter a username' } ] : []}
+            label={t('login_username')}
+            rules={editing === 'new' ? [ { required: true, message: t('enter_a_username') } ] : []}
           >
             {/* The username is what the session and the file key on, so it is
                 shown for context but not editable. */}
@@ -830,27 +818,27 @@ function Users() {
           </Form.Item>
           <Form.Item
             name="password"
-            label={editing === 'new' ? 'Password' : 'New password'}
-            extra={editing === 'new' ? undefined : 'Leave blank to keep the current password'}
-            rules={editing === 'new' ? [ { required: true, message: 'Enter a password' } ] : []}
+            label={editing === 'new' ? t('login_password') : t('new_password')}
+            extra={editing === 'new' ? undefined : t('leave_blank_keep_password')}
+            rules={editing === 'new' ? [ { required: true, message: t('login_enter_password') } ] : []}
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="role" label="Role">
-            <Select options={ROLE_OPTIONS} />
+          <Form.Item name="role" label={t('role')}>
+            <Select options={roleOptions} />
           </Form.Item>
           {/* Everything this account may and may not do is one dialog further
               in. The account itself - who it is and how it signs in - is what
               is being edited most of the time, and it was being read past four
               blocks of permissions to get to. */}
-          <Form.Item label="Permissions" className="mb-0">
+          <Form.Item label={t('permissions')} className="mb-0">
             <Space orientation="vertical" size={8} className="users__permissions">
               <PermissionsSummary form={form} />
               <Button
                 icon={<SafetyCertificateOutlined />}
                 onClick={() => setPermissionsOpen(true)}
               >
-                More permissions
+                {t('more_permissions')}
               </Button>
             </Space>
           </Form.Item>
@@ -859,17 +847,17 @@ function Users() {
               not by closing this one. */}
           <Modal
             open={permissionsOpen}
-            title="Permissions"
+            title={t('permissions')}
             width={620}
             onCancel={() => setPermissionsOpen(false)}
             footer={[
               <Button key="done" type="primary" onClick={() => closePermissions()}>
-                Done
+                {t('done')}
               </Button>
             ]}
           >
             <p className="text-body-secondary">
-              Kept when you save the user - closing this dialog on its own changes nothing.
+              {t('permissions_kept_note')}
             </p>
             <PermissionFields
               form={form}
@@ -883,7 +871,7 @@ function Users() {
       </Modal>
       <Modal
         open={!!signInsFor}
-        title={`Recent sign-ins${signInsFor ? ` - ${signInsFor.username}` : ''}`}
+        title={t('recent_signins_title', { name: signInsFor ? signInsFor.username : '' })}
         width={760}
         onCancel={() => setSignInsFor(null)}
         footer={[
@@ -893,10 +881,10 @@ function Users() {
             loading={loginLogLoading}
             onClick={() => signInsFor && void refreshLoginLog(signInsFor)}
           >
-            Refresh
+            {t('refresh')}
           </Button>,
           <Button key="close" type="primary" onClick={() => setSignInsFor(null)}>
-            Close
+            {t('close')}
           </Button>
         ]}
       >
@@ -913,10 +901,10 @@ function Users() {
           loading={loginLog === null && loginLogLoading}
           pagination={false}
           size="small"
-          locale={{ emptyText: 'Nothing recorded for this account yet' }}
+          locale={{ emptyText: t('no_signins_recorded') }}
           columns={[
             {
-              title: 'When',
+              title: t('col_when'),
               dataIndex: 'at',
               render: (at: string) => describeLoginTime(at)
             },
@@ -925,7 +913,7 @@ function Users() {
               dataIndex: 'ip'
             },
             {
-              title: 'Location',
+              title: t('col_location'),
               dataIndex: 'location',
               render: (location: string | null, entry) => (
                 // An address that could not be placed is left blank rather
@@ -938,7 +926,7 @@ function Users() {
               )
             },
             {
-              title: 'Client',
+              title: t('col_client'),
               dataIndex: 'userAgent',
               // A user agent string would take the whole row if it could, and
               // the columns beside it are the ones being read. It gets no more
@@ -951,13 +939,13 @@ function Users() {
               )
             },
             {
-              title: 'Result',
+              title: t('col_result'),
               key: 'result',
               align: 'right',
               render: (_, entry) => (
-                entry.success ? <Tag color="green">Signed in</Tag> : (
-                  <Tooltip title="The password did not match">
-                    <Tag color="red">Failed</Tag>
+                entry.success ? <Tag color="green">{t('signed_in')}</Tag> : (
+                  <Tooltip title={t('password_mismatch_tooltip')}>
+                    <Tag color="red">{t('failed')}</Tag>
                   </Tooltip>
                 )
               )
@@ -989,19 +977,15 @@ function PermissionFields(props: {
 }) {
   const { form, campaignOptions, campaignsLoading, regionOptions, regionsLoading } = props;
   const role = Form.useWatch('role', form);
+  const { t } = useLanguage();
 
   if (role === 'admin') {
     return (
       <Alert
         type="info"
         showIcon
-        title="Administrators are not restricted"
-        description={
-          'Anyone who can edit permissions can lift their own, so nothing set ' +
-          'here would hold: an administrator sees every creator, reads with no ' +
-          'daily limit, signs in from anywhere and may translate. Make the ' +
-          'account a user to restrict it.'
-        }
+        title={t('admins_not_restricted_title')}
+        description={t('admins_not_restricted_desc')}
       />
     );
   }
@@ -1049,9 +1033,10 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
   const canUploadTranscription = Form.useWatch('canUploadTranscription', form);
   const canTranscribeVideo = Form.useWatch('canTranscribeVideo', form);
   const canViewSubtitles = Form.useWatch('canViewSubtitles', form);
+  const { t } = useLanguage();
 
   if (role === 'admin') {
-    return <Tag color="green">Unrestricted</Tag>;
+    return <Tag color="green">{t('unrestricted')}</Tag>;
   }
 
   const campaignCount = (visibleCampaigns || []).length;
@@ -1059,35 +1044,35 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
   // "None" and "Nowhere" are the settings worth catching at a glance: both are
   // reachable, both are meant, and both look like a mistake if they are not.
   const campaigns = campaignAccess === 'all' ?
-    { text: 'All creators', color: undefined } :
-    campaignCount === 0 ? { text: 'No creators', color: 'red' } :
-      { text: `${campaignCount} creators`, color: 'blue' };
+    { text: t('access_all_creators'), color: undefined } :
+    campaignCount === 0 ? { text: t('no_creators'), color: 'red' } :
+      { text: t('creators_count', { count: campaignCount }), color: 'blue' };
   const regions = loginRegionAccess === 'anywhere' ?
-    { text: 'Signs in anywhere', color: undefined } :
-    regionCount === 0 ? { text: 'Signs in nowhere', color: 'red' } :
-      { text: `${regionCount} regions`, color: 'blue' };
+    { text: t('signs_in_anywhere'), color: undefined } :
+    regionCount === 0 ? { text: t('signs_in_nowhere'), color: 'red' } :
+      { text: t('regions_count', { count: regionCount }), color: 'blue' };
 
   return (
     <Space size={4} wrap>
       <Tag color={campaigns.color}>{campaigns.text}</Tag>
       <Tag color={postQuotaMode === 'limited' ? 'blue' : undefined}>
-        {postQuotaMode === 'limited' ? `Posts ${postQuota ?? 0}/day` : 'Posts unlimited'}
+        {postQuotaMode === 'limited' ? t('posts_per_day_value', { value: postQuota ?? 0 }) : t('posts_unlimited')}
       </Tag>
       <Tag color={videoQuotaMode === 'limited' ? 'blue' : undefined}>
-        {videoQuotaMode === 'limited' ? `Videos ${videoQuota ?? 0}/day` : 'Videos unlimited'}
+        {videoQuotaMode === 'limited' ? t('videos_per_day_value', { value: videoQuota ?? 0 }) : t('videos_unlimited')}
       </Tag>
       <Tag color={regions.color}>{regions.text}</Tag>
       <Tag color={canTranslatePdf ? 'blue' : undefined}>
-        {canTranslatePdf ? 'PDF translation on' : 'PDF translation off'}
+        {canTranslatePdf ? t('pdf_translation_on') : t('pdf_translation_off')}
       </Tag>
       <Tag color={canUploadTranscription ? 'blue' : undefined}>
-        {canUploadTranscription ? 'Uploads on' : 'Uploads off'}
+        {canUploadTranscription ? t('uploads_on') : t('uploads_off')}
       </Tag>
       <Tag color={canTranscribeVideo ? 'blue' : undefined}>
-        {canTranscribeVideo ? 'Transcribe on' : 'Transcribe off'}
+        {canTranscribeVideo ? t('transcribe_on') : t('transcribe_off')}
       </Tag>
       <Tag color={canViewSubtitles ? 'blue' : undefined}>
-        {canViewSubtitles ? 'Subtitles on' : 'Subtitles off'}
+        {canViewSubtitles ? t('subtitles_on') : t('subtitles_off')}
       </Tag>
     </Space>
   );
@@ -1103,21 +1088,20 @@ function PermissionsSummary(props: { form: FormInstance<UserFormValues>; }) {
 function PdfTranslationField(props: { form: FormInstance<UserFormValues>; }) {
   const { form } = props;
   const canTranslatePdf = Form.useWatch('canTranslatePdf', form);
+  const { t } = useLanguage();
 
   return (
     <Form.Item
       name="canTranslatePdf"
-      label="PDF translation"
+      label={t('pdf_translation')}
       valuePropName="checked"
       extra={
         canTranslatePdf ?
-          'The PDF reader offers both the overlay and the side-by-side panel.' :
-          'Both translation buttons are hidden in the PDF reader, and the server ' +
-          'refuses the requests behind them. The account can still open and read ' +
-          'every PDF it may see.'
+          t('pdf_reader_offers') :
+          t('pdf_reader_hides')
       }
     >
-      <Switch checkedChildren="On" unCheckedChildren="Off" />
+      <Switch checkedChildren={t('tag_on')} unCheckedChildren={t('tag_off')} />
     </Form.Item>
   );
 }
@@ -1132,22 +1116,20 @@ function PdfTranslationField(props: { form: FormInstance<UserFormValues>; }) {
 function UploadTranscriptionField(props: { form: FormInstance<UserFormValues>; }) {
   const { form } = props;
   const canUploadTranscription = Form.useWatch('canUploadTranscription', form);
+  const { t } = useLanguage();
 
   return (
     <Form.Item
       name="canUploadTranscription"
-      label="Video uploads"
+      label={t('video_uploads')}
       valuePropName="checked"
       extra={
         canUploadTranscription ?
-          'The account gets the upload page, and can have its own videos transcribed ' +
-          'and translated. The video stays on their machine - the browser sends only ' +
-          'the audio.' :
-          'The upload page is hidden and the routes behind it are refused. ' +
-          'Captions on the videos already in the library are unaffected.'
+          t('upload_on_desc') :
+          t('upload_off_desc')
       }
     >
-      <Switch checkedChildren="On" unCheckedChildren="Off" />
+      <Switch checkedChildren={t('tag_on')} unCheckedChildren={t('tag_off')} />
     </Form.Item>
   );
 }
@@ -1164,23 +1146,23 @@ function UploadTranscriptionField(props: { form: FormInstance<UserFormValues>; }
 function TranscribeVideoField(props: { form: FormInstance<UserFormValues>; }) {
   const { form } = props;
   const canTranscribeVideo = Form.useWatch('canTranscribeVideo', form);
+  const { t } = useLanguage();
 
   return (
     <Form.Item
       name="canTranscribeVideo"
-      label="Transcribe videos"
+      label={t('transcribe_videos')}
       valuePropName="checked"
       extra={
         canTranscribeVideo ?
-          `The account gets the transcribe button on video tiles, for up to ` +
-          `${DAILY_TRANSCRIPTION_VIDEOS} videos or ` +
-          `${DAILY_TRANSCRIPTION_SECONDS / 3600} hours of video a day, whichever comes first. ` +
-          'It does not get the transcription page - only the button.' :
-          'The button is kept off the tiles and the route behind it is refused. ' +
-          'Subtitles that already exist are unaffected.'
+          t('transcribe_on_desc', {
+            videos: DAILY_TRANSCRIPTION_VIDEOS,
+            hours: DAILY_TRANSCRIPTION_SECONDS / 3600
+          }) :
+          t('transcribe_off_desc')
       }
     >
-      <Switch checkedChildren="On" unCheckedChildren="Off" />
+      <Switch checkedChildren={t('tag_on')} unCheckedChildren={t('tag_off')} />
     </Form.Item>
   );
 }
@@ -1196,22 +1178,20 @@ function TranscribeVideoField(props: { form: FormInstance<UserFormValues>; }) {
 function ViewSubtitlesField(props: { form: FormInstance<UserFormValues>; }) {
   const { form } = props;
   const canViewSubtitles = Form.useWatch('canViewSubtitles', form);
+  const { t } = useLanguage();
 
   return (
     <Form.Item
       name="canViewSubtitles"
-      label="Subtitles"
+      label={t('subtitles')}
       valuePropName="checked"
       extra={
         canViewSubtitles ?
-          'Videos play with their captions, and the player offers a picker for ' +
-          'whichever languages a video has.' :
-          'The caption picker is kept off both players and the subtitle routes ' +
-          'are refused. The account still watches every video it may see - ' +
-          'without captions.'
+          t('view_subtitles_on_desc') :
+          t('view_subtitles_off_desc')
       }
     >
-      <Switch checkedChildren="On" unCheckedChildren="Off" />
+      <Switch checkedChildren={t('tag_on')} unCheckedChildren={t('tag_off')} />
     </Form.Item>
   );
 }
@@ -1229,17 +1209,23 @@ function CampaignAccessFields(props: {
 }) {
   const { form, options, loading } = props;
   const access = Form.useWatch('campaignAccess', form);
+  const { t } = useLanguage();
+
+  const accessOptions = [
+    { value: 'all', label: t('access_all_creators') },
+    { value: 'selected', label: t('access_only_selected') }
+  ];
 
   return (
     <>
-      <Form.Item name="campaignAccess" label="Creators">
-        <Radio.Group options={CAMPAIGN_ACCESS_OPTIONS} optionType="button" />
+      <Form.Item name="campaignAccess" label={t('nav_creators')}>
+        <Radio.Group options={accessOptions} optionType="button" />
       </Form.Item>
       {
         access === 'selected' ? (
           <Form.Item
             name="visibleCampaigns"
-            extra="Everything belonging to the other creators is hidden and refused - their posts, media and files, not just their place in the list."
+            extra={t('selected_creators_extra')}
           >
             <Select
               mode="multiple"
@@ -1247,7 +1233,7 @@ function CampaignAccessFields(props: {
               loading={loading}
               options={options}
               showSearch={{ optionFilterProp: 'label' }}
-              placeholder="Choose the creators this user may see"
+              placeholder={t('choose_creators_placeholder')}
             />
           </Form.Item>
         ) : null
@@ -1265,22 +1251,23 @@ function CampaignAccessFields(props: {
  */
 function QuotaFields(props: { form: FormInstance<UserFormValues>; }) {
   const { form } = props;
+  const { t } = useLanguage();
 
   return (
     <>
       <QuotaField
         form={form}
-        label="Posts per day"
+        label={t('posts_per_day')}
         modeName="postQuotaMode"
         valueName="postQuota"
-        extra="Counted when a post is opened. Going back to one already opened today costs nothing. Resets at 08:00 Beijing time."
+        extra={t('posts_per_day_extra')}
       />
       <QuotaField
         form={form}
-        label="Videos per day"
+        label={t('videos_per_day')}
         modeName="videoQuotaMode"
         valueName="videoQuota"
-        extra="Counted when a video starts playing. Replaying one already watched today costs nothing."
+        extra={t('videos_per_day_extra')}
       />
     </>
   );
@@ -1295,19 +1282,25 @@ function QuotaField(props: {
 }) {
   const { form, label, modeName, valueName, extra } = props;
   const mode = Form.useWatch(modeName, form);
+  const { t } = useLanguage();
+
+  const modeOptions = [
+    { value: 'unlimited', label: t('quota_unlimited') },
+    { value: 'limited', label: t('quota_mode_limit') }
+  ];
 
   return (
     <Form.Item label={label} extra={extra} className="mb-3">
       <Space align="start">
         <Form.Item name={modeName} noStyle>
-          <Radio.Group options={QUOTA_MODE_OPTIONS} optionType="button" />
+          <Radio.Group options={modeOptions} optionType="button" />
         </Form.Item>
         {
           mode === 'limited' ? (
             <Form.Item
               name={valueName}
               noStyle
-              rules={[ { required: true, message: 'Enter a number' } ]}
+              rules={[ { required: true, message: t('enter_a_number') } ]}
             >
               {/* Zero is allowed and means nothing today - a real setting, not
                   a way of saying "unlimited". */}
@@ -1340,23 +1333,24 @@ function LoginRegionFields(props: {
   const { form, options, loading } = props;
   const access = Form.useWatch('loginRegionAccess', form);
   const regions = Form.useWatch('loginRegions', form);
+  const { t } = useLanguage();
+
+  const accessOptions = [
+    { value: 'anywhere', label: t('access_anywhere') },
+    { value: 'selected', label: t('access_only_selected') }
+  ];
 
   return (
     <>
-      <Form.Item name="loginRegionAccess" label="Sign-in region">
-        <Radio.Group options={LOGIN_REGION_ACCESS_OPTIONS} optionType="button" />
+      <Form.Item name="loginRegionAccess" label={t('signin_region')}>
+        <Radio.Group options={accessOptions} optionType="button" />
       </Form.Item>
       {
         access === 'selected' ? (
           <>
             <Form.Item
               name="loginRegions"
-              extra={
-                'Checked at sign-in, against the same lookup the sign-in log uses. ' +
-                'A country covers every place in it, a province every city in it. ' +
-                'Type one that is not listed as 国家/省/市 - for example 中国/广东省/深圳. ' +
-                'A sign-in from a local address, or one the lookup cannot place, is let through.'
-              }
+              extra={t('login_regions_extra')}
             >
               <Select
                 mode="tags"
@@ -1365,7 +1359,7 @@ function LoginRegionFields(props: {
                 options={options}
                 tokenSeparators={[ ',' ]}
                 showSearch={{ optionFilterProp: 'label' }}
-                placeholder="Choose or type the regions this user may sign in from"
+                placeholder={t('choose_regions_placeholder')}
               />
             </Form.Item>
             {
@@ -1374,11 +1368,8 @@ function LoginRegionFields(props: {
                   className="mb-3"
                   type="warning"
                   showIcon
-                  title="This user will not be able to sign in at all"
-                  description={
-                    'An empty list means no region, not every region. Switch to ' +
-                    '"Anywhere" to lift the restriction instead.'
-                  }
+                  title={t('cannot_signin_alert')}
+                  description={t('cannot_signin_desc')}
                 />
               ) : null
             }

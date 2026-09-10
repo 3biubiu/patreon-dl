@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Card, Descriptions, Form, Input, InputNumber, Popconfirm, Radio, Space, Tag } from "antd";
 import { useAPI } from "../../contexts/APIProvider";
 import { LoadingBlock } from "../Loading";
+import { useLanguage } from "../../contexts/LanguageProvider";
 import {
   type ProviderSettings,
   type TranscriptionProvider,
@@ -42,29 +43,30 @@ function ProviderStatus(props: {
   active: boolean;
 }) {
   const { provider, envVar, active } = props;
+  const { t } = useLanguage();
   return (
     <>
       <Descriptions column={1} size="small">
-        <Descriptions.Item label="Status">
+        <Descriptions.Item label={t('status')}>
           <Space size={4} wrap>
             {
               provider.configured ?
-                <Tag color="green">Configured</Tag>
-                : <Tag color="orange">No API key</Tag>
+                <Tag color="green">{t('configured')}</Tag>
+                : <Tag color="orange">{t('no_api_key')}</Tag>
             }
-            {provider.source === 'env' ? <Tag>From {envVar}</Tag> : null}
-            {active ? <Tag color="blue">In use</Tag> : null}
+            {provider.source === 'env' ? <Tag>{t('from_env', { var: envVar })}</Tag> : null}
+            {active ? <Tag color="blue">{t('in_use')}</Tag> : null}
           </Space>
         </Descriptions.Item>
         {
           provider.key ? (
             <>
-              <Descriptions.Item label="Key">{provider.key.label || '—'}</Descriptions.Item>
-              <Descriptions.Item label="Spent">{formatMoney(provider.key.usage)}</Descriptions.Item>
-              <Descriptions.Item label="Remaining">
+              <Descriptions.Item label={t('api_key')}>{provider.key.label || '—'}</Descriptions.Item>
+              <Descriptions.Item label={t('spent')}>{formatMoney(provider.key.usage)}</Descriptions.Item>
+              <Descriptions.Item label={t('remaining')}>
                 {
                   provider.key.limit === null ?
-                    'No limit set'
+                    t('no_limit_set')
                     : formatMoney(provider.key.limitRemaining)
                 }
               </Descriptions.Item>
@@ -77,7 +79,7 @@ function ProviderStatus(props: {
           <Alert
             type="warning"
             showIcon
-            title="A key is configured, but it could not be checked just now"
+            title={t('key_check_failed_title')}
             description={provider.keyError}
           />
         ) : null
@@ -109,6 +111,7 @@ function TranscriptionSettingsPanel() {
   const [ submitting, setSubmitting ] = useState(false);
   const [ form ] = Form.useForm<FormValues>();
   const provider = Form.useWatch('provider', form);
+  const { t } = useLanguage();
 
   const fill = useCallback((result: Settings) => {
     setSettings(result);
@@ -134,9 +137,9 @@ function TranscriptionSettingsPanel() {
       fill(await api.getTranscriptionSettings());
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load transcription settings');
+      setError(e instanceof Error ? e.message : t('could_not_load_transcription_settings'));
     }
-  }, [ api, fill ]);
+  }, [ api, fill, t ]);
 
   useEffect(() => { void refresh(); }, [ refresh ]);
 
@@ -177,12 +180,12 @@ function TranscriptionSettingsPanel() {
       setSaved(true);
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save transcription settings');
+      setError(e instanceof Error ? e.message : t('could_not_save_transcription_settings'));
     }
     finally {
       setSubmitting(false);
     }
-  }, [ api, fill ]);
+  }, [ api, fill, t ]);
 
   const handleClearKey = useCallback(async (which: TranscriptionProvider) => {
     setSubmitting(true);
@@ -194,12 +197,12 @@ function TranscriptionSettingsPanel() {
       ));
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not clear the API key');
+      setError(e instanceof Error ? e.message : t('could_not_clear_api_key'));
     }
     finally {
       setSubmitting(false);
     }
-  }, [ api, fill ]);
+  }, [ api, fill, t ]);
 
   if (!settings) {
     return error ? <Alert type="error" title={error} showIcon /> : <LoadingBlock />;
@@ -213,26 +216,23 @@ function TranscriptionSettingsPanel() {
   return (
     <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
       {error ? <Alert type="error" title={error} showIcon closable={{ onClose: () => setError(null) }} /> : null}
-      {saved ? <Alert type="success" title="Settings saved" showIcon closable={{ onClose: () => setSaved(false) }} /> : null}
+      {saved ? <Alert type="success" title={t('settings_saved')} showIcon closable={{ onClose: () => setSaved(false) }} /> : null}
 
       <Form form={form} layout="vertical" onFinish={(v) => void handleSubmit(v)} disabled={submitting}>
         <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-          <Card title="Provider">
+          <Card title={t('provider')}>
             <Form.Item
               name="provider"
-              label="Transcribe with"
-              extra={
-                'Nothing switches on its own. When the provider in use runs out of quota ' +
-                'the job fails and says so - change it here and run the job again.'
-              }
+              label={t('transcribe_with')}
+              extra={t('provider_switch_note')}
             >
               <Radio.Group>
                 <Space orientation="vertical" size={4}>
                   <Radio value="openrouter">
-                    OpenRouter — Whisper and other OpenAI-compatible models
+                    {t('openrouter_option')}
                   </Radio>
                   <Radio value="gemini">
-                    Gemini — accepts a custom vocabulary, and costs more per minute
+                    {t('gemini_option')}
                   </Radio>
                 </Space>
               </Radio.Group>
@@ -247,13 +247,13 @@ function TranscriptionSettingsPanel() {
             />
             <Form.Item
               name="apiKey"
-              label="API key"
+              label={t('api_key')}
               extra={
                 settings.openrouter.configured ?
                   settings.openrouter.source === 'env' ?
-                    'A key is coming from the environment. Saving one here will take precedence over it.'
-                    : 'A key is already saved. Leave this blank to keep it, or enter a new one to replace it.'
-                  : 'Create one at openrouter.ai. It is checked against OpenRouter before being saved.'
+                    t('env_key_precedence')
+                    : t('saved_key_blank_to_keep')
+                  : t('openrouter_create_desc')
               }
             >
               <Input.Password
@@ -263,32 +263,32 @@ function TranscriptionSettingsPanel() {
                 // commit of this file into a false alarm.
                 placeholder={
                   settings.openrouter.configured ?
-                    settings.openrouter.key?.label || 'Saved'
-                    : 'Paste your OpenRouter key'
+                    settings.openrouter.key?.label || t('saved_placeholder')
+                    : t('paste_openrouter_key')
                 }
               />
             </Form.Item>
 
             <Form.Item
               name="model"
-              label="Model"
-              extra="Must be served by an OpenAI-compatible upstream - subtitles are built from segment timestamps, which OpenRouter only returns for those."
+              label={t('model')}
+              extra={t('model_openrouter_extra')}
             >
               <Input placeholder="openai/whisper-large-v3-turbo" />
             </Form.Item>
 
-            <Form.Item name="baseUrl" label="API base URL">
+            <Form.Item name="baseUrl" label={t('api_base_url')}>
               <Input placeholder="https://openrouter.ai/api/v1" />
             </Form.Item>
 
             {
               settings.openrouter.source === 'file' ? (
                 <Popconfirm
-                  title="Clear the saved OpenRouter key?"
-                  description="Transcription through OpenRouter will stop working unless a key is set in the environment."
+                  title={t('clear_saved_openrouter_key_title')}
+                  description={t('clear_openrouter_key_desc')}
                   onConfirm={() => void handleClearKey('openrouter')}
                 >
-                  <Button danger disabled={submitting}>Clear OpenRouter key</Button>
+                  <Button danger disabled={submitting}>{t('clear_openrouter_key')}</Button>
                 </Popconfirm>
               ) : null
             }
@@ -302,42 +302,37 @@ function TranscriptionSettingsPanel() {
             />
             <Form.Item
               name="geminiApiKey"
-              label="API key"
+              label={t('api_key')}
               extra={
                 settings.gemini.configured ?
                   settings.gemini.source === 'env' ?
-                    'A key is coming from the environment. Saving one here will take precedence over it.'
-                    : 'A key is already saved. Leave this blank to keep it, or enter a new one to replace it.'
-                  : 'Create one in Google AI Studio. It is checked against Gemini before being saved.'
+                    t('env_key_precedence')
+                    : t('saved_key_blank_to_keep')
+                  : t('gemini_create_desc')
               }
             >
               <Input.Password
                 autoComplete="off"
-                placeholder={settings.gemini.configured ? 'Saved' : 'Paste your Gemini key'}
+                placeholder={settings.gemini.configured ? t('saved_placeholder') : t('paste_gemini_key')}
               />
             </Form.Item>
 
             <Form.Item
               name="geminiModel"
-              label="Model"
-              extra="Word timestamps are required to build subtitles, which caps a request at 30 minutes of speech and rules out smart transcription."
+              label={t('model')}
+              extra={t('gemini_model_extra')}
             >
               <Input placeholder="gemini-3.5-transcribe" />
             </Form.Item>
 
-            <Form.Item name="geminiBaseUrl" label="API base URL">
+            <Form.Item name="geminiBaseUrl" label={t('api_base_url')}>
               <Input placeholder="https://generativelanguage.googleapis.com" />
             </Form.Item>
 
             <Form.Item
               name="geminiProxyUrl"
-              label="Proxy"
-              extra={
-                'Gemini is not reachable everywhere, so a local proxy is assumed unless ' +
-                'this is cleared. Clear it to connect directly. HTTP and SOCKS are both ' +
-                'accepted, and the key check above goes through it too, so a key that ' +
-                'verifies here is one that will work on a job.'
-              }
+              label={t('proxy')}
+              extra={t('gemini_proxy_extra')}
             >
               <Input placeholder="http://127.0.0.1:17890" allowClear />
             </Form.Item>
@@ -345,24 +340,24 @@ function TranscriptionSettingsPanel() {
             {
               settings.gemini.source === 'file' ? (
                 <Popconfirm
-                  title="Clear the saved Gemini key?"
-                  description="Transcription through Gemini will stop working unless a key is set in the environment."
+                  title={t('clear_saved_gemini_key_title')}
+                  description={t('clear_gemini_key_desc')}
                   onConfirm={() => void handleClearKey('gemini')}
                 >
-                  <Button danger disabled={submitting}>Clear Gemini key</Button>
+                  <Button danger disabled={submitting}>{t('clear_gemini_key')}</Button>
                 </Popconfirm>
               ) : null
             }
           </Card>
 
-          <Card title="Vocabulary">
+          <Card title={t('vocabulary')}>
             {
               !vocabularyActive ? (
                 <Alert
                   type="info"
                   showIcon
-                  title="Only Gemini uses this list"
-                  description="It is kept either way, and takes effect when Gemini is the provider."
+                  title={t('only_gemini_uses_this_title')}
+                  description={t('only_gemini_uses_this_desc')}
                 />
               ) : null
             }
@@ -374,21 +369,13 @@ function TranscriptionSettingsPanel() {
             <Form.Item
               name="vocabulary"
               label={
-                `Domain terms (${settings.vocabulary.termCount} in use` +
+                t('domain_terms_label', { count: settings.vocabulary.termCount }) +
                 (settings.vocabulary.mappingCount > 0 ?
-                  `, ${settings.vocabulary.mappingCount} translated`
+                  t('domain_terms_translated_suffix', { count: settings.vocabulary.mappingCount })
                   : '') +
-                ')'
+                t('domain_terms_label_suffix')
               }
-              extra={
-                `One term or phrase per line; lines starting with # are comments. ` +
-                `Only distinct jargon, brand names and proper nouns - everyday words ` +
-                `pull the transcript towards themselves. A line may also fix the ` +
-                `Chinese for a term, as "zenithal priming => 天顶喷涂": it still biases ` +
-                `the transcription, and the translation renders it that way every time. ` +
-                `The same file can be edited directly at ${settings.vocabulary.path}, ` +
-                `and is re-read for each clip.`
-              }
+              extra={t('vocabulary_extra', { path: settings.vocabulary.path })}
             >
               <Input.TextArea
                 autoSize={{ minRows: 6, maxRows: 20 }}
@@ -399,24 +386,20 @@ function TranscriptionSettingsPanel() {
           </Card>
 
           <Card
-            title="Voice activity detection"
+            title={t('voice_activity_detection')}
             extra={
               <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
-                Blank means the default
+                {t('blank_means_default')}
               </span>
             }
           >
             <p style={{ marginTop: 0 }}>
-              The detector decides which parts of the audio reach the
-              transcriber. Words being cut off at their start or end means the
-              detection threshold is too high or the padding too small;
-              subtitles appearing over stretches of silence means the opposite.
-              Takes effect from the next video.
+              {t('vad_intro')}
             </p>
             <Form.Item
               name="vadThreshold"
-              label="Speech threshold"
-              extra={`Probability above which a frame counts as speech. Default ${settings.vad.defaults.threshold}.`}
+              label={t('speech_threshold')}
+              extra={t('speech_threshold_extra', { value: settings.vad.defaults.threshold })}
             >
               <InputNumber
                 min={settings.vad.ranges.threshold.min}
@@ -428,8 +411,8 @@ function TranscriptionSettingsPanel() {
             </Form.Item>
             <Form.Item
               name="vadMinSilenceDuration"
-              label="Minimum silence (seconds)"
-              extra={`Silence shorter than this does not end a stretch of speech. Default ${settings.vad.defaults.minSilenceDuration}.`}
+              label={t('min_silence_seconds')}
+              extra={t('min_silence_extra', { value: settings.vad.defaults.minSilenceDuration })}
             >
               <InputNumber
                 min={settings.vad.ranges.minSilenceDuration.min}
@@ -441,8 +424,8 @@ function TranscriptionSettingsPanel() {
             </Form.Item>
             <Form.Item
               name="vadSpeechPad"
-              label="Padding (seconds)"
-              extra={`Each stretch of speech is widened by this much at both ends, so the first and last words are not clipped. Default ${settings.vad.defaults.speechPad}.`}
+              label={t('padding_seconds')}
+              extra={t('padding_extra', { value: settings.vad.defaults.speechPad })}
             >
               <InputNumber
                 min={settings.vad.ranges.speechPad.min}
@@ -454,8 +437,8 @@ function TranscriptionSettingsPanel() {
             </Form.Item>
             <Form.Item
               name="vadMergeGap"
-              label="Merge silence (seconds)"
-              extra={`Silence up to this long is kept inside the upload; anything longer is cut out. Default ${settings.vad.defaults.mergeGap}.`}
+              label={t('merge_silence_seconds')}
+              extra={t('merge_silence_extra', { value: settings.vad.defaults.mergeGap })}
             >
               <InputNumber
                 min={settings.vad.ranges.mergeGap.min}
@@ -468,7 +451,7 @@ function TranscriptionSettingsPanel() {
           </Card>
 
           <Button type="primary" htmlType="submit" loading={submitting}>
-            Save
+            {t('save')}
           </Button>
         </Space>
       </Form>

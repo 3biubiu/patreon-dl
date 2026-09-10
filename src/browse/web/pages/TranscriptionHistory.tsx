@@ -1,5 +1,5 @@
 import "../assets/styles/TranscriptionHistory.scss";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Button, Checkbox, Empty, Popconfirm, Progress, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import { Link } from "react-router";
 import { useAPI } from "../contexts/APIProvider";
@@ -20,6 +20,7 @@ import SubtitleViewer from "../components/SubtitleViewer";
 import { useMediaQuery, DESKTOP_QUERY } from "../utils/useMediaQuery";
 import useTranslationAvailability from "../utils/useTranslationAvailability";
 import { readTranslatePreference, writeTranslatePreference } from "../utils/translatePreference";
+import { useLanguage } from "../contexts/LanguageProvider";
 import {
   isActive,
   type TranscriptionRecord,
@@ -33,36 +34,12 @@ const POLL_INTERVAL_MS = 2000;
 
 type ListTab = 'transcription' | 'translation' | 'subtitles';
 
-const STATE_LABEL: Record<TranscriptionState, string> = {
-  pending: 'Queued',
-  running: 'Running',
-  done: 'Done',
-  error: 'Failed',
-  cancelled: 'Cancelled'
-};
-
 const STATE_COLOR: Record<TranscriptionState, string> = {
   pending: 'default',
   running: 'processing',
   done: 'success',
   error: 'error',
   cancelled: 'warning'
-};
-
-const STAGE_LABEL: Record<TranscriptionStage, string> = {
-  detecting: 'Finding speech',
-  transcribing: 'Transcribing',
-  segmenting: 'Splitting sentences',
-  polishing: 'Repairing text',
-  writing: 'Writing subtitles'
-};
-
-const TRANSLATION_STATE_LABEL: Record<TranslationState, string> = {
-  pending: 'Queued',
-  running: 'Translating',
-  done: 'Chinese',
-  error: 'Failed',
-  cancelled: 'Cancelled'
 };
 
 const TRANSLATION_STATE_COLOR: Record<TranslationState, string> = {
@@ -186,6 +163,7 @@ function VideoCell(props: { record: TranscriptionRecord }) {
 function TranscriptionHistory() {
   const { api } = useAPI();
   const { setTitle } = useDocument();
+  const { t } = useLanguage();
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const [ records, setRecords ] = useState<TranscriptionRecord[] | null>(null);
   const [ error, setError ] = useState<string | null>(null);
@@ -198,9 +176,33 @@ function TranscriptionHistory() {
   const availability = useTranslationAvailability();
   const canTranslate = !!availability?.available;
 
+  const stateLabel = useMemo<Record<TranscriptionState, string>>(() => ({
+    pending: t('state_pending'),
+    running: t('state_running'),
+    done: t('state_done'),
+    error: t('state_error'),
+    cancelled: t('state_cancelled')
+  }), [t]);
+
+  const stageLabel = useMemo<Record<TranscriptionStage, string>>(() => ({
+    detecting: t('stage_detecting'),
+    transcribing: t('stage_transcribing'),
+    segmenting: t('stage_segmenting'),
+    polishing: t('stage_polishing'),
+    writing: t('stage_writing')
+  }), [t]);
+
+  const translationStateLabel = useMemo<Record<TranslationState, string>>(() => ({
+    pending: t('state_pending'),
+    running: t('trans_state_translating'),
+    done: t('trans_state_chinese'),
+    error: t('state_error'),
+    cancelled: t('state_cancelled')
+  }), [t]);
+
   useEffect(() => {
-    setTitle('Transcription');
-  }, [ setTitle ]);
+    setTitle(t('nav_transcription'));
+  }, [setTitle, t]);
 
   const refresh = useCallback(async () => {
     try {
@@ -211,9 +213,9 @@ function TranscriptionHistory() {
       setAnyActive(result.some((record) => isActive(record) || isTranslationActive(record.translation)));
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the transcription history');
+      setError(e instanceof Error ? e.message : t('could_not_load_transcription_history'));
     }
-  }, [ api ]);
+  }, [ api, t ]);
 
   useEffect(() => { void refresh(); }, [ refresh ]);
 
@@ -233,36 +235,36 @@ function TranscriptionHistory() {
       await refresh();
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'That did not work');
+      setError(e instanceof Error ? e.message : t('that_did_not_work'));
     }
     finally {
       setBusyId(null);
     }
-  }, [ refresh ]);
+  }, [ refresh, t ]);
 
   if (!records) {
     return error ? <Alert type="error" title={error} showIcon /> : <LoadingBlock />;
   }
 
   const videoColumn = {
-    title: 'Video',
+    title: t('col_video'),
     key: 'video',
     render: (_: unknown, record: TranscriptionRecord) => <VideoCell record={record} />
   };
 
   const stateColumn = {
-    title: isDesktop ? 'State' : 'Progress',
+    title: isDesktop ? t('col_state') : t('col_progress'),
     key: 'state',
     width: isDesktop ? 220 : 110,
     render: (_: unknown, record: TranscriptionRecord) => (
       <div className="transcription-history__state">
         <span>
           <Tag color={STATE_COLOR[record.state]} style={{ marginInlineEnd: 4 }}>
-            {STATE_LABEL[record.state]}
+            {stateLabel[record.state]}
           </Tag>
           {
             isDesktop && record.state === 'running' && record.stage ?
-              <span className="transcription-history__stage">{STAGE_LABEL[record.stage]}</span>
+              <span className="transcription-history__stage">{stageLabel[record.stage]}</span>
               : null
           }
         </span>
@@ -283,7 +285,7 @@ function TranscriptionHistory() {
   };
 
   const languageColumn = {
-    title: 'Lang',
+    title: t('col_lang'),
     dataIndex: 'language',
     key: 'language',
     width: isDesktop ? 100 : 60,
@@ -298,7 +300,7 @@ function TranscriptionHistory() {
    * watching, and the one the batch size in the settings moves.
    */
   const translationStateColumn = {
-    title: 'State',
+    title: t('col_state'),
     key: 'translation-state',
     width: isDesktop ? 220 : 130,
     render: (_: unknown, record: TranscriptionRecord) => {
@@ -309,7 +311,7 @@ function TranscriptionHistory() {
       return (
         <div className="transcription-history__state">
           <Tag color={TRANSLATION_STATE_COLOR[translation.state]}>
-            {TRANSLATION_STATE_LABEL[translation.state]}
+            {translationStateLabel[translation.state]}
           </Tag>
           {
             translation.state === 'running' ?
@@ -319,7 +321,7 @@ function TranscriptionHistory() {
           {
             translation.state === 'done' ?
               <span className="transcription-history__stage">
-                {translation.requests} call{translation.requests === 1 ? '' : 's'}
+                {t('calls_count', { count: translation.requests })}
               </span>
               : null
           }
@@ -345,7 +347,7 @@ function TranscriptionHistory() {
       }}
       style={{ marginBlockStart: 8 }}
     >
-      Also translate to Chinese
+      {t('also_translate_to_chinese')}
     </Checkbox>
   ) : null;
 
@@ -362,10 +364,10 @@ function TranscriptionHistory() {
         // leaving the other queued is not a thing anyone means to do.
         return (
           <Popconfirm
-            title={isActive(record) ? 'Cancel this transcription?' : 'Cancel this translation?'}
-            description="Progress so far is discarded."
-            okText="Cancel it"
-            cancelText="Never mind"
+            title={isActive(record) ? t('cancel_transcription_confirm') : t('cancel_translation_confirm')}
+            description={t('progress_discarded_desc')}
+            okText={t('cancel_it')}
+            cancelText={t('never_mind')}
             okButtonProps={{ danger: true }}
             onConfirm={() => void run(record.mediaId, async () => {
               await api.cancelTranslation(record.mediaId);
@@ -376,8 +378,8 @@ function TranscriptionHistory() {
           >
             {
               isDesktop ?
-                <Button size="small" danger loading={busy}>Cancel</Button>
-                : <Button size="small" danger loading={busy} icon={<CloseOutlined />} aria-label="Cancel" />
+                <Button size="small" danger loading={busy}>{t('cancel')}</Button>
+                : <Button size="small" danger loading={busy} icon={<CloseOutlined />} aria-label={t('cancel')} />
             }
           </Popconfirm>
         );
@@ -385,21 +387,21 @@ function TranscriptionHistory() {
       return (
         <div className="transcription-history__actions">
           <Popconfirm
-            title="Transcribe again?"
+            title={t('transcribe_again_confirm')}
             description={
               <>
                 <div>
                   {
                     record.state === 'done' ?
-                      'The existing subtitle file is replaced.'
-                      : 'It runs in the background and costs roughly $0.01 per hour of video.'
+                      t('replaced_subtitle_desc')
+                      : t('rerun_background_cost_desc')
                   }
                 </div>
                 {translateCheckbox}
               </>
             }
-            okText="Transcribe"
-            cancelText="Never mind"
+            okText={t('transcribe')}
+            cancelText={t('never_mind')}
             onConfirm={() => void run(record.mediaId, async () => {
               await api.startTranscription(record.mediaId);
               if (canTranslate && translate) {
@@ -409,8 +411,8 @@ function TranscriptionHistory() {
           >
             {
               isDesktop ?
-                <Button size="small" loading={busy}>Retry</Button>
-                : <Button size="small" loading={busy} icon={<ReloadOutlined />} aria-label="Retry" />
+                <Button size="small" loading={busy}>{t('retry')}</Button>
+                : <Button size="small" loading={busy} icon={<ReloadOutlined />} aria-label={t('retry')} />
             }
           </Popconfirm>
           {
@@ -423,35 +425,35 @@ function TranscriptionHistory() {
             // more use than a button that is simply not there.
             record.state === 'done' ? (
               <Popconfirm
-                title={record.translation?.state === 'done' ? 'Translate again?' : 'Translate to Chinese?'}
+                title={record.translation?.state === 'done' ? t('translate_again_confirm') : t('translate_to_chinese_confirm')}
                 description={
                   record.translation?.state === 'done' ?
-                    'The existing Chinese subtitle file is replaced.'
-                    : 'The subtitles are translated in the background and written beside the video.'
+                    t('replaced_chinese_subtitle_desc')
+                    : t('translate_background_desc')
                 }
-                okText="Translate"
-                cancelText="Never mind"
+                okText={t('translate_button')}
+                cancelText={t('never_mind')}
                 onConfirm={() => void run(record.mediaId, () => api.startTranslation(record.mediaId))}
               >
                 {
                   isDesktop ?
-                    <Button size="small" loading={busy}>Translate</Button>
-                    : <Button size="small" loading={busy} icon={<TranslationOutlined />} aria-label="Translate" />
+                    <Button size="small" loading={busy}>{t('translate_button')}</Button>
+                    : <Button size="small" loading={busy} icon={<TranslationOutlined />} aria-label={t('translate_button')} />
                 }
               </Popconfirm>
             ) : null
           }
           <Popconfirm
-            title="Forget this record?"
-            description="The subtitle file it produced stays on disk."
-            okText="Forget"
-            cancelText="Never mind"
+            title={t('forget_record_confirm')}
+            description={t('forget_record_desc')}
+            okText={t('forget')}
+            cancelText={t('never_mind')}
             onConfirm={() => void run(record.mediaId, () => api.forgetTranscription(record.mediaId))}
           >
             {
               isDesktop ?
-                <Button size="small" type="text" loading={busy}>Forget</Button>
-                : <Button size="small" type="text" loading={busy} icon={<DeleteOutlined />} aria-label="Forget" />
+                <Button size="small" type="text" loading={busy}>{t('forget')}</Button>
+                : <Button size="small" type="text" loading={busy} icon={<DeleteOutlined />} aria-label={t('forget')} />
             }
           </Popconfirm>
         </div>
@@ -469,17 +471,17 @@ function TranscriptionHistory() {
       if (isTranslationActive(record.translation)) {
         return (
           <Popconfirm
-            title="Cancel this translation?"
-            description="Progress so far is discarded."
-            okText="Cancel it"
-            cancelText="Never mind"
+            title={t('cancel_translation_confirm')}
+            description={t('progress_discarded_desc')}
+            okText={t('cancel_it')}
+            cancelText={t('never_mind')}
             okButtonProps={{ danger: true }}
             onConfirm={() => void run(record.mediaId, () => api.cancelTranslation(record.mediaId))}
           >
             {
               isDesktop ?
-                <Button size="small" danger loading={busy}>Cancel</Button>
-                : <Button size="small" danger loading={busy} icon={<CloseOutlined />} aria-label="Cancel" />
+                <Button size="small" danger loading={busy}>{t('cancel')}</Button>
+                : <Button size="small" danger loading={busy} icon={<CloseOutlined />} aria-label={t('cancel')} />
             }
           </Popconfirm>
         );
@@ -487,20 +489,20 @@ function TranscriptionHistory() {
       if (record.state === 'done') {
         return (
           <Popconfirm
-            title={record.translation?.state === 'done' ? 'Translate again?' : 'Translate to Chinese?'}
+            title={record.translation?.state === 'done' ? t('translate_again_confirm') : t('translate_to_chinese_confirm')}
             description={
               record.translation?.state === 'done' ?
-                'The existing Chinese subtitle file is replaced.'
-                : 'The subtitles are translated in the background and written beside the video.'
+                t('replaced_chinese_subtitle_desc')
+                : t('translate_background_desc')
             }
-            okText="Translate"
-            cancelText="Never mind"
+            okText={t('translate_button')}
+            cancelText={t('never_mind')}
             onConfirm={() => void run(record.mediaId, () => api.startTranslation(record.mediaId))}
           >
             {
               isDesktop ?
-                <Button size="small" loading={busy}>Retry</Button>
-                : <Button size="small" loading={busy} icon={<ReloadOutlined />} aria-label="Retry" />
+                <Button size="small" loading={busy}>{t('retry')}</Button>
+                : <Button size="small" loading={busy} icon={<ReloadOutlined />} aria-label={t('retry')} />
             }
           </Popconfirm>
         );
@@ -517,20 +519,20 @@ function TranscriptionHistory() {
     stateColumn,
     languageColumn,
     {
-      title: 'Cost',
+      title: t('col_cost'),
       dataIndex: 'cost',
       key: 'cost',
       width: 90,
       render: (cost: number | null) => typeof cost === 'number' ? `$${cost.toFixed(4)}` : '—'
     },
     {
-      title: 'Took',
+      title: t('col_took'),
       key: 'took',
       width: 80,
       render: (_: unknown, record: TranscriptionRecord) => formatDuration(record)
     },
     {
-      title: 'Requested',
+      title: t('col_requested'),
       dataIndex: 'requestedAt',
       key: 'requestedAt',
       width: 160,
@@ -550,7 +552,7 @@ function TranscriptionHistory() {
     videoColumn,
     translationStateColumn,
     {
-      title: 'Requested',
+      title: t('col_requested'),
       key: 'translation-requested',
       width: 160,
       render: (_: unknown, record: TranscriptionRecord) =>
@@ -570,7 +572,7 @@ function TranscriptionHistory() {
    * does not become unreadable because a retry was asked for.
    */
   const subtitleLanguagesColumn = {
-    title: 'Subtitles',
+    title: t('subtitles'),
     key: 'subtitle-languages',
     width: isDesktop ? 200 : 110,
     render: (_: unknown, record: TranscriptionRecord) => (
@@ -595,8 +597,8 @@ function TranscriptionHistory() {
     width: isDesktop ? 100 : 56,
     render: (_: unknown, record: TranscriptionRecord) => (
       isDesktop ?
-        <Button size="small" onClick={() => setViewing(record)}>Read</Button>
-        : <Button size="small" icon={<FileTextOutlined />} aria-label="Read" onClick={() => setViewing(record)} />
+        <Button size="small" onClick={() => setViewing(record)}>{t('read')}</Button>
+        : <Button size="small" icon={<FileTextOutlined />} aria-label={t('read')} onClick={() => setViewing(record)} />
     )
   };
 
@@ -622,7 +624,7 @@ function TranscriptionHistory() {
 
   const settingsButton = (
     <Button icon={<SettingOutlined />} onClick={() => setSettingsOpen(true)}>
-      Settings
+      {t('nav_settings')}
     </Button>
   );
 
@@ -632,27 +634,27 @@ function TranscriptionHistory() {
       {
         active > 0 ? (
           <Popconfirm
-            title={`Stop ${active} job${active > 1 ? 's' : ''}?`}
-            description="The running one is aborted and the rest are taken off the queue. Progress so far is discarded."
-            okText="Stop all"
-            cancelText="Never mind"
+            title={t('stop_jobs_confirm', { count: active })}
+            description={t('stop_jobs_desc')}
+            okText={t('stop_all')}
+            cancelText={t('never_mind')}
             okButtonProps={{ danger: true }}
             onConfirm={() => void run('', async () => { setRecords(await api.stopAllTranscriptions()); })}
           >
-            <Button danger>Stop all ({active})</Button>
+            <Button danger>{t('stop_all_count', { count: active })}</Button>
           </Popconfirm>
         ) : null
       }
       {
         finished > 0 ? (
           <Popconfirm
-            title="Clear finished records?"
-            description="Anything queued or running is kept. Subtitle files stay on disk."
-            okText="Clear"
-            cancelText="Never mind"
+            title={t('clear_finished_records')}
+            description={t('clear_finished_desc')}
+            okText={t('clear')}
+            cancelText={t('never_mind')}
             onConfirm={() => void run('', async () => { setRecords(await api.clearTranscriptionHistory()); })}
           >
-            <Button>Clear finished ({finished})</Button>
+            <Button>{t('clear_finished_count', { count: finished })}</Button>
           </Popconfirm>
         ) : null
       }
@@ -665,17 +667,17 @@ function TranscriptionHistory() {
       {
         translatingCount > 0 ? (
           <Popconfirm
-            title={`Stop ${translatingCount} translation${translatingCount > 1 ? 's' : ''}?`}
-            description="The running one is aborted and the rest are taken off the queue. Progress so far is discarded."
-            okText="Stop all"
-            cancelText="Never mind"
+            title={t('stop_translations_confirm', { count: translatingCount })}
+            description={t('stop_jobs_desc')}
+            okText={t('stop_all')}
+            cancelText={t('never_mind')}
             okButtonProps={{ danger: true }}
             onConfirm={() => void run('', async () => {
               await api.stopAllTranslations();
               await refresh();
             })}
           >
-            <Button danger>Stop all ({translatingCount})</Button>
+            <Button danger>{t('stop_all_count', { count: translatingCount })}</Button>
           </Popconfirm>
         ) : null
       }
@@ -683,7 +685,7 @@ function TranscriptionHistory() {
   );
 
   const subtitlesPane = subtitleRecords.length === 0 ? (
-    <Empty description="No subtitles have been written yet. Transcribe a video first." />
+    <Empty description={t('subtitles_history_empty')} />
   ) : (
     <Table
       rowKey="mediaId"
@@ -702,7 +704,7 @@ function TranscriptionHistory() {
   );
 
   const transcriptionPane = records.length === 0 ? (
-    <Empty description="Nothing has been transcribed yet. Use the CC button on a video." />
+    <Empty description={t('transcription_history_empty')} />
   ) : (
     <Table
       rowKey="mediaId"
@@ -717,7 +719,7 @@ function TranscriptionHistory() {
   );
 
   const translationPane = translationRecords.length === 0 ? (
-    <Empty description="Nothing has been translated yet. Ask for one from the Transcription tab." />
+    <Empty description={t('translation_history_empty')} />
   ) : (
     <Table
       rowKey="mediaId"
@@ -756,19 +758,19 @@ function TranscriptionHistory() {
           {
             key: 'transcription',
             icon: <AudioOutlined />,
-            label: <TabLabel text="Transcription" count={records.length} />,
+            label: <TabLabel text={t('nav_transcription')} count={records.length} />,
             children: transcriptionPane
           },
           {
             key: 'translation',
             icon: <TranslationOutlined />,
-            label: <TabLabel text="Translation" count={translationRecords.length} />,
+            label: <TabLabel text={t('history_tab_translation')} count={translationRecords.length} />,
             children: translationPane
           },
           {
             key: 'subtitles',
             icon: <FileTextOutlined />,
-            label: <TabLabel text="Subtitles" count={subtitleRecords.length} />,
+            label: <TabLabel text={t('subtitles')} count={subtitleRecords.length} />,
             children: subtitlesPane
           }
         ]}

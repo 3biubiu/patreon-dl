@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Popconfirm, Space, Switch, Tag } from "antd";
 import { useAPI } from "../../contexts/APIProvider";
 import { LoadingBlock } from "../Loading";
+import { useLanguage } from "../../contexts/LanguageProvider";
 import { type TranslationSettings as Settings } from "../../../types/Translation";
 
 interface FormValues {
@@ -55,6 +56,7 @@ function TranslationSettingsPanel() {
   const [ form ] = Form.useForm<FormValues>();
   const batchCharacters = Form.useWatch('batchCharacters', form);
   const batchLines = Form.useWatch('batchLines', form);
+  const { t } = useLanguage();
 
   const apply = useCallback((result: Settings) => {
     setSettings(result);
@@ -80,9 +82,9 @@ function TranslationSettingsPanel() {
       apply(await api.getTranslationSettings());
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load the translation settings');
+      setError(e instanceof Error ? e.message : t('could_not_load_translation_settings'));
     }
-  }, [ api, apply ]);
+  }, [ api, apply, t ]);
 
   useEffect(() => { void refresh(); }, [ refresh ]);
 
@@ -99,12 +101,12 @@ function TranslationSettingsPanel() {
       setSaved(message);
     }
     catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save the translation settings');
+      setError(e instanceof Error ? e.message : t('could_not_save_translation_settings'));
     }
     finally {
       setSubmitting(false);
     }
-  }, [ api, apply ]);
+  }, [ api, apply, t ]);
 
   const handleSubmit = useCallback(async (values: FormValues) => {
     const params: Parameters<typeof api.saveTranslationSettings>[0] = {
@@ -126,8 +128,8 @@ function TranslationSettingsPanel() {
     if (values.apiKey?.trim()) {
       params.apiKey = values.apiKey.trim();
     }
-    await save(params, 'Settings saved');
-  }, [ save ]);
+    await save(params, t('settings_saved'));
+  }, [ save, t ]);
 
   if (!settings) {
     return error ? <Alert type="error" title={error} showIcon /> : <LoadingBlock />;
@@ -143,32 +145,32 @@ function TranslationSettingsPanel() {
     <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
       <Card title="Gemini">
         <Descriptions column={1} size="small">
-          <Descriptions.Item label="Status">
+          <Descriptions.Item label={t('status')}>
             {
               settings.configured ?
-                <Tag color="green">Configured</Tag>
-                : <Tag color="orange">No API key</Tag>
+                <Tag color="green">{t('configured')}</Tag>
+                : <Tag color="orange">{t('no_api_key')}</Tag>
             }
-            {fromEnvironment ? <Tag>From GEMINI_API_KEY</Tag> : null}
+            {fromEnvironment ? <Tag>{t('from_gemini_env')}</Tag> : null}
           </Descriptions.Item>
-          <Descriptions.Item label="Proxy">
-            {settings.proxyUrl || 'None - connecting straight out'}
+          <Descriptions.Item label={t('proxy')}>
+            {settings.proxyUrl || t('none_connecting_straight_out')}
           </Descriptions.Item>
           {
             settings.key ? (
               <>
-                <Descriptions.Item label="Models visible">{settings.key.modelCount}</Descriptions.Item>
+                <Descriptions.Item label={t('models_visible')}>{settings.key.modelCount}</Descriptions.Item>
                 <Descriptions.Item label={settings.model}>
                   {
                     settings.key.modelFound ?
-                      <Tag color="green">Available to this key</Tag>
-                      : <Tag color="orange">Not in the list this key can see</Tag>
+                      <Tag color="green">{t('available_to_key')}</Tag>
+                      : <Tag color="orange">{t('not_in_list')}</Tag>
                   }
                 </Descriptions.Item>
               </>
             ) : null
           }
-          <Descriptions.Item label="Calls spent">
+          <Descriptions.Item label={t('calls_spent')}>
             {settings.totalRequests}
             <Button
               size="small"
@@ -184,7 +186,7 @@ function TranslationSettingsPanel() {
                 }
               })()}
             >
-              Reset
+              {t('reset')}
             </Button>
           </Descriptions.Item>
         </Descriptions>
@@ -193,7 +195,7 @@ function TranslationSettingsPanel() {
             <Alert
               type="warning"
               showIcon
-              title="A key is configured, but it could not be checked just now"
+              title={t('key_check_failed_title')}
               description={settings.keyError}
             />
           ) : null
@@ -203,7 +205,7 @@ function TranslationSettingsPanel() {
       {error ? <Alert type="error" title={error} showIcon closable={{ onClose: () => setError(null) }} /> : null}
       {saved ? <Alert type="success" title={saved} showIcon closable={{ onClose: () => setSaved(null) }} /> : null}
 
-      <Card title="Settings">
+      <Card title={t('settings_panel')}>
         <Form
           form={form}
           layout="vertical"
@@ -212,54 +214,50 @@ function TranslationSettingsPanel() {
         >
           <Form.Item
             name="apiKey"
-            label="API key"
+            label={t('api_key')}
             extra={
               settings.configured ?
                 fromEnvironment ?
-                  'A key is coming from the environment. Saving one here will take precedence over it.'
-                  : 'A key is already saved. Leave this blank to keep it, or enter a new one to replace it.'
-                : 'Create one in Google AI Studio. It is checked against Gemini before being saved.'
+                  t('env_key_precedence')
+                  : t('saved_key_blank_to_keep')
+                : t('gemini_create_desc')
             }
           >
-            <Input.Password autoComplete="off" placeholder={settings.configured ? 'Saved' : 'Paste your Gemini key'} />
+            <Input.Password autoComplete="off" placeholder={settings.configured ? t('saved_placeholder') : t('paste_gemini_key')} />
           </Form.Item>
 
           <Form.Item
             name="model"
-            label="Model"
-            extra="Any model your key can use. The status above says whether this one is among them."
+            label={t('model')}
+            extra={t('model_extra_any')}
           >
             <Input placeholder="gemini-3.5-flash-lite" />
           </Form.Item>
 
-          <Form.Item name="baseUrl" label="API base URL">
+          <Form.Item name="baseUrl" label={t('api_base_url')}>
             <Input placeholder="https://generativelanguage.googleapis.com/v1beta" />
           </Form.Item>
 
           <Form.Item
             name="proxyUrl"
-            label="Proxy"
-            extra={
-              `Every Gemini request goes through this, key checks included. HTTP, HTTPS ` +
-              `and SOCKS are all understood. Defaults to ${settings.defaultProxyUrl}; ` +
-              `clear it to connect straight out.`
-            }
+            label={t('proxy')}
+            extra={t('proxy_extra', { proxy: settings.defaultProxyUrl })}
           >
             <Input placeholder={settings.defaultProxyUrl} allowClear />
           </Form.Item>
 
           <Form.Item
             name="batchCharacters"
-            label="Characters per call"
-            extra="How much of the transcript goes into one call. Gemini AI Studio bills by the call, so this is the main lever on what a video costs - raise it to spend fewer, lower it if large batches come back truncated."
+            label={t('characters_per_call')}
+            extra={t('characters_per_call_extra')}
           >
             <InputNumber min={500} max={40000} step={500} style={{ width: '12rem' }} />
           </Form.Item>
 
           <Form.Item
             name="batchLines"
-            label="Captions per call"
-            extra="A ceiling for files of very short captions, where the character budget alone would put a thousand of them in one call."
+            label={t('captions_per_call')}
+            extra={t('captions_per_call_extra')}
           >
             <InputNumber min={10} max={1000} step={10} style={{ width: '12rem' }} />
           </Form.Item>
@@ -267,16 +265,16 @@ function TranslationSettingsPanel() {
           <Alert
             type="info"
             showIcon
-            title={`About ${estimate} call${estimate === 1 ? '' : 's'} per hour of video`}
-            description="For an hour of ordinary speech, before any retry. Every batch is sent, every time: a translation asked for a second time is asked for because something about the first one was wrong, so it is paid for again."
+            title={t('calls_estimate_title', { count: estimate })}
+            description={t('calls_estimate_desc')}
             style={{ marginBlockEnd: 24 }}
           />
 
           <Form.Item
             name="disableThinking"
-            label="Disable thinking"
+            label={t('disable_thinking')}
             valuePropName="checked"
-            extra="Sends a zero thinking budget with each call. Faster and cheaper on models that support it, but a model that does not know the setting rejects the request outright - leave it off unless you know this model takes it."
+            extra={t('disable_thinking_extra')}
           >
             <Switch />
           </Form.Item>
@@ -285,33 +283,18 @@ function TranslationSettingsPanel() {
 
           <Form.Item
             name="sourceSegmentation"
-            label="Split the source sentences"
+            label={t('split_source_sentences')}
             valuePropName="checked"
-            extra={
-              'Asks the model where the sentences end in the transcript, instead of guessing ' +
-              'from pauses and full stops alone. Runs while a video is transcribed, and the ' +
-              'break lands on the word it was put next to, so the timing is exact rather than ' +
-              'estimated. Unlike the setting below this one costs calls - about five per hour ' +
-              'of speech - and it changes the subtitle the transcription itself writes. It is ' +
-              'skipped when no key is set.'
-            }
+            extra={t('split_source_extra')}
           >
             <Switch />
           </Form.Item>
 
           <Form.Item
             name="polish"
-            label="Repair the source text"
+            label={t('repair_source_text')}
             valuePropName="checked"
-            extra={
-              'Asks the model to fix what the transcription got wrong: misrecognised ' +
-              'words, filler syllables (um, uh, 呃), missing punctuation, and terms pulled ' +
-              'towards the transcription vocabulary. It runs on whole captions and never ' +
-              'touches their timings, and a caption it would rewrite too heavily is kept ' +
-              'as it was. Off by default, because it changes what was said; costs about ' +
-              'six calls per hour of speech, and needs the key above. It is skipped when ' +
-              'no key is set.'
-            }
+            extra={t('repair_source_extra')}
           >
             <Switch />
           </Form.Item>
@@ -320,48 +303,41 @@ function TranslationSettingsPanel() {
 
           <Form.Item
             name="segmentation"
-            label="Re-cut the Chinese lines"
+            label={t('recut_chinese_lines')}
             valuePropName="checked"
-            extra={
-              'A translation comes back one line per original caption, and an English caption ' +
-              'of a dozen words is a good deal more than a dozen Chinese characters. This puts ' +
-              'the translated text back into a stream and breaks it where a Chinese caption ' +
-              'should break - at full stops, commas and the pauses the speaker made, with the ' +
-              'lengths below used only to choose between them. It runs on text already in ' +
-              'hand and costs no calls. The subtitle the transcription wrote is never touched.'
-            }
+            extra={t('recut_chinese_extra')}
           >
             <Switch />
           </Form.Item>
 
           <Form.Item
             name="maxLineCjk"
-            label="Longest Chinese line (characters)"
-            extra="Characters. A soft limit: a full stop still ends a line early, and a line still runs past a comma to reach a better break."
+            label={t('longest_chinese_line')}
+            extra={t('longest_chinese_line_extra')}
           >
             <InputNumber min={8} max={40} style={{ width: '12rem' }} />
           </Form.Item>
 
           <Form.Item
             name="maxLineLatin"
-            label="Longest line in a spaced language (words)"
-            extra="Words. Used for a line that came back untranslated and kept its original, which is the one way English reaches this file."
+            label={t('longest_spaced_line')}
+            extra={t('longest_spaced_line_extra')}
           >
             <InputNumber min={5} max={30} style={{ width: '12rem' }} />
           </Form.Item>
 
           <Space>
             <Button type="primary" htmlType="submit" loading={submitting}>
-              Save
+              {t('save')}
             </Button>
             {
               settings.source === 'file' ? (
                 <Popconfirm
-                  title="Clear the saved API key?"
-                  description="Translation will stop working unless a key is set in the environment."
-                  onConfirm={() => void save({ apiKey: '' }, 'API key cleared')}
+                  title={t('clear_api_key_title')}
+                  description={t('clear_api_key_desc')}
+                  onConfirm={() => void save({ apiKey: '' }, t('api_key_cleared'))}
                 >
-                  <Button danger disabled={submitting}>Clear key</Button>
+                  <Button danger disabled={submitting}>{t('clear_key')}</Button>
                 </Popconfirm>
               ) : null
             }
@@ -370,22 +346,19 @@ function TranslationSettingsPanel() {
       </Card>
 
       <Card
-        title="Prompt"
+        title={t('prompt')}
         extra={
           <Button
             size="small"
             disabled={submitting || prompt === settings.defaultPrompt}
             onClick={() => setPrompt(settings.defaultPrompt)}
           >
-            Reset to default
+            {t('reset_to_default')}
           </Button>
         }
       >
         <p>
-          Your half of the prompt: tone, terminology, and what to leave in the original.
-          The rest of it - one translation per caption, no merging, no splitting, JSON out -
-          is fixed, because the timings belong to the original captions and a prompt that
-          let the model regroup them would silently put the subtitles out of sync.
+          {t('prompt_intro')}
         </p>
         <Input.TextArea
           value={prompt}
@@ -398,9 +371,9 @@ function TranslationSettingsPanel() {
             type="primary"
             loading={submitting}
             disabled={prompt === settings.prompt}
-            onClick={() => void save({ prompt }, 'Prompt saved')}
+            onClick={() => void save({ prompt }, t('prompt_saved'))}
           >
-            Save prompt
+            {t('save_prompt')}
           </Button>
         </Space>
       </Card>

@@ -40,7 +40,30 @@ export interface PdfTranslationAvailability {
   engine: PdfTranslationEngine;
   /** False when DeepL is selected but has no key - nothing will translate. */
   available: boolean;
+  /** Whether the page-image translation has credentials. See {@link PdfImageTranslationResult}. */
+  imageAvailable: boolean;
   to: string;
+}
+
+/**
+ * The other kind of translation: the page as a picture rather than as text.
+ *
+ * The reader sends what it has already drawn - the page canvas - and gets back
+ * the same picture with the translation printed into it where the original
+ * words were. It is for the pages the text one cannot help with: a scan, a
+ * comic, a diagram whose labels are part of the artwork. Baidu does the work,
+ * and unlike the text engines it is the only one, so it is configured by
+ * credentials rather than chosen from a list.
+ *
+ * The image itself comes back as image bytes rather than in a JSON field: it
+ * is a few hundred kilobytes, and base64 in a JSON body would be a third more
+ * of them for nothing.
+ */
+export interface PdfImageTranslationResult {
+  /** An object URL for the translated page, or `null` when it has no text. */
+  url: string | null;
+  /** True when the server had it on file rather than asking Baidu again. */
+  cached: boolean;
 }
 
 /**
@@ -54,6 +77,17 @@ export interface PdfTranslationSettings {
   hasDeepLKey: boolean;
   /** True when the key comes from the command line and the form cannot change it. */
   deepLKeyFromConfig: boolean;
+  /**
+   * Baidu, for the image translation. Not an engine in the list above: it
+   * translates pictures, not text, and the two are separate features that
+   * happen to sit in the same dialog.
+   *
+   * The app id comes back because it is an account name rather than a secret;
+   * the key, like every other key here, is write-only.
+   */
+  baiduAppId: string;
+  hasBaiduSecretKey: boolean;
+  baiduFromConfig: boolean;
   targetLanguage: string;
   /** Empty string means "go direct". */
   proxyUrl: string;
@@ -65,6 +99,9 @@ export interface PdfTranslationSettingsUpdate {
   engine?: PdfTranslationEngine;
   /** Omit to leave as it is; an empty string forgets the key. */
   deepLApiKey?: string;
+  baiduAppId?: string;
+  /** Omit to leave as it is; an empty string forgets the key. */
+  baiduSecretKey?: string;
   targetLanguage?: string;
   proxyUrl?: string;
 }

@@ -17,6 +17,7 @@ import { type TranslationAvailability, type TranslationSettings } from '../../ty
 import { type UploadJobView } from '../../types/Upload';
 import {
   type DeepLKeyStatus,
+  type PdfImageTranslationResult,
   type PdfTranslationResponse,
   type PdfTranslationSettings,
   type PdfTranslationSettingsUpdate
@@ -702,6 +703,53 @@ class API {
       }
     ));
     return data as unknown as PdfTranslationResponse;
+  }
+
+  /**
+   * Translates one page as a picture, through Baidu.
+   *
+   * The page goes up as the reader drew it and comes back as an image rather
+   * than as JSON carrying one - so what is handed back is an object URL, which
+   * belongs to the caller and has to be revoked by it. A page with no text to
+   * translate answers 204 and so comes back as `null`, which is worth telling
+   * apart from a failure: it means "there is nothing here", and asking again
+   * would cost the same and answer the same.
+   */
+  async translatePdfPageImage(
+    mediaId: string, page: number, image: Blob, to?: string, signal?: AbortSignal
+  ): Promise<PdfImageTranslationResult> {
+    const query = new URLSearchParams({ page: String(page) });
+    if (to) {
+      query.set('to', to);
+    }
+    const response = await apiFetch(
+      `/api/media/${mediaId}/pdf-image-translation?${query.toString()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': image.type || 'image/jpeg' },
+        body: image,
+        // Turning the page abandons the request rather than paying for a page
+        // nobody will read; the server drops its own call along with it.
+        signal
+      }
+    );
+    if (response.status === 204) {
+      return { url: null, cached: response.headers.get('X-Translation-Cached') === '1' };
+    }
+    if (!response.ok) {
+      // The failures answer JSON even though the successes do not.
+      let message = 'Could not translate this page';
+      try {
+        const body = await response.json() as { error?: string };
+        message = body?.error || message;
+      }
+      catch (_error) { /* the default will have to do */ }
+      throw Error(message);
+    }
+    return {
+      url: URL.createObjectURL(await response.blob()),
+      cached: response.headers.get('X-Translation-Cached') === '1'
+    };
   }
 
   /** Where this reader left a PDF, or `null` for one never opened. */

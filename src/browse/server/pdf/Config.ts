@@ -6,7 +6,9 @@ import GoogleTranslator, {
   DEFAULT_TLD
 } from './GoogleTranslator.js';
 import DeepLTranslator from './DeepLTranslator.js';
+import BaiduImageTranslator from './BaiduImageTranslator.js';
 import PdfTranslationStore from './PdfTranslationStore.js';
+import PdfImageTranslationStore from './PdfImageTranslationStore.js';
 import PdfTranslationSettingsStore from './PdfTranslationSettingsStore.js';
 import { type PdfTranslator } from './BatchRunner.js';
 
@@ -26,6 +28,15 @@ export interface PdfTranslationConfig {
   tld?: string | null;
   /** A DeepL key from the command line, which takes precedence over the stored one. */
   deepLApiKey?: string | null;
+  /**
+   * Baidu's credentials for the image translation, from the command line.
+   *
+   * Both halves or neither - an APP ID without its key signs nothing - and
+   * like the DeepL key, what is set here takes precedence over what an
+   * administrator sets in the reader.
+   */
+  baiduAppId?: string | null;
+  baiduSecretKey?: string | null;
 }
 
 export interface PdfTranslationServices {
@@ -33,8 +44,11 @@ export interface PdfTranslationServices {
   translator: () => PdfTranslator;
   google: GoogleTranslator;
   deepL: DeepLTranslator;
+  /** Pictures rather than text, and not one of the engines above. */
+  baiduImage: BaiduImageTranslator;
   settings: PdfTranslationSettingsStore;
   store: PdfTranslationStore;
+  imageStore: PdfImageTranslationStore;
 }
 
 /**
@@ -90,8 +104,28 @@ export function createPdfTranslationServices(
     logger
   );
 
+  const baiduImage = new BaiduImageTranslator(
+    () => ({
+      // Both halves come from the same place: half a set of credentials from
+      // the command line and half from the settings would sign nothing and be
+      // a puzzle to work out.
+      appId: config?.baiduAppId && config?.baiduSecretKey ?
+        config.baiduAppId : settings.baiduAppId,
+      secretKey: config?.baiduAppId && config?.baiduSecretKey ?
+        config.baiduSecretKey : settings.baiduSecretKey,
+      proxyUrl: resolveProxyUrl(),
+      targetLanguage: resolveTargetLanguage()
+    }),
+    logger
+  );
+
   const store = new PdfTranslationStore(
     path.resolve(dataDir, '.patreon-dl', 'pdf-translations'),
+    logger
+  );
+
+  const imageStore = new PdfImageTranslationStore(
+    path.resolve(dataDir, '.patreon-dl', 'pdf-page-images'),
     logger
   );
 
@@ -101,7 +135,9 @@ export function createPdfTranslationServices(
     translator: () => settings.engine === 'deepl' ? deepL : google,
     google,
     deepL,
+    baiduImage,
     settings,
-    store
+    store,
+    imageStore
   };
 }

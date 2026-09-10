@@ -19,6 +19,9 @@ interface StoredSettings {
   v: number;
   engine: PdfTranslationEngine;
   deepLApiKey: string | null;
+  /** Baidu's, for the image translation - which is not one of the engines. */
+  baiduAppId: string | null;
+  baiduSecretKey: string | null;
   targetLanguage: string | null;
   /** `null` means "not set, use the default"; `''` means "go direct". */
   proxyUrl: string | null;
@@ -28,6 +31,8 @@ const EMPTY: StoredSettings = {
   v: FILE_VERSION,
   engine: 'google',
   deepLApiKey: null,
+  baiduAppId: null,
+  baiduSecretKey: null,
   targetLanguage: null,
   proxyUrl: null
 };
@@ -36,6 +41,9 @@ export interface PdfTranslationSettingsUpdate {
   engine?: PdfTranslationEngine;
   /** Omit to leave as it is; `''` to forget the key entirely. */
   deepLApiKey?: string;
+  baiduAppId?: string;
+  /** Omit to leave as it is; `''` to forget the key entirely. */
+  baiduSecretKey?: string;
   targetLanguage?: string;
   proxyUrl?: string;
 }
@@ -82,6 +90,14 @@ export default class PdfTranslationSettingsStore {
     return this.#data.deepLApiKey;
   }
 
+  get baiduAppId() {
+    return this.#data.baiduAppId;
+  }
+
+  get baiduSecretKey() {
+    return this.#data.baiduSecretKey;
+  }
+
   get targetLanguage() {
     return this.#data.targetLanguage;
   }
@@ -98,6 +114,12 @@ export default class PdfTranslationSettingsStore {
       // A blank key is how it is cleared, and is stored as absent rather than
       // as an empty string that would read as "configured".
       this.#data.deepLApiKey = update.deepLApiKey.trim() || null;
+    }
+    if (update.baiduAppId !== undefined) {
+      this.#data.baiduAppId = update.baiduAppId.trim() || null;
+    }
+    if (update.baiduSecretKey !== undefined) {
+      this.#data.baiduSecretKey = update.baiduSecretKey.trim() || null;
     }
     if (update.targetLanguage !== undefined) {
       this.#data.targetLanguage = update.targetLanguage.trim() || null;

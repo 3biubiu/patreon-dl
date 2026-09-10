@@ -3,8 +3,22 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
+    // Thirteen buttons do not fit beside a filename on a phone, and a toolbar
+    // that wraps onto a second row is better than one that clips.
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
     padding-right: 1.5rem;
+  }
+
+  // A hairline between groups of buttons that do unrelated things - turning
+  // pages, laying them out, sizing them.
+  &__divider {
+    display: inline-block;
+    width: 1px;
+    height: 1.1rem;
+    margin: 0 0.15rem;
+    vertical-align: middle;
+    background-color: var(--bs-border-color);
   }
 
   &__filename {
@@ -56,9 +70,10 @@
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    // Tall pages scroll inside the dialog rather than pushing it past the
-    // viewport. Sideways they never do: the page is drawn to the width this
-    // box has, so there is nothing to scroll to.
+    // Tall pages - and, in the scrolling layout, the whole document - scroll
+    // inside the dialog rather than pushing it past the viewport. Sideways
+    // they never do: the pages are drawn to the width this box has, so there
+    // is nothing to scroll to.
     max-height: 78vh;
     overflow-x: hidden;
     overflow-y: auto;
@@ -69,6 +84,48 @@
     background-color: var(--bs-tertiary-bg);
     border-radius: var(--bs-border-radius);
     scrollbar-width: thin;
+  }
+
+  // The column the pages are laid out in, and the box that is measured to
+  // decide how wide to draw them. It is the stage itself that scrolls, so
+  // this is only ever as tall as what it holds - and in fullscreen its
+  // max-width is what the zoom buttons set, the dialog being the whole screen
+  // by then.
+  &__pages {
+    width: 100%;
+    min-width: 0;
+  }
+
+  // One page beside the other in the spread, one under the other everywhere
+  // else. The gap matches SPREAD_GAP in the component, which takes it off the
+  // width before halving it.
+  &__deck {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  &--scroll &__deck {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  // A page in the scrolling column that is not drawn yet: a box of about the
+  // right size with its number in it, so that scrolling fast reads as pages
+  // going by rather than as emptiness.
+  &__placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    border: 1px dashed var(--bs-border-color);
+    border-radius: var(--bs-border-radius-sm);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-secondary-color);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
   }
 
   &__panel {
@@ -160,6 +217,61 @@
     }
   }
 
+  // Fills the screen. The browser's own fullscreen puts the dialog in the top
+  // layer and sizes it itself; where that was refused the same class grows it
+  // to the window instead, and the two look the same from here.
+  &--fullscreen {
+    .ant-modal {
+      max-width: 100vw !important;
+      height: 100vh !important;
+      top: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background-color: var(--bs-body-bg);
+    }
+
+    .ant-modal-content {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      border-radius: 0;
+    }
+
+    .ant-modal-header {
+      flex: 0 0 auto;
+    }
+
+    // The body takes whatever the toolbar leaves, and the stage takes all of
+    // that - rather than the share of the viewport it is given otherwise.
+    .ant-modal-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+    }
+
+    .pdf-viewer__body,
+    .pdf-viewer__stage {
+      max-height: none;
+    }
+
+    .pdf-viewer__body {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    // There is nothing left to drag: the dialog is the screen.
+    .pdf-viewer__resize-handle {
+      display: none;
+    }
+  }
+
+  // The left button held down on the page lifts the translation off it for as
+  // long as it is held. Transitioned, so it reads as the overlay being lifted
+  // rather than as the page flickering.
+  &--peeking &__layer {
+    opacity: 0;
+  }
+
   &--resizing {
     // A drag that leaves the handle should not select the page text it
     // crosses, and the pointer should keep saying what it is doing.
@@ -184,11 +296,80 @@
     overflow: hidden;
   }
 
-  // One per mounted page - the current one and the ones drawn ahead of it.
-  // The hidden ones must take no room at all, so the flex layout of the body
+  // One row per page: the page, and - when the picture translation is being
+  // shown beside it rather than over it - the translated picture next to it.
+  &__slot {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  // The hidden ones must take no room at all, so the flex layout of the deck
   // cannot override the attribute.
-  &__page[hidden] {
+  &__slot[hidden] {
     display: none !important;
+  }
+
+  // One box per page. Sized from the width the deck sets and the shape the box
+  // was given - so a resize writes one custom property rather than a style per
+  // page. See PageSlot in the component.
+  &__page {
+    flex: 0 0 auto;
+    width: var(--pdf-page-width, 600px);
+    height: calc(var(--pdf-page-width, 600px) * var(--pdf-page-aspect, 1.414));
+  }
+
+  // The translated picture beside the page. Sized like the page it belongs to
+  // and fitted inside that, because what comes back from Baidu is the same
+  // page and should sit at the same height as it.
+  &__page--side {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: var(--bs-border-radius-sm);
+    background-color: var(--bs-body-bg);
+    box-shadow: 0 2px 12px rgb(0 0 0 / 25%);
+  }
+
+  &__side-image {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  // And the same picture laid over the page instead. Stretched rather than
+  // fitted: it is the same page at the same shape, and a letterbox here would
+  // be the translation sitting a few pixels off the words it replaced.
+  &__image-layer {
+    position: absolute;
+    inset: 0;
+    // The page underneath keeps its text selectable through the picture.
+    pointer-events: none;
+    transition: opacity 0.1s ease-in-out;
+
+    img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: fill;
+    }
+  }
+
+  // Held down on the page, the long press lifts whichever of the two is
+  // covering it.
+  &--peeking &__image-layer {
+    opacity: 0;
+  }
+
+  // Something went wrong with an image translation. Kept in the flow at the
+  // top of the column rather than floating over the page, and sticky so that
+  // it is still there to be read after a scroll.
+  &__notice {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    margin-bottom: 0.5rem;
   }
 
   // Scaled like an image while a resize is still moving, and back to 1 once
@@ -204,6 +385,7 @@
     inset: 0;
     // The page underneath stays selectable except where a block covers it.
     pointer-events: none;
+    transition: opacity 0.1s ease-in-out;
   }
 
   &__block {

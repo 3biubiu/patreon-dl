@@ -10,6 +10,8 @@ import {
 interface FormValues {
   engine: PdfTranslationEngine;
   deepLApiKey: string;
+  baiduAppId: string;
+  baiduSecretKey: string;
   targetLanguage: string;
   proxyUrl: string;
 }
@@ -49,6 +51,8 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
     form.setFieldsValue({
       engine: result.engine,
       deepLApiKey: '',
+      baiduAppId: result.baiduAppId,
+      baiduSecretKey: '',
       targetLanguage: result.targetLanguage,
       proxyUrl: result.proxyUrl
     });
@@ -81,6 +85,9 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
         // Left out when blank, so saving the form does not wipe a key that is
         // already set and deliberately never sent back to be re-submitted.
         deepLApiKey: values.deepLApiKey ? values.deepLApiKey : undefined,
+        baiduAppId: settings?.baiduFromConfig ? undefined : values.baiduAppId ?? '',
+        // Left out when blank for the same reason as the DeepL key above.
+        baiduSecretKey: values.baiduSecretKey ? values.baiduSecretKey : undefined,
         targetLanguage: values.targetLanguage,
         proxyUrl: values.proxyUrl ?? ''
       });
@@ -94,7 +101,8 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
     finally {
       setSaving(false);
     }
-  }, [ api, apply, form, onSaved ]);
+    // `settings` is read for the flags that say what may be written at all.
+  }, [ api, apply, form, onSaved, settings ]);
 
   /** Checks the key in the box, or the stored one when the box is empty. */
   const check = useCallback(async () => {
@@ -188,9 +196,45 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
             </Form.Item>
 
             <Form.Item
+              label="Image translation (Baidu)"
+              extra={
+                settings.baiduFromConfig ?
+                  'Set when the server was started, so it cannot be changed here.'
+                  : 'For translating a page as a picture - a scan, a comic, a diagram - which the engines above cannot help with. Sign up at fanyi-api.baidu.com and enable 图片翻译; the reader shows the two image buttons to anyone allowed to translate, and says so there when this is not set.'
+              }
+              className="mb-2"
+            >
+              <Space.Compact className="w-100">
+                <Form.Item name="baiduAppId" noStyle>
+                  <Input
+                    placeholder="APP ID"
+                    disabled={settings.baiduFromConfig}
+                    autoComplete="off"
+                  />
+                </Form.Item>
+                <Form.Item name="baiduSecretKey" noStyle>
+                  <Input.Password
+                    placeholder={settings.hasBaiduSecretKey ? '••••••••  (unchanged)' : 'Secret key'}
+                    disabled={settings.baiduFromConfig}
+                    autoComplete="off"
+                  />
+                </Form.Item>
+              </Space.Compact>
+            </Form.Item>
+
+            <Form.Item className="mb-3">
+              {
+                settings.hasBaiduSecretKey ?
+                  <Tag color="green">image translation is set up</Tag> :
+                  <Tag>image translation is not set up</Tag>
+              }
+              {settings.baiduFromConfig ? <Tag color="blue">from the command line</Tag> : null}
+            </Form.Item>
+
+            <Form.Item
               name="targetLanguage"
               label="Translate into"
-              extra='A language code - "zh-CN", "en", "ja". DeepL is given the code it expects for the same language.'
+              extra='A language code - "zh-CN", "en", "ja". DeepL and Baidu are each given the code they expect for the same language. Changing it discards the page images translated into the old one.'
             >
               <Input placeholder="zh-CN" />
             </Form.Item>
@@ -201,7 +245,7 @@ function PdfTranslationSettingsModal(props: PdfTranslationSettingsModalProps) {
               extra={
                 settings.proxyFromConfig ?
                   'Set when the server was started, so it cannot be changed here.'
-                  : 'Used by whichever engine is selected. Leave blank to connect directly.'
+                  : 'Used by whichever engine is selected, and by the image translation. Leave blank to connect directly.'
               }
             >
               <Input placeholder="http://127.0.0.1:7890" disabled={settings.proxyFromConfig} />

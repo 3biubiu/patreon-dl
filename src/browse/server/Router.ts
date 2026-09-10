@@ -708,6 +708,23 @@ class _Router {
       }
     );
 
+    // The other half of the same permission: the page as a picture, for the
+    // pages that have no text to send to the route above. The body is the
+    // image itself, which no body parser touches - see the handler.
+    this.#router.post(
+      '/api/media/:id/pdf-image-translation',
+      requirePdfTranslation,
+      inScope(byMediaParam),
+      (req, res) => {
+        this.#handlers.pdfTranslation.handleTranslateImageRequest(req, res, req.params.id)
+          .catch(() => {
+            if (!res.headersSent) {
+              res.status(500).json({ error: 'Could not translate this page' });
+            }
+          });
+      }
+    );
+
     // The one sanctioned way past `MediaAccessGuard`: an administrator who can
     // also produce the download code gets a short-lived ticket for one file.
     this.#router.post('/api/media/:id/download-ticket', requireAdmin, (req, res) =>
@@ -783,6 +800,9 @@ export function getRouter(
     pdfTranslation: new PdfTranslationRequestHandler(
       pdfTranslation,
       !!pdfTranslationConfig?.deepLApiKey,
+      // Both halves or neither - one on its own signs nothing, so one on its
+      // own does not take the form's away.
+      !!pdfTranslationConfig?.baiduAppId && !!pdfTranslationConfig?.baiduSecretKey,
       pdfTranslationConfig?.proxyUrl !== undefined && pdfTranslationConfig?.proxyUrl !== null ||
         process.env.PDF_TRANSLATE_PROXY_URL !== undefined,
       logger

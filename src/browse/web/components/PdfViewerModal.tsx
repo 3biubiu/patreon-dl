@@ -143,6 +143,37 @@ type ImageTranslationMode = 'off' | 'immersive' | 'side';
 const IMAGE_MODE_STORAGE_KEY = 'patreon-dl.pdfViewerImageMode';
 
 /**
+ * A phone, by the same breakpoint the rest of the application uses.
+ *
+ * On a screen this narrow a fullscreen reader gives the page every pixel it
+ * has: the dialog's padding, the tray's, and the width the zoom buttons cap
+ * the column at are all margins around a page that is already as narrow as it
+ * is ever going to be. Watched here rather than written as a media query in
+ * the stylesheet because the toolbar has to know as well - buttons that set a
+ * width nothing is using would be three buttons that do nothing.
+ */
+const NARROW_VIEWPORT = '(max-width: 575.98px)';
+
+function useNarrowViewport() {
+  const [ narrow, setNarrow ] = useState(
+    () => window.matchMedia?.(NARROW_VIEWPORT).matches ?? false
+  );
+  useEffect(() => {
+    const query = window.matchMedia?.(NARROW_VIEWPORT);
+    if (!query) {
+      return;
+    }
+    const onChange = () => setNarrow(query.matches);
+    // Read again on the way in: the screen may have turned since the state
+    // above was worked out.
+    onChange();
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
+/**
  * The size a page is sent at.
  *
  * Baidu refuses anything over 4096 pixels on its long edge or four megabytes
@@ -591,6 +622,9 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const [ containerWidth, setContainerWidth ] = useState(0);
   const [ resizing, setResizing ] = useState(false);
   const [ fullscreen, setFullscreen ] = useState(false);
+  const narrowViewport = useNarrowViewport();
+  /** A phone in fullscreen: no margins anywhere, the page takes the width. */
+  const fullBleed = fullscreen && narrowViewport;
   const [ failed, setFailed ] = useState(false);
   const [ immersive, setImmersive ] = useState(() => readStoredFlag(IMMERSIVE_STORAGE_KEY));
   const [ panelOpen, setPanelOpen ] = useState(() => readStoredFlag(PANEL_STORAGE_KEY));
@@ -1677,7 +1711,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           size="small"
           icon={<ZoomOutOutlined />}
           aria-label={t('pdf_narrower')}
-          disabled={widthPercent <= MIN_WIDTH_PERCENT}
+          // Nothing to narrow: the page is already the width of the screen.
+          disabled={fullBleed || widthPercent <= MIN_WIDTH_PERCENT}
           onClick={() => changeWidth(-WIDTH_STEP)}
         />
         <Button
@@ -1685,6 +1720,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           size="small"
           icon={<ColumnWidthOutlined />}
           aria-label={t('pdf_reset_width')}
+          disabled={fullBleed}
           onClick={() => changeWidth(getDefaultWidthPercent() - widthPercent)}
         />
         <Button
@@ -1692,7 +1728,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           size="small"
           icon={<ZoomInOutlined />}
           aria-label={t('pdf_wider')}
-          disabled={widthPercent >= MAX_WIDTH_PERCENT}
+          disabled={fullBleed || widthPercent >= MAX_WIDTH_PERCENT}
           onClick={() => changeWidth(WIDTH_STEP)}
         />
         <Tooltip
@@ -2100,6 +2136,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     `pdf-viewer--${viewMode}`,
     resizing ? 'pdf-viewer--resizing' : '',
     fullscreen ? 'pdf-viewer--fullscreen' : '',
+    fullBleed ? 'pdf-viewer--full-bleed' : '',
     peeking ? 'pdf-viewer--peeking' : ''
   ].filter(Boolean).join(' ');
 
@@ -2149,8 +2186,10 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           <div
             className="pdf-viewer__pages"
             ref={setContainerRef}
-            // What the width buttons mean once the dialog is the whole screen.
-            style={fullscreen ? { maxWidth: `${widthPercent}%` } : undefined}
+            // What the width buttons mean once the dialog is the whole screen -
+            // except on a phone, where the whole screen is barely a page wide
+            // and the page is given all of it.
+            style={fullscreen && !fullBleed ? { maxWidth: `${widthPercent}%` } : undefined}
           >
             {
               // Where a translation went wrong, either kind. The panel says so

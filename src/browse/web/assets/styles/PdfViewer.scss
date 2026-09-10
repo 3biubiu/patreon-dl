@@ -284,6 +284,40 @@
     }
   }
 
+  /**
+   * A phone in fullscreen: the page gets the width, all of it.
+   *
+   * Three sets of margins stand between the page and the edge of a phone -
+   * the dialog's own padding, the tray the page sits in, and the column width
+   * the zoom buttons cap - and together they cost about a fifth of a screen
+   * that has none to spare. None of them earns its keep at this size, so all
+   * three go. The class comes from the component rather than from a media
+   * query here, because the toolbar has to agree about it: see
+   * NARROW_VIEWPORT.
+   */
+  &--full-bleed {
+    .ant-modal-container {
+      padding-left: 0;
+      padding-right: 0;
+    }
+
+    // The header loses its inset with it, so it gets a little of its own back
+    // - a filename against the edge of the glass reads as a mistake. The
+    // close button keeps its place: the toolbar already reserves room for it.
+    .ant-modal-header {
+      padding-left: 0.5rem;
+    }
+
+    .pdf-viewer__stage {
+      padding-left: 0;
+      padding-right: 0;
+      border-radius: 0;
+      // Nothing to reserve: a phone's scrollbar is drawn over the content
+      // rather than beside it.
+      scrollbar-gutter: auto;
+    }
+  }
+
   // The left button held down on the page lifts the translation off it for as
   // long as it is held. Transitioned, so it reads as the overlay being lifted
   // rather than as the page flickering.

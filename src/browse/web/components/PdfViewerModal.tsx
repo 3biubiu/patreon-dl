@@ -90,6 +90,31 @@ const FALLBACK_WIDTH_PERCENT = 92;
 const WIDTH_STORAGE_KEY = 'patreon-dl.pdfViewerWidthPercent';
 
 /**
+ * Whether this browser throws the whole page away rather than let it grow.
+ *
+ * iOS is the one that matters. Safari there gives a tab a small fraction of
+ * the memory a desktop browser does, and when a tab passes it nothing fails
+ * in a way the page can see: WebKit discards the tab and loads it again from
+ * scratch, which from the reader's side is a document that closes itself
+ * after a few pages. So every figure that decides what a page costs is lower
+ * here, and a page that has been read is given back rather than kept.
+ *
+ * iPadOS reports itself as a Mac, hence the second test - a desktop Safari
+ * has no touch points.
+ */
+const MEMORY_CONSTRAINED = (() => {
+  if (typeof navigator === 'undefined') {
+    return false;
+  }
+  const agent = navigator.userAgent || '';
+  const ios = /iP(hone|ad|od)/.test(agent) ||
+    (/Macintosh/.test(agent) && navigator.maxTouchPoints > 1);
+  // Phones with little to spare answer this; desktops largely do not.
+  const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  return ios || (typeof memory === 'number' && memory <= 4);
+})();
+
+/**
  * How many pages ahead of the one being read are drawn in advance.
  *
  * They are mounted, hidden, at the same width as the visible page, so pdf.js
@@ -98,14 +123,26 @@ const WIDTH_STORAGE_KEY = 'patreon-dl.pdfViewerWidthPercent';
  * covers reading at a normal pace without holding a whole document's worth of
  * canvases in memory.
  */
-const DEFAULT_PRELOAD_PAGES = 3;
+const DEFAULT_PRELOAD_PAGES = MEMORY_CONSTRAINED ? 1 : 3;
 
 /**
  * And a smaller number for the two layouts that already hold more than one
  * page on screen. A canvas is the expensive thing here, so a spread that drew
  * three pages ahead would be holding eight of them at once.
  */
-const MULTI_PAGE_PRELOAD = 2;
+const MULTI_PAGE_PRELOAD = MEMORY_CONSTRAINED ? 1 : 2;
+
+/**
+ * A hard ceiling on how many pages are drawn at once, whatever the layout
+ * asked for.
+ *
+ * The scrolling column decides what it draws from what is on screen, and a
+ * short document at a small width can put a lot of pages on screen at once -
+ * each of them a canvas, and each of them a page's worth of decoded images
+ * held by pdf.js. The preload numbers above are per-layout intentions; this
+ * is the budget they all share.
+ */
+const MAX_DRAWN_PAGES = MEMORY_CONSTRAINED ? 3 : 8;
 
 /**
  * How the pages are laid out.
@@ -249,8 +286,12 @@ const MAX_RENDER_WIDTH = 1400;
  * And a ceiling on the device pixel ratio, for the same reason. A phone at 3x
  * would otherwise draw nine times the pixels of a desktop for a page that is
  * physically smaller.
+ *
+ * Lower again where memory is the thing that runs out first: 1.5x is still
+ * above what the screen resolves once the page is scaled down to the column,
+ * and costs a little over half what 2x does.
  */
-const MAX_DEVICE_PIXEL_RATIO = 2;
+const MAX_DEVICE_PIXEL_RATIO = MEMORY_CONSTRAINED ? 1.5 : 2;
 
 /**
  * The shape assumed for a page nobody has opened yet.
@@ -434,6 +475,13 @@ interface LoadedPage {
   originalHeight: number;
   getViewport: (params: { scale: number }) => { transform: number[]; scale: number };
   getTextContent: () => Promise<{ items: unknown[]; styles?: Record<string, { ascent?: number }> }>;
+  /**
+   * Lets go of everything pdf.js decoded to draw the page - the images at
+   * their full size, on both sides of the worker. See the effect that calls
+   * it. Optional only because the object is typed here by hand; pdf.js always
+   * supplies it.
+   */
+  cleanup?: () => void;
 }
 
 interface PageTranslation {
@@ -1178,8 +1226,61 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     for (let p = first; p <= last; p++) {
       result.push(p);
     }
-    return result;
+    if (result.length <= MAX_DRAWN_PAGES) {
+      return result;
+    }
+    // Over budget - see {@link MAX_DRAWN_PAGES}. What is given up is the far
+    // end of the window rather than the page being read: it keeps that page
+    // and as much of what follows it as the budget allows, which is the
+    // direction reading goes.
+    const current = Math.max(0, result.indexOf(page));
+    const start = Math.min(current, result.length - MAX_DRAWN_PAGES);
+    return result.slice(start, start + MAX_DRAWN_PAGES);
   }, [ viewMode, page, numPages, preloadPages, shownPages ]);
+
+  /**
+   * Gives back what pdf.js decoded for the pages that have been read.
+   *
+   * Drawing a page leaves pdf.js holding everything it decoded to draw it -
+   * every image on the page at its full size, on both sides of the worker -
+   * and it holds it until the page is told to let go. Nothing was telling it:
+   * react-pdf cleans a page as it draws it, so a page drawn once and then
+   * scrolled past kept a scan's worth of bitmap for as long as the document
+   * stayed open. A handful of pages of that is hundreds of megabytes on the
+   * illustrated PDFs this is mostly used for, which is what was reloading the
+   * tab on iOS a few pages into a document.
+   *
+   * So a page is cleaned as it leaves the drawn window, and marked so it is
+   * not cleaned again on every render. Coming back to it costs nothing worth
+   * measuring: pdf.js parses the page again out of the file it is already
+   * holding, which is the same work it did the first time.
+   */
+  const cleanedPages = useRef(new Set<number>());
+
+  useEffect(() => {
+    const drawn = new Set(renderedPages);
+    for (const pageNumber of drawn) {
+      cleanedPages.current.delete(pageNumber);
+    }
+    for (const [ pageNumber, loaded ] of loadedPages) {
+      if (drawn.has(pageNumber) || cleanedPages.current.has(pageNumber)) {
+        continue;
+      }
+      cleanedPages.current.add(pageNumber);
+      try {
+        loaded.cleanup?.();
+      }
+      catch {
+        // A page that is still finishing a cancelled render refuses; pdf.js
+        // remembers and does it itself when the render is done.
+      }
+    }
+  }, [ renderedPages, loadedPages ]);
+
+  // A different document, and the pages of the last one are gone with it.
+  useEffect(() => {
+    cleanedPages.current.clear();
+  }, [target?.url]);
 
   /**
    * Which pages are worth translating: the ones actually being looked at.
@@ -1513,16 +1614,23 @@ function PdfViewerModal(props: PdfViewerModalProps) {
    *
    * It only ever grows - a viewport that gets wider raises the ceiling; one
    * that gets narrower leaves a bitmap that is simply more than is needed.
+   *
+   * Except where memory is what runs out first. There the viewport only ever
+   * changes because the phone was turned, which is neither frequent nor free
+   * of a re-layout anyway - and holding a landscape-sized bitmap for every
+   * drawn page while reading in portrait is twice the memory for pixels
+   * nothing is showing.
    */
   const [ renderWidth, setRenderWidth ] = useState(getMaxStageWidth);
 
   useEffect(() => {
-    const raise = () => setRenderWidth(
-      (current) => Math.max(current, getMaxStageWidth(), fitWidth)
-    );
-    raise();
-    window.addEventListener('resize', raise);
-    return () => window.removeEventListener('resize', raise);
+    const measure = () => setRenderWidth((current) => {
+      const wanted = Math.max(getMaxStageWidth(), fitWidth);
+      return MEMORY_CONSTRAINED ? wanted : Math.max(current, wanted);
+    });
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
   }, [fitWidth]);
 
   // Two columns for the spread, and two for a page shown beside its

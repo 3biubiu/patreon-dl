@@ -456,12 +456,36 @@ export default class GeminiTranslator {
       items = JSON.parse(cleaned);
     }
     catch (error) {
-      if (!truncated) {
+      // Without a response schema - an OpenAI-compatible server, or a proxy
+      // in front of Gemini that drops it - the model writes the JSON by hand,
+      // and the usual slip is a bare " inside a translation. Read what can be
+      // read rather than throwing the whole batch away over one quote.
+      const lenient = this.#readLeniently(cleaned);
+      if (lenient.length > 0) {
+        this.log('warn',
+          `The answer was not valid JSON (${error instanceof Error ? error.message : String(error)}); ` +
+          `read ${lenient.length} item(s) from it leniently`
+        );
+        items = lenient;
+      }
+      else if (truncated) {
+        items = this.#salvage(cleaned);
+      }
+      else {
+        const position = /position (\d+)/.exec(error instanceof Error ? error.message : '');
+        const at = position ? Number(position[1]) : 0;
+        this.log('warn',
+          'Unreadable answer near the error: ' +
+          JSON.stringify(cleaned.slice(Math.max(0, at - 120), at + 120))
+        );
+        // Retryable by splitting: a smaller batch is a shorter answer, with
+        // fewer chances to slip, and one bad answer should not fail the job.
         throw new TranslationError(
-          `Could not read the translation: ${error instanceof Error ? error.message : String(error)}`
+          `Could not read the translation: ${error instanceof Error ? error.message : String(error)}`,
+          null,
+          true
         );
       }
-      items = this.#salvage(cleaned);
     }
     if (!Array.isArray(items)) {
       throw new TranslationError('The model returned something other than a list of translations');
@@ -579,6 +603,52 @@ export default class GeminiTranslator {
       );
     }
     return translations;
+  }
+
+  /**
+   * Reads `{"i": <n>, "t": "<text>"}` items out of an answer that is not valid
+   * JSON, the way a person would: a string ends at the quote that closes its
+   * object, not at the first quote in it. So a translation with a bare " in
+   * it, a raw line break, or prose around the array still comes through.
+   */
+  #readLeniently(cleaned: string): { i: number; t: string }[] {
+    const items: { i: number; t: string }[] = [];
+    const start = /\{\s*"i"\s*:\s*"?(\d+)"?\s*,\s*"t"\s*:\s*"/g;
+    let match: RegExpExecArray | null;
+    while ((match = start.exec(cleaned)) !== null) {
+      const from = start.lastIndex;
+      let end = -1;
+      for (let k = from; k < cleaned.length; k++) {
+        const c = cleaned[k];
+        if (c === '\\') {
+          k++;
+        }
+        else if (c === '"' && /^\s*\}/.test(cleaned.slice(k + 1, k + 20))) {
+          end = k;
+          break;
+        }
+        else if (c === '{' && /^\{\s*"i"\s*:/.test(cleaned.slice(k, k + 12))) {
+          // Ran into the next item without finding this one's end.
+          break;
+        }
+      }
+      if (end < 0) {
+        continue;
+      }
+      const raw = cleaned.slice(from, end);
+      let text: string;
+      try {
+        text = JSON.parse(
+          `"${raw.replace(/(?<!\\)"/g, '\\"').replace(/\r?\n/g, '\\n')}"`
+        ) as string;
+      }
+      catch {
+        text = raw;
+      }
+      items.push({ i: Number(match[1]), t: text });
+      start.lastIndex = end + 1;
+    }
+    return items;
   }
 
   /**

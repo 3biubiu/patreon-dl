@@ -6,7 +6,8 @@ import type TranscriptionQueue from '../transcription/TranscriptionQueue.js';
 import type VocabularyStore from '../transcription/VocabularyStore.js';
 import SentenceSplitter from '../transcription/SentenceSplitter.js';
 import SubtitlePolisher from '../transcription/SubtitlePolisher.js';
-import GeminiTranslator, { DEFAULT_BASE_URL, DEFAULT_MODEL } from './GeminiTranslator.js';
+import GeminiTranslator from './GeminiTranslator.js';
+import { PROVIDER_DEFAULTS } from './LLMProtocol.js';
 import TranslationQueue from './TranslationQueue.js';
 import TranslationSettingsStore from './TranslationSettingsStore.js';
 
@@ -56,11 +57,24 @@ export function createTranslationServices(
     logger
   );
 
+  // The provider, key, model and base URL every model call is made with. Read
+  // per call so a change saved from the browser applies without a restart.
+  // The command-line config only fills in for the Gemini provider: its values
+  // are Gemini ones, and would otherwise override an OpenAI-compatible setup.
+  const connection = () => {
+    const provider = settings.getProvider();
+    const cli = provider === 'gemini' ? config : null;
+    return {
+      provider,
+      apiKey: cli?.apiKey || settings.getApiKey(),
+      model: cli?.model || settings.getModel() || PROVIDER_DEFAULTS[provider].model,
+      baseUrl: cli?.baseUrl || settings.getBaseUrl() || PROVIDER_DEFAULTS[provider].baseUrl
+    };
+  };
+
   const translator = new GeminiTranslator(
     () => ({
-      apiKey: config?.apiKey || settings.getApiKey(),
-      model: config?.model || settings.getModel() || DEFAULT_MODEL,
-      baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL,
+      ...connection(),
       proxyUrl: config?.proxyUrl !== undefined ? config.proxyUrl || null : settings.getProxyUrl(),
       prompt: settings.getPrompt(),
       disableThinking: settings.getDisableThinking(),
@@ -82,9 +96,7 @@ export function createTranslationServices(
   transcriptionQueue.setSentenceSplitter(
     new SentenceSplitter(
       () => ({
-        apiKey: config?.apiKey || settings.getApiKey(),
-        model: config?.model || settings.getModel() || DEFAULT_MODEL,
-        baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL,
+        ...connection(),
         proxyUrl: config?.proxyUrl !== undefined ?
           config.proxyUrl || null
           : settings.getProxyUrl(),
@@ -108,9 +120,7 @@ export function createTranslationServices(
   transcriptionQueue.setPolisher(
     new SubtitlePolisher(
       () => ({
-        apiKey: config?.apiKey || settings.getApiKey(),
-        model: config?.model || settings.getModel() || DEFAULT_MODEL,
-        baseUrl: config?.baseUrl || settings.getBaseUrl() || DEFAULT_BASE_URL,
+        ...connection(),
         proxyUrl: config?.proxyUrl !== undefined ?
           config.proxyUrl || null
           : settings.getProxyUrl(),

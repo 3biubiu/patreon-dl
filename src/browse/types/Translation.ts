@@ -69,6 +69,13 @@ export interface TranslationKeyDescription {
  * the server when an administrator sets it and never comes back.
  */
 export interface TranslationSettings {
+  /**
+   * Which wire protocol is spoken: Gemini's own, or the OpenAI-compatible
+   * `chat/completions` most other providers expose.
+   */
+  provider: 'gemini' | 'openai';
+  /** The base URL and model each provider falls back to when left blank. */
+  providerDefaults: Record<'gemini' | 'openai', { baseUrl: string; model: string }>;
   configured: boolean;
   /** Where the key in use comes from: saved here, or the environment. */
   source: 'file' | 'env' | null;

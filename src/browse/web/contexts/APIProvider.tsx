@@ -1004,6 +1004,7 @@ class API {
    * it alone. Passing an empty `prompt` puts the default prompt back.
    */
   async saveTranslationSettings(params: {
+    provider?: 'gemini' | 'openai';
     apiKey?: string;
     model?: string;
     baseUrl?: string;

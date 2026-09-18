@@ -25,10 +25,12 @@ import { fetch, type Response } from 'undici';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
 import { createProxyAgentFor } from '../../../utils/Proxy.js';
+import { buildLLMRequest, readLLMAnswer, type LLMProvider } from '../translation/LLMProtocol.js';
 import { alignWords, type Word } from './CaptionAssembler.js';
 import { type Segment } from './SubtitleBuilder.js';
 
 export interface SplitterSettings {
+  provider: LLMProvider;
   apiKey: string | null;
   model: string;
   /** Includes the API version, as the translator's does. */
@@ -120,14 +122,6 @@ const SYSTEM_PROMPT = [
   'reveal that follows a buildup is where a reader looks away to read, so a',
   'caption break there keeps the punchline on screen as it happens.'
 ].join('\n');
-
-interface GeminiResponse {
-  candidates?: {
-    content?: { parts?: { text?: string }[] };
-    finishReason?: string;
-  }[];
-  promptFeedback?: { blockReason?: string };
-}
 
 /** The transcript the captions were cut from, and where each one sits in it. */
 function joinSegments(segments: Segment[]) {
@@ -484,7 +478,7 @@ export default class SentenceSplitter {
   ): Promise<string> {
     // Read per call: an administrator can change the key or model between one
     // chunk and the next.
-    const { apiKey, model, baseUrl, proxyUrl, disableThinking } = this.#getSettings();
+    const { provider, apiKey, model, baseUrl, proxyUrl, disableThinking } = this.#getSettings();
     if (!apiKey) {
       throw Error('No API key');
     }
@@ -492,16 +486,18 @@ export default class SentenceSplitter {
       .replace('${maxCjk}', String(maxCjk))
       .replace('${maxLatin}', String(maxLatin));
 
-    const body = {
-      systemInstruction: { parts: [ { text: system } ] },
+    const request = buildLLMRequest({
+      provider,
+      apiKey,
+      model,
+      baseUrl: baseUrl.replace(/\/+$/, ''),
+      system: [ system ],
       contents,
-      generationConfig: {
-        // Near zero: there is one right answer here, and the freedom that
-        // helps a translation read well only invites a rewrite.
-        temperature: 0.1,
-        ...(disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {})
-      }
-    };
+      // Near zero: there is one right answer here, and the freedom that
+      // helps a translation read well only invites a rewrite.
+      temperature: 0.1,
+      disableThinking
+    });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -511,11 +507,11 @@ export default class SentenceSplitter {
     let response: Response;
     try {
       response = await fetch(
-        `${baseUrl}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`,
+        request.url,
         {
           method: 'POST',
-          headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          headers: request.headers,
+          body: JSON.stringify(request.body),
           dispatcher: this.#dispatcher(proxyUrl),
           signal: controller.signal
         }
@@ -543,20 +539,19 @@ export default class SentenceSplitter {
       throw Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
     }
 
-    let json: GeminiResponse;
+    let json: unknown;
     try {
       json = JSON.parse(text);
     }
     catch {
       throw Error(`Response was not JSON: ${text.slice(0, 200)}`);
     }
-    if (json.promptFeedback?.blockReason) {
-      throw Error(`Refused (${json.promptFeedback.blockReason})`);
+    const { answer, finishReason, blockReason } = readLLMAnswer(provider, json);
+    if (blockReason) {
+      throw Error(`Refused (${blockReason})`);
     }
-    const candidate = json.candidates?.[0];
-    const answer = (candidate?.content?.parts || []).map((p) => p.text || '').join('');
     if (!answer.trim()) {
-      throw Error(`Nothing came back (${candidate?.finishReason || 'no candidates'})`);
+      throw Error(`Nothing came back (${finishReason || 'empty answer'})`);
     }
     return answer.trim().replace(/^```(?:\w+)?\s*/i, '').replace(/```\s*$/, '');
   }

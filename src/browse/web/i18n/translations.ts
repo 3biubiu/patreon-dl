@@ -544,7 +544,7 @@ export const translations = {
   pdf_set_image_not_set_up: { en: 'Image translation is not set up', zh: '图片翻译未配置' },
   pdf_set_translate_into: { en: 'Translate into', zh: '翻译为目标语言' },
   pdf_set_translate_into_extra: { en: 'A language code - "zh-CN", "en", "ja". DeepL and Baidu are each given the code they expect for the same language. Changing it discards the page images translated into the old one.', zh: '一个语言代码——如 "zh-CN"、"en"、"ja"。DeepL 和百度会各自收到适用于同一语言的对应代码。更改此设置将丢弃已按旧语言翻译的页面图片。' },
-  pdf_set_proxy_extra: { en: 'Used by whichever engine is selected, and by the image translation. Leave blank to connect directly.', zh: '被当前选择的翻译引擎以及图片翻译所使用。留空则直接连接。' },
+  pdf_set_proxy_extra: { en: 'Used by whichever engine is selected. The image translation (Baidu) always connects directly. Leave blank to connect directly.', zh: '被当前选择的翻译引擎所使用。图片翻译（百度）始终直接连接。留空则直接连接。' },
   pdf_set_deepl_no_key_warning: { en: 'DeepL is selected but has no key - nothing will be translated until one is set.', zh: '已选择 DeepL 但未配置密钥——设置密钥前将不会进行任何翻译。' },
 
   // ---- Video player & subtitles ----

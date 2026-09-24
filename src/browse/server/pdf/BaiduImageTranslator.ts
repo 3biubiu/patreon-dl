@@ -22,8 +22,8 @@ import { dispatcherFor } from './Proxy.js';
  *
  * Baidu is the only provider here rather than one of a list: it is configured
  * by credentials, not chosen, and choosing an engine above has no effect on
- * it. The two features share the proxy and the target language and nothing
- * else.
+ * it. The two features share the target language and nothing else - not even
+ * the proxy, which is there for Google. See `Config.ts`.
  *
  * @see https://fanyi-api.baidu.com/doc/24
  */
@@ -353,14 +353,19 @@ export default class BaiduImageTranslator {
       } as any);
     }
     catch (error) {
-      // The reader leaving is not worth asking again for; anything else on
-      // the way there - a timeout, a dropped connection - is.
+      // The reader leaving is not worth asking again for, and nor is a
+      // timeout: another 45 seconds on top of the first outlasts whatever
+      // sits in front of this server, and the reader gets its error page
+      // instead. A dropped connection is quick to find out about, so that one
+      // is asked again.
       if (signal?.aborted) {
         throw error;
       }
+      if (timeout.aborted) {
+        throw new Error('Baidu did not answer in time');
+      }
       throw new RetryableError(
-        timeout.aborted ? 'Baidu did not answer in time' :
-          `Could not reach Baidu: ${error instanceof Error ? error.message : String(error)}`
+        `Could not reach Baidu: ${error instanceof Error ? error.message : String(error)}`
       );
     }
     if (!response.ok) {

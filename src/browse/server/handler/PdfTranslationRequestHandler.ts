@@ -339,6 +339,7 @@ export default class PdfTranslationRequestHandler extends Basehandler {
       }
     });
 
+    const startedAt = Date.now();
     try {
       const translated = await baiduImage.translateImage(image, to, null, abandoned.signal);
       // Remembered either way, the empty answer included: a page of
@@ -353,7 +354,8 @@ export default class PdfTranslationRequestHandler extends Basehandler {
       }
       this.log('info',
         `Translated page ${page} of "${mediaId}" as an image ` +
-        `(${translated.from} to ${translated.to}, ${(translated.image.length / 1024).toFixed(0)} kB)`
+        `(${translated.from} to ${translated.to}, ${(image.length / 1024).toFixed(0)} kB up, ` +
+        `${(translated.image.length / 1024).toFixed(0)} kB back, ${Date.now() - startedAt} ms)`
       );
       this.#sendPageImage(res, translated.image, translated.contentType, false);
     }
@@ -363,7 +365,10 @@ export default class PdfTranslationRequestHandler extends Basehandler {
         return;
       }
       const message = error instanceof Error ? error.message : 'Image translation failed';
-      this.log('warn', `Could not translate page ${page} of "${mediaId}" as an image: ${message}`);
+      this.log('warn',
+        `Could not translate page ${page} of "${mediaId}" as an image ` +
+        `after ${Date.now() - startedAt} ms: ${message}`
+      );
       if (res.headersSent) {
         return;
       }

@@ -215,12 +215,13 @@ function useNarrowViewport() {
  *
  * Baidu refuses anything over 4096 pixels on its long edge or four megabytes
  * in total, and a page drawn for a high-resolution screen is close to both. It
- * is also more than the OCR needs: two thousand pixels down the long edge is
- * about 170 dpi on A4, which reads small print comfortably, and gets a page
- * into a couple of hundred kilobytes of JPEG.
+ * is also more than the OCR needs: sixteen hundred pixels down the long edge
+ * is about 135 dpi on A4, which still reads small print, and keeps a page -
+ * which goes up to Baidu and comes back again as a picture - small enough
+ * that the transfer is not most of the wait.
  */
-const PAGE_IMAGE_MAX_EDGE = 2000;
-const PAGE_IMAGE_QUALITY = 0.85;
+const PAGE_IMAGE_MAX_EDGE = 1600;
+const PAGE_IMAGE_QUALITY = 0.8;
 
 /**
  * The thumbnail a page is checked against before it is sent. Big enough that

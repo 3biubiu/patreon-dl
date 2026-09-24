@@ -113,7 +113,11 @@ export function createPdfTranslationServices(
         config.baiduAppId : settings.baiduAppId,
       secretKey: config?.baiduAppId && config?.baiduSecretKey ?
         config.baiduSecretKey : settings.baiduSecretKey,
-      proxyUrl: resolveProxyUrl(),
+      // Direct, not through the proxy above. That one is there for Google,
+      // and sending a domestic service out through it and back - with a page
+      // image each way - was most of what made the image translation slow
+      // and flaky. `PDF_BAIDU_PROXY_URL` is for a network that needs one.
+      proxyUrl: process.env.PDF_BAIDU_PROXY_URL || null,
       targetLanguage: resolveTargetLanguage()
     }),
     logger

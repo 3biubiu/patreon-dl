@@ -18,7 +18,9 @@ import {
   SplitCellsOutlined,
   ReadOutlined,
   FullscreenOutlined,
-  FullscreenExitOutlined
+  FullscreenExitOutlined,
+  ExpandOutlined,
+  CompressOutlined
 } from "@ant-design/icons";
 import { Document, Page, pdfjs } from "react-pdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -75,10 +77,8 @@ const PDF_OPTIONS = {
  * the dialog is what zooming in means here, and the page follows the window
  * whenever it is resized.
  *
- * In fullscreen the dialog is the whole screen, so the same setting stops
- * being a dialog width and becomes a cap on the column the pages are laid out
- * in - which is the same thing from the reader's side, and keeps the buttons
- * doing what they did.
+ * In fullscreen the dialog is the whole screen and the pages take all of it,
+ * so the setting has nothing to size and the buttons are turned off.
  */
 const MIN_WIDTH_PERCENT = 40;
 const MAX_WIDTH_PERCENT = 96;
@@ -178,37 +178,6 @@ const VIEW_MODE_STORAGE_KEY = 'patreon-dl.pdfViewerViewMode';
 type ImageTranslationMode = 'off' | 'immersive' | 'side';
 
 const IMAGE_MODE_STORAGE_KEY = 'patreon-dl.pdfViewerImageMode';
-
-/**
- * A phone, by the same breakpoint the rest of the application uses.
- *
- * On a screen this narrow a fullscreen reader gives the page every pixel it
- * has: the dialog's padding, the tray's, and the width the zoom buttons cap
- * the column at are all margins around a page that is already as narrow as it
- * is ever going to be. Watched here rather than written as a media query in
- * the stylesheet because the toolbar has to know as well - buttons that set a
- * width nothing is using would be three buttons that do nothing.
- */
-const NARROW_VIEWPORT = '(max-width: 575.98px)';
-
-function useNarrowViewport() {
-  const [ narrow, setNarrow ] = useState(
-    () => window.matchMedia?.(NARROW_VIEWPORT).matches ?? false
-  );
-  useEffect(() => {
-    const query = window.matchMedia?.(NARROW_VIEWPORT);
-    if (!query) {
-      return;
-    }
-    const onChange = () => setNarrow(query.matches);
-    // Read again on the way in: the screen may have turned since the state
-    // above was worked out.
-    onChange();
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, []);
-  return narrow;
-}
 
 /**
  * The size a page is sent at.
@@ -337,8 +306,11 @@ const SCROLL_ALIGN_ATTEMPTS = 8;
 /** Where in the stage a page has to reach before it counts as the one being read. */
 const SCROLL_ACTIVE_OFFSET = 0.35;
 
-/** The gap between the two pages of a spread, in CSS pixels. Matches the SCSS. */
-const SPREAD_GAP = 16;
+/**
+ * The gap between the two pages of a spread, or a page and its translated
+ * picture, in CSS pixels. Matches the SCSS - none, so the pages fill the width.
+ */
+const SPREAD_GAP = 0;
 
 /**
  * The widest the page area can ever get: the dialog at its widest setting, and
@@ -747,10 +719,16 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const [ widthPercent, setWidthPercent ] = useState(readStoredWidthPercent);
   const [ containerWidth, setContainerWidth ] = useState(0);
   const [ resizing, setResizing ] = useState(false);
-  const [ fullscreen, setFullscreen ] = useState(false);
-  const narrowViewport = useNarrowViewport();
-  /** A phone in fullscreen: no margins anywhere, the page takes the width. */
-  const fullBleed = fullscreen && narrowViewport;
+  /**
+   * `browser` asks the browser for real fullscreen (and falls back to filling
+   * the window where it is refused); `page` only ever fills the window, with
+   * the address bar and the tabs left where they are. The layout is the same
+   * for both - they differ only in whether the browser's chrome goes too.
+   */
+  const [ fullscreenMode, setFullscreenMode ] = useState<'off' | 'browser' | 'page'>('off');
+  const fullscreen = fullscreenMode !== 'off';
+  /** Fullscreen: no margins anywhere, the pages take the whole width. */
+  const fullBleed = fullscreen;
   const [ failed, setFailed ] = useState(false);
   const [ immersive, setImmersive ] = useState(() => readStoredFlag(IMMERSIVE_STORAGE_KEY));
   const [ panelOpen, setPanelOpen ] = useState(() => readStoredFlag(PANEL_STORAGE_KEY));
@@ -1600,37 +1578,76 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   const toggleFullscreen = useCallback(() => {
     const element = modalRef.current;
     if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => setFullscreen(false));
+      void document.exitFullscreen().catch(() => setFullscreenMode('off'));
       return;
     }
-    if (fullscreen) {
+    if (fullscreenMode === 'browser') {
       // Grown by the fallback rather than by the browser.
-      setFullscreen(false);
+      setFullscreenMode('off');
       return;
     }
-    setFullscreen(true);
+    // From off, or straight over from filling the window - the layout is the
+    // same, so only the browser's chrome is left to go.
+    setFullscreenMode('browser');
     if (element?.requestFullscreen) {
       void element.requestFullscreen().catch(() => undefined);
     }
-  }, [fullscreen]);
+  }, [fullscreenMode]);
+
+  /**
+   * Fills the browser window with the reader, and nothing more: the address
+   * bar, the tabs and the rest of the desktop stay, and nothing has to be
+   * granted by the browser for it.
+   */
+  const togglePageFullscreen = useCallback(() => {
+    if (fullscreenMode === 'page') {
+      setFullscreenMode('off');
+      return;
+    }
+    if (document.fullscreenElement) {
+      // Down from the browser's fullscreen. The change it fires leaves `page`
+      // alone - see below.
+      void document.exitFullscreen().catch(() => undefined);
+    }
+    setFullscreenMode('page');
+  }, [fullscreenMode]);
 
   // The browser has its own ways out of fullscreen - Escape, the window
-  // controls - and none of them go through the button.
+  // controls - and none of them go through the button. Only the browser's
+  // own fullscreen is ended by them; filling the window is not theirs.
   useEffect(() => {
     const onChange = () => {
       if (!document.fullscreenElement) {
-        setFullscreen(false);
+        setFullscreenMode((current) => current === 'browser' ? 'off' : current);
       }
     };
     document.addEventListener('fullscreenchange', onChange);
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // Escape leaves the window-filling mode before it closes the reader, the way
+  // it leaves the browser's fullscreen. The dialog's own Escape is switched
+  // off meanwhile - see `keyboard` on the Modal.
+  useEffect(() => {
+    // The settings dialog over the reader has its own Escape, and that one
+    // should only close it.
+    if (fullscreenMode !== 'page' || settingsOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setFullscreenMode('off');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [ fullscreenMode, settingsOpen ]);
+
   const handleClose = useCallback(() => {
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => undefined);
     }
-    setFullscreen(false);
+    setFullscreenMode('off');
     onClose();
   }, [onClose]);
 
@@ -2060,15 +2077,28 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           onClick={() => changeWidth(WIDTH_STEP)}
         />
         <Tooltip
-          title={fullscreen ? t('leave_fullscreen') : t('fullscreen')}
+          title={fullscreenMode === 'page' ? t('leave_page_fullscreen') : t('page_fullscreen')}
           getPopupContainer={popupContainer}
         >
           <Button
-            type={fullscreen ? 'primary' : 'text'}
+            type={fullscreenMode === 'page' ? 'primary' : 'text'}
             size="small"
-            icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-            aria-label={fullscreen ? t('leave_fullscreen') : t('fullscreen')}
-            aria-pressed={fullscreen}
+            icon={fullscreenMode === 'page' ? <CompressOutlined /> : <ExpandOutlined />}
+            aria-label={fullscreenMode === 'page' ? t('leave_page_fullscreen') : t('page_fullscreen')}
+            aria-pressed={fullscreenMode === 'page'}
+            onClick={togglePageFullscreen}
+          />
+        </Tooltip>
+        <Tooltip
+          title={fullscreenMode === 'browser' ? t('leave_fullscreen') : t('fullscreen')}
+          getPopupContainer={popupContainer}
+        >
+          <Button
+            type={fullscreenMode === 'browser' ? 'primary' : 'text'}
+            size="small"
+            icon={fullscreenMode === 'browser' ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+            aria-label={fullscreenMode === 'browser' ? t('leave_fullscreen') : t('fullscreen')}
+            aria-pressed={fullscreenMode === 'browser'}
             onClick={toggleFullscreen}
           />
         </Tooltip>
@@ -2489,6 +2519,9 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       // next open inherits both. Reopening costs a re-read of the file, which
       // is a few byte ranges out of the browser cache.
       destroyOnHidden
+      // Escape leaves the window-filling mode first rather than closing the
+      // reader out from under it - see the listener that does that.
+      keyboard={fullscreenMode !== 'page'}
       title={toolbar}
     >
       <div

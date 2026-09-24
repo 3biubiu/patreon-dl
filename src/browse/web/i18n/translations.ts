@@ -491,6 +491,8 @@ export const translations = {
   pdf_reset_width: { en: 'Reset width', zh: '重置宽度' },
   pdf_wider: { en: 'Wider', zh: '变宽' },
   fullscreen: { en: 'Fullscreen', zh: '全屏' },
+  page_fullscreen: { en: 'Fill the window', zh: '网页全屏' },
+  leave_page_fullscreen: { en: 'Leave window fill', zh: '退出网页全屏' },
   exit_fullscreen: { en: 'Exit fullscreen', zh: '退出全屏' },
   leave_fullscreen: { en: 'Leave fullscreen', zh: '退出全屏' },
   translation: { en: 'Translation', zh: '翻译' },

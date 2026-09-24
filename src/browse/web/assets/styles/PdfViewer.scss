@@ -58,7 +58,8 @@
   &__body {
     display: flex;
     align-items: stretch;
-    gap: 0.5rem;
+    // No margin anywhere around the pages: they take all the room there is.
+    gap: 0;
     max-height: 78vh;
     overflow: hidden;
   }
@@ -80,9 +81,8 @@
     // Reserved up front, so the page is not re-rendered a second time at a
     // narrower width the moment a long document brings the scrollbar in.
     scrollbar-gutter: stable;
-    padding: 1rem;
+    padding: 0;
     background-color: var(--bs-tertiary-bg);
-    border-radius: var(--bs-border-radius);
     scrollbar-width: thin;
   }
 
@@ -98,12 +98,12 @@
 
   // One page beside the other in the spread, one under the other everywhere
   // else. The gap matches SPREAD_GAP in the component, which takes it off the
-  // width before halving it.
+  // width before halving it - none, so the pages get every pixel.
   &__deck {
     display: flex;
     align-items: flex-start;
     justify-content: center;
-    gap: 16px;
+    gap: 0;
   }
 
   &--scroll &__deck {
@@ -137,7 +137,8 @@
     flex-direction: column;
     overflow: hidden;
     background-color: var(--bs-tertiary-bg);
-    border-radius: var(--bs-border-radius);
+    // Butted against the pages with no gap, so a line is what tells them apart.
+    border-left: 1px solid var(--bs-border-color);
   }
 
   &__panel-head {
@@ -285,20 +286,19 @@
   }
 
   /**
-   * A phone in fullscreen: the page gets the width, all of it.
+   * Fullscreen, of either kind: the pages get the screen, all of it.
    *
-   * Three sets of margins stand between the page and the edge of a phone -
-   * the dialog's own padding, the tray the page sits in, and the column width
-   * the zoom buttons cap - and together they cost about a fifth of a screen
-   * that has none to spare. None of them earns its keep at this size, so all
-   * three go. The class comes from the component rather than from a media
-   * query here, because the toolbar has to agree about it: see
-   * NARROW_VIEWPORT.
+   * The dialog's own padding and the column width the zoom buttons cap are
+   * margins around a page that is meant to be as large as it can be, so both
+   * go. The class comes from the component rather than from the fullscreen
+   * one here, because the toolbar has to agree about it - the zoom buttons
+   * are turned off while it is on.
    */
   &--full-bleed {
     .ant-modal-container {
       padding-left: 0;
       padding-right: 0;
+      padding-bottom: 0;
     }
 
     // The header loses its inset with it, so it gets a little of its own back
@@ -309,11 +309,9 @@
     }
 
     .pdf-viewer__stage {
-      padding-left: 0;
-      padding-right: 0;
-      border-radius: 0;
-      // Nothing to reserve: a phone's scrollbar is drawn over the content
-      // rather than beside it.
+      // Not reserved either. The page is scaled rather than redrawn when the
+      // width changes, so a scrollbar arriving costs nothing - and a phone's
+      // is drawn over the content anyway.
       scrollbar-gutter: auto;
     }
   }
@@ -358,7 +356,8 @@
   &__slot {
     display: flex;
     align-items: flex-start;
-    gap: 16px;
+    // Also SPREAD_GAP: the page and its translated picture are two columns.
+    gap: 0;
   }
 
   // The hidden ones must take no room at all, so the flex layout of the deck
@@ -384,15 +383,17 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
-    border-radius: var(--bs-border-radius-sm);
     background-color: var(--bs-body-bg);
     box-shadow: 0 2px 12px rgb(0 0 0 / 25%);
   }
 
+  // Stretched to the box, like the overlay below: the box already has the
+  // page's own shape, and `contain` would letterbox it by a rounding pixel.
   &__side-image {
+    display: block;
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: fill;
   }
 
   // And the same picture laid over the page instead. Stretched rather than

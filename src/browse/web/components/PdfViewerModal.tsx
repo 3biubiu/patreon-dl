@@ -927,16 +927,30 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           return;
         }
         pageCanvases.current.delete(pageNumber);
-        // Scrolled out of the window and unmounted. Whatever was drawn is
-        // gone, so the page counts as unpainted again - otherwise coming back
-        // to it would leave it in a state where it can never be photographed.
-        setPaintedPages((current) => {
-          if (!current.has(pageNumber)) {
-            return current;
+        // Not necessarily unmounted. react-pdf hands its canvas a ref made
+        // afresh by `mergeRefs` on every render, so React detaches and
+        // reattaches it - null, then the same canvas - every time the reader
+        // re-renders, which while scrolling is constantly. Taking that as an
+        // unmount wiped the painted mark off every page drawn ahead of the
+        // one on screen, and those are never drawn again, so scrolling onto
+        // them never sent them. So it is only believed once the commit is
+        // over and the canvas has still not come back.
+        queueMicrotask(() => {
+          if (pageCanvases.current.has(pageNumber)) {
+            return;
           }
-          const next = new Map(current);
-          next.delete(pageNumber);
-          return next;
+          // Scrolled out of the window and unmounted. Whatever was drawn is
+          // gone, so the page counts as unpainted again - otherwise coming
+          // back to it would leave it in a state where it can never be
+          // photographed.
+          setPaintedPages((current) => {
+            if (!current.has(pageNumber)) {
+              return current;
+            }
+            const next = new Map(current);
+            next.delete(pageNumber);
+            return next;
+          });
         });
       };
       canvasCallbacks.current.set(pageNumber, callback);

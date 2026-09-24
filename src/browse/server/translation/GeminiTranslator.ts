@@ -4,11 +4,20 @@ import type Logger from '../../../utils/logging/Logger.js';
 import { createProxyAgentFor } from '../../../utils/Proxy.js';
 import { type TranslationKeyDescription } from '../../types/Translation.js';
 import { buildSystemPrompt } from './TranslationPrompt.js';
+import {
+  buildLLMRequest,
+  buildModelListRequest,
+  PROVIDER_DEFAULTS,
+  providerLabel,
+  readLLMAnswer,
+  readModelNames,
+  type LLMProvider
+} from './LLMProtocol.js';
 
 export { type TranslationKeyDescription } from '../../types/Translation.js';
 
-export const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
-export const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+export const DEFAULT_BASE_URL = PROVIDER_DEFAULTS.gemini.baseUrl;
+export const DEFAULT_MODEL = PROVIDER_DEFAULTS.gemini.model;
 /**
  * Gemini is not reachable from everywhere, so translation goes through a local
  * proxy unless one is configured otherwise or the setting is cleared. This is
@@ -58,6 +67,7 @@ export interface TranslateBatchResult {
 }
 
 export interface TranslatorSettings {
+  provider: LLMProvider;
   apiKey: string | null;
   model: string;
   baseUrl: string;
@@ -128,14 +138,6 @@ const RESPONSE_SCHEMA = {
   }
 };
 
-interface GeminiResponse {
-  candidates?: {
-    content?: { parts?: { text?: string }[] };
-    finishReason?: string;
-  }[];
-  promptFeedback?: { blockReason?: string };
-}
-
 /**
  * Translates batches of subtitle lines through Gemini's `generateContent`.
  *
@@ -170,7 +172,7 @@ export default class GeminiTranslator {
     const settings = this.#getSettings();
     if (!settings.apiKey) {
       throw new TranslationError(
-        'No Gemini API key is configured. An administrator can set one in the ' +
+        'No translation API key is configured. An administrator can set one in the ' +
         'translation settings.'
       );
     }
@@ -186,43 +188,49 @@ export default class GeminiTranslator {
    * job, after the earlier batches have already been paid for.
    */
   static async describeKey(
+    provider: LLMProvider,
     apiKey: string,
-    baseUrl = DEFAULT_BASE_URL,
-    model = DEFAULT_MODEL,
+    baseUrl = PROVIDER_DEFAULTS[provider].baseUrl,
+    model = PROVIDER_DEFAULTS[provider].model,
     proxyUrl: string | null = DEFAULT_PROXY_URL,
     signal?: AbortSignal
   ): Promise<TranslationKeyDescription> {
-    const url = `${baseUrl.replace(/\/+$/, '')}/models?pageSize=1000`;
+    const label = providerLabel(provider);
+    const { url, headers } = buildModelListRequest(provider, apiKey, baseUrl);
     let response: Response;
     try {
       // Through the same proxy the translations themselves go through, so
       // that a key verified here is a key that will work there.
       response = await fetch(url, {
-        headers: { 'x-goog-api-key': apiKey },
+        headers,
         dispatcher: dispatcherFor(proxyUrl),
         signal
       });
     }
     catch (error) {
       throw new TranslationError(
-        `Could not reach Gemini${proxyUrl ? ` through ${proxyUrl}` : ''}: ` +
+        `Could not reach ${label}${proxyUrl ? ` through ${proxyUrl}` : ''}: ` +
         describeFetchError(error)
       );
     }
-    if (response.status === 400 || response.status === 401 || response.status === 403) {
-      throw new TranslationError('Gemini rejected this API key', response.status);
+    if (response.status === 401 || response.status === 403 ||
+        (provider === 'gemini' && response.status === 400)) {
+      throw new TranslationError(`${label} rejected this API key`, response.status);
+    }
+    if (provider === 'openai' && (response.status === 404 || response.status === 405)) {
+      // Not every OpenAI-compatible server lists its models. The key was not
+      // refused, which is all that can be learned here.
+      return { modelCount: 0, modelFound: false };
     }
     if (!response.ok) {
-      throw new TranslationError(`Gemini returned HTTP ${response.status}`, response.status);
+      throw new TranslationError(`${label} returned HTTP ${response.status}`, response.status);
     }
-    const json = await response.json() as { models?: { name?: string }[] };
-    const models = json.models || [];
-    // Names come back as `models/gemini-...`, so compare on the last segment
-    // and let either form be typed into the settings form.
+    const names = readModelNames(provider, await response.json());
+    // Let either `models/gemini-...` or the bare name be typed into the form.
     const wanted = model.replace(/^models\//, '');
     return {
-      modelCount: models.length,
-      modelFound: models.some((m) => (m.name || '').replace(/^models\//, '') === wanted)
+      modelCount: names.length,
+      modelFound: names.includes(wanted)
     };
   }
 
@@ -269,10 +277,11 @@ export default class GeminiTranslator {
   ): Promise<Map<number, string>> {
     // Read once per call: an administrator can change the key, model or
     // prompt between one batch and the next.
-    const { apiKey, model, baseUrl, proxyUrl, prompt, disableThinking, vocabulary } =
+    const { provider, apiKey, model, baseUrl, proxyUrl, prompt, disableThinking, vocabulary } =
       this.#settings();
+    const label = providerLabel(provider);
 
-    const systemParts: { text: string }[] = [ { text: buildSystemPrompt(prompt) } ];
+    const systemParts: string[] = [ buildSystemPrompt(prompt) ];
     if (vocabulary.length > 0) {
       // The same terms the transcription was biased with, here as rules about
       // what they become in Chinese. Without this a term the vocabulary
@@ -305,7 +314,7 @@ export default class GeminiTranslator {
         parts.push('', 'Terms to keep in English:', ...keepEnglish);
       }
       parts.push('</terminology>');
-      systemParts.push({ text: parts.join('\n') });
+      systemParts.push(parts.join('\n'));
     }
 
     const said: string[] = [];
@@ -320,22 +329,23 @@ export default class GeminiTranslator {
     }
     said.push(JSON.stringify(lines));
 
-    const body: Record<string, unknown> = {
-      systemInstruction: { parts: systemParts },
+    // `maxOutputTokens` is deliberately not sent. Gemini defaults it to the
+    // model's own ceiling, and a number guessed here would either truncate a
+    // large batch or be rejected by a model whose ceiling is lower than the
+    // guess.
+    const request = buildLLMRequest({
+      provider,
+      apiKey: apiKey as string,
+      model,
+      baseUrl,
+      system: systemParts,
       contents: [ { role: 'user', parts: [ { text: said.join('') } ] } ],
-      generationConfig: {
-        // Low, not zero: subtitles read better for a little freedom, and zero
-        // leaves a model that has started repeating itself doing so.
-        temperature: 0.3,
-        responseMimeType: 'application/json',
-        responseSchema: RESPONSE_SCHEMA,
-        // `maxOutputTokens` is deliberately not sent. Gemini defaults it to
-        // the model's own ceiling, and a number guessed here would either
-        // truncate a large batch or be rejected by a model whose ceiling is
-        // lower than the guess.
-        ...(disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {})
-      }
-    };
+      // Low, not zero: subtitles read better for a little freedom, and zero
+      // leaves a model that has started repeating itself doing so.
+      temperature: 0.3,
+      disableThinking,
+      responseSchema: RESPONSE_SCHEMA
+    });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -345,11 +355,11 @@ export default class GeminiTranslator {
     let response: Response;
     try {
       response = await fetch(
-        `${baseUrl}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`,
+        request.url,
         {
           method: 'POST',
-          headers: { 'x-goog-api-key': apiKey as string, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          headers: request.headers,
+          body: JSON.stringify(request.body),
           dispatcher: dispatcherFor(proxyUrl, this.#logger),
           signal: controller.signal
         }
@@ -379,20 +389,20 @@ export default class GeminiTranslator {
       const detail = this.#extractError(text);
       if (response.status === 400 || response.status === 401 || response.status === 403) {
         throw new TranslationError(
-          `Gemini rejected the request (HTTP ${response.status}): ${detail}`,
+          `${label} rejected the request (HTTP ${response.status}): ${detail}`,
           response.status
         );
       }
       if (response.status === 404) {
         throw new TranslationError(
-          `Gemini has no model "${model}" for this key (HTTP 404): ${detail}`,
+          `${label} has no model "${model}" for this key (HTTP 404): ${detail}`,
           response.status
         );
       }
       throw new TranslationError(`HTTP ${response.status}: ${detail}`, response.status);
     }
 
-    let json: GeminiResponse;
+    let json: unknown;
     try {
       json = JSON.parse(text);
     }
@@ -400,17 +410,14 @@ export default class GeminiTranslator {
       throw new TranslationError(`Response was not JSON: ${text.slice(0, 200)}`);
     }
 
-    if (json.promptFeedback?.blockReason) {
-      throw new TranslationError(
-        `Gemini refused this batch (${json.promptFeedback.blockReason})`
-      );
+    const { answer, finishReason, blockReason } = readLLMAnswer(provider, json);
+    if (blockReason) {
+      throw new TranslationError(`${label} refused this batch (${blockReason})`);
     }
-    const candidate = json.candidates?.[0];
-    const answer = (candidate?.content?.parts || []).map((p) => p.text || '').join('');
     if (!answer.trim()) {
-      const reason = candidate?.finishReason || 'no candidates';
+      const reason = finishReason || 'empty answer';
       throw new TranslationError(
-        `Gemini returned nothing (${reason})`,
+        `${label} returned nothing (${reason})`,
         null,
         // A batch cut off at the output ceiling is exactly the case a smaller
         // batch fixes.
@@ -419,7 +426,7 @@ export default class GeminiTranslator {
     }
     // `MAX_TOKENS` with text is a truncated array. Whatever parsed is kept and
     // the caller repairs the tail, rather than paying for the batch twice.
-    return this.#parse(answer, candidate?.finishReason === 'MAX_TOKENS', lines);
+    return this.#parse(answer, finishReason === 'MAX_TOKENS', lines);
   }
 
   /**
@@ -449,15 +456,39 @@ export default class GeminiTranslator {
       items = JSON.parse(cleaned);
     }
     catch (error) {
-      if (!truncated) {
+      // Without a response schema - an OpenAI-compatible server, or a proxy
+      // in front of Gemini that drops it - the model writes the JSON by hand,
+      // and the usual slip is a bare " inside a translation. Read what can be
+      // read rather than throwing the whole batch away over one quote.
+      const lenient = this.#readLeniently(cleaned);
+      if (lenient.length > 0) {
+        this.log('warn',
+          `The answer was not valid JSON (${error instanceof Error ? error.message : String(error)}); ` +
+          `read ${lenient.length} item(s) from it leniently`
+        );
+        items = lenient;
+      }
+      else if (truncated) {
+        items = this.#salvage(cleaned);
+      }
+      else {
+        const position = /position (\d+)/.exec(error instanceof Error ? error.message : '');
+        const at = position ? Number(position[1]) : 0;
+        this.log('warn',
+          'Unreadable answer near the error: ' +
+          JSON.stringify(cleaned.slice(Math.max(0, at - 120), at + 120))
+        );
+        // Retryable by splitting: a smaller batch is a shorter answer, with
+        // fewer chances to slip, and one bad answer should not fail the job.
         throw new TranslationError(
-          `Could not read the translation: ${error instanceof Error ? error.message : String(error)}`
+          `Could not read the translation: ${error instanceof Error ? error.message : String(error)}`,
+          null,
+          true
         );
       }
-      items = this.#salvage(cleaned);
     }
     if (!Array.isArray(items)) {
-      throw new TranslationError('Gemini returned something other than a list of translations');
+      throw new TranslationError('The model returned something other than a list of translations');
     }
 
     /** The reported index and text of one item, however the model typed them. */
@@ -572,6 +603,52 @@ export default class GeminiTranslator {
       );
     }
     return translations;
+  }
+
+  /**
+   * Reads `{"i": <n>, "t": "<text>"}` items out of an answer that is not valid
+   * JSON, the way a person would: a string ends at the quote that closes its
+   * object, not at the first quote in it. So a translation with a bare " in
+   * it, a raw line break, or prose around the array still comes through.
+   */
+  #readLeniently(cleaned: string): { i: number; t: string }[] {
+    const items: { i: number; t: string }[] = [];
+    const start = /\{\s*"i"\s*:\s*"?(\d+)"?\s*,\s*"t"\s*:\s*"/g;
+    let match: RegExpExecArray | null;
+    while ((match = start.exec(cleaned)) !== null) {
+      const from = start.lastIndex;
+      let end = -1;
+      for (let k = from; k < cleaned.length; k++) {
+        const c = cleaned[k];
+        if (c === '\\') {
+          k++;
+        }
+        else if (c === '"' && /^\s*\}/.test(cleaned.slice(k + 1, k + 20))) {
+          end = k;
+          break;
+        }
+        else if (c === '{' && /^\{\s*"i"\s*:/.test(cleaned.slice(k, k + 12))) {
+          // Ran into the next item without finding this one's end.
+          break;
+        }
+      }
+      if (end < 0) {
+        continue;
+      }
+      const raw = cleaned.slice(from, end);
+      let text: string;
+      try {
+        text = JSON.parse(
+          `"${raw.replace(/(?<!\\)"/g, '\\"').replace(/\r?\n/g, '\\n')}"`
+        ) as string;
+      }
+      catch {
+        text = raw;
+      }
+      items.push({ i: Number(match[1]), t: text });
+      start.lastIndex = end + 1;
+    }
+    return items;
   }
 
   /**

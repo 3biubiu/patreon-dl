@@ -3,6 +3,7 @@ import path from 'path';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import { type Logger } from '../../../utils/logging/index.js';
 import { DEFAULT_PROXY_URL } from './GeminiTranslator.js';
+import { isLLMProvider, type LLMProvider } from './LLMProtocol.js';
 import { DEFAULT_SEGMENTER_OPTIONS, MAX_CJK_RANGE, MAX_LATIN_RANGE } from './SubtitleSegmenter.js';
 
 /**
@@ -24,7 +25,9 @@ export const BATCH_CHARACTERS_RANGE = { min: 500, max: 40000 };
 export const BATCH_LINES_RANGE = { min: 10, max: 1000 };
 
 interface SettingsFile {
-  /** Gemini API key. Never leaves the server. */
+  /** Which wire protocol the key, model and base URL below speak. */
+  provider: LLMProvider;
+  /** API key for `provider`. Never leaves the server. */
   apiKey: string | null;
   model: string | null;
   baseUrl: string | null;
@@ -64,6 +67,7 @@ interface SettingsFile {
 }
 
 const EMPTY: SettingsFile = {
+  provider: 'gemini',
   apiKey: null,
   model: null,
   baseUrl: null,
@@ -113,6 +117,9 @@ export default class TranslationSettingsStore {
       try {
         const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Partial<SettingsFile>;
         return new TranslationSettingsStore(filePath, {
+          // Absent in files written before OpenAI-compatible APIs were
+          // supported, all of which were Gemini.
+          provider: isLLMProvider(parsed.provider) ? parsed.provider : 'gemini',
           apiKey: parsed.apiKey || null,
           model: parsed.model || null,
           baseUrl: parsed.baseUrl || null,
@@ -140,13 +147,32 @@ export default class TranslationSettingsStore {
     return new TranslationSettingsStore(filePath, { ...EMPTY }, logger);
   }
 
+  getProvider(): LLMProvider {
+    return this.#data.provider;
+  }
+
+  /** The environment variables that stand in for the saved values of `provider`. */
+  #env() {
+    return this.#data.provider === 'openai' ?
+      {
+        apiKey: process.env.OPENAI_API_KEY,
+        model: process.env.OPENAI_MODEL,
+        baseUrl: process.env.OPENAI_BASE_URL
+      }
+      : {
+        apiKey: process.env.GEMINI_API_KEY,
+        model: process.env.GEMINI_MODEL,
+        baseUrl: process.env.GEMINI_BASE_URL
+      };
+  }
+
   /**
    * The key in use, preferring what an administrator saved over the
    * environment. The environment remains the way to configure a deployment
    * that has no one to click anything.
    */
   getApiKey(): string | null {
-    return this.#data.apiKey || process.env.GEMINI_API_KEY || null;
+    return this.#data.apiKey || this.#env().apiKey || null;
   }
 
   /** Where the key in use came from, so the browser can say so. */
@@ -154,15 +180,15 @@ export default class TranslationSettingsStore {
     if (this.#data.apiKey) {
       return 'file';
     }
-    return process.env.GEMINI_API_KEY ? 'env' : null;
+    return this.#env().apiKey ? 'env' : null;
   }
 
   getModel(): string | null {
-    return this.#data.model || process.env.GEMINI_MODEL || null;
+    return this.#data.model || this.#env().model || null;
   }
 
   getBaseUrl(): string | null {
-    return this.#data.baseUrl || process.env.GEMINI_BASE_URL || null;
+    return this.#data.baseUrl || this.#env().baseUrl || null;
   }
 
   /**
@@ -247,6 +273,7 @@ export default class TranslationSettingsStore {
    * passing `null` for `prompt` puts the default prompt back.
    */
   update(params: {
+    provider?: LLMProvider;
     apiKey?: string | null;
     model?: string | null;
     baseUrl?: string | null;
@@ -261,6 +288,9 @@ export default class TranslationSettingsStore {
     maxLineCjk?: number | null;
     maxLineLatin?: number | null;
   }) {
+    if (params.provider !== undefined) {
+      this.#data.provider = params.provider;
+    }
     if (params.apiKey !== undefined) {
       this.#data.apiKey = params.apiKey || null;
     }

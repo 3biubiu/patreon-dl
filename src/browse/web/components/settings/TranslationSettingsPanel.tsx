@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Popconfirm, Space, Switch, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Popconfirm, Radio, Space, Switch, Tag } from "antd";
 import { useAPI } from "../../contexts/APIProvider";
 import { LoadingBlock } from "../Loading";
 import { useLanguage } from "../../contexts/LanguageProvider";
 import { type TranslationSettings as Settings } from "../../../types/Translation";
 
 interface FormValues {
+  provider: Settings['provider'];
   apiKey: string;
   model: string;
   baseUrl: string;
@@ -56,12 +57,14 @@ function TranslationSettingsPanel() {
   const [ form ] = Form.useForm<FormValues>();
   const batchCharacters = Form.useWatch('batchCharacters', form);
   const batchLines = Form.useWatch('batchLines', form);
+  const provider = Form.useWatch('provider', form);
   const { t } = useLanguage();
 
   const apply = useCallback((result: Settings) => {
     setSettings(result);
     setPrompt(result.prompt);
     form.setFieldsValue({
+      provider: result.provider,
       apiKey: '',
       model: result.model,
       baseUrl: result.baseUrl,
@@ -110,6 +113,7 @@ function TranslationSettingsPanel() {
 
   const handleSubmit = useCallback(async (values: FormValues) => {
     const params: Parameters<typeof api.saveTranslationSettings>[0] = {
+      provider: values.provider,
       model: values.model,
       baseUrl: values.baseUrl,
       proxyUrl: values.proxyUrl ?? '',
@@ -131,9 +135,33 @@ function TranslationSettingsPanel() {
     await save(params, t('settings_saved'));
   }, [ save, t ]);
 
+  /**
+   * Swaps the model and base URL for the new provider's defaults, unless they
+   * were changed from the old provider's - a Gemini URL is never what an
+   * OpenAI-compatible server wants, but a URL someone typed might be.
+   */
+  const handleProviderChange = (next: Settings['provider']) => {
+    if (!settings) {
+      return;
+    }
+    const previous = next === 'openai' ? 'gemini' : 'openai';
+    const { model, baseUrl } = form.getFieldsValue([ 'model', 'baseUrl' ]);
+    const defaults = settings.providerDefaults;
+    if (!model || model === defaults[previous].model) {
+      form.setFieldValue('model', defaults[next].model);
+    }
+    if (!baseUrl || baseUrl.replace(/\/+$/, '') === defaults[previous].baseUrl) {
+      form.setFieldValue('baseUrl', defaults[next].baseUrl);
+    }
+  };
+
   if (!settings) {
     return error ? <Alert type="error" title={error} showIcon /> : <LoadingBlock />;
   }
+
+  const currentProvider = provider ?? settings.provider;
+  const switchingProvider = currentProvider !== settings.provider;
+  const isOpenAI = currentProvider === 'openai';
 
   const fromEnvironment = settings.source === 'env';
   const estimate = callsPerHour(
@@ -143,7 +171,7 @@ function TranslationSettingsPanel() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-      <Card title="Gemini">
+      <Card title={t(settings.provider === 'openai' ? 'provider_openai' : 'provider_gemini')}>
         <Descriptions column={1} size="small">
           <Descriptions.Item label={t('status')}>
             {
@@ -151,7 +179,7 @@ function TranslationSettingsPanel() {
                 <Tag color="green">{t('configured')}</Tag>
                 : <Tag color="orange">{t('no_api_key')}</Tag>
             }
-            {fromEnvironment ? <Tag>{t('from_gemini_env')}</Tag> : null}
+            {fromEnvironment ? <Tag>{t(settings.provider === 'openai' ? 'from_openai_env' : 'from_gemini_env')}</Tag> : null}
           </Descriptions.Item>
           <Descriptions.Item label={t('proxy')}>
             {settings.proxyUrl || t('none_connecting_straight_out')}
@@ -213,17 +241,39 @@ function TranslationSettingsPanel() {
           disabled={submitting}
         >
           <Form.Item
+            name="provider"
+            label={t('api_provider')}
+            extra={t('api_provider_extra')}
+          >
+            <Radio.Group
+              optionType="button"
+              onChange={(e) => handleProviderChange(e.target.value)}
+              options={[
+                { value: 'gemini', label: t('provider_gemini') },
+                { value: 'openai', label: t('provider_openai') }
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item
             name="apiKey"
             label={t('api_key')}
             extra={
-              settings.configured ?
+              settings.configured && !switchingProvider ?
                 fromEnvironment ?
                   t('env_key_precedence')
                   : t('saved_key_blank_to_keep')
-                : t('gemini_create_desc')
+                : t(isOpenAI ? 'openai_create_desc' : 'gemini_create_desc')
             }
           >
-            <Input.Password autoComplete="off" placeholder={settings.configured ? t('saved_placeholder') : t('paste_gemini_key')} />
+            <Input.Password
+              autoComplete="off"
+              placeholder={
+                settings.configured && !switchingProvider ?
+                  t('saved_placeholder')
+                  : t(isOpenAI ? 'paste_openai_key' : 'paste_gemini_key')
+              }
+            />
           </Form.Item>
 
           <Form.Item
@@ -231,11 +281,15 @@ function TranslationSettingsPanel() {
             label={t('model')}
             extra={t('model_extra_any')}
           >
-            <Input placeholder="gemini-3.5-flash-lite" />
+            <Input placeholder={settings.providerDefaults[currentProvider].model} />
           </Form.Item>
 
-          <Form.Item name="baseUrl" label={t('api_base_url')}>
-            <Input placeholder="https://generativelanguage.googleapis.com/v1beta" />
+          <Form.Item
+            name="baseUrl"
+            label={t('api_base_url')}
+            extra={isOpenAI ? t('openai_base_url_extra') : undefined}
+          >
+            <Input placeholder={settings.providerDefaults[currentProvider].baseUrl} />
           </Form.Item>
 
           <Form.Item
@@ -274,7 +328,7 @@ function TranslationSettingsPanel() {
             name="disableThinking"
             label={t('disable_thinking')}
             valuePropName="checked"
-            extra={t('disable_thinking_extra')}
+            extra={isOpenAI ? t('disable_thinking_gemini_only') : t('disable_thinking_extra')}
           >
             <Switch />
           </Form.Item>

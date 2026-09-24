@@ -4,7 +4,8 @@ import Basehandler from './BaseHandler.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type TranslationQueue from '../translation/TranslationQueue.js';
 import type TranslationSettingsStore from '../translation/TranslationSettingsStore.js';
-import GeminiTranslator, { DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_PROXY_URL } from '../translation/GeminiTranslator.js';
+import GeminiTranslator, { DEFAULT_PROXY_URL } from '../translation/GeminiTranslator.js';
+import { isLLMProvider, PROVIDER_DEFAULTS } from '../translation/LLMProtocol.js';
 import { DEFAULT_PROMPT } from '../translation/TranslationPrompt.js';
 import { type TranslationSettings } from '../../types/Translation.js';
 
@@ -38,7 +39,7 @@ export default class TranslationAPIRequestHandler extends Basehandler {
   /** Why translation cannot run, or `null` when it can. */
   #getBlockedReason(): string | null {
     if (!this.#settings.getApiKey()) {
-      return 'No Gemini API key is configured. An administrator can set one in the ' +
+      return 'No translation API key is configured. An administrator can set one in the ' +
         'translation settings.';
     }
     return null;
@@ -56,11 +57,14 @@ export default class TranslationAPIRequestHandler extends Basehandler {
    */
   async handleGetSettingsRequest(_req: Request, res: Response) {
     const apiKey = this.#settings.getApiKey();
+    const provider = this.#settings.getProvider();
     const settings: TranslationSettings = {
+      provider,
+      providerDefaults: PROVIDER_DEFAULTS,
       configured: !!apiKey,
       source: this.#settings.getApiKeySource(),
-      model: this.#settings.getModel() || DEFAULT_MODEL,
-      baseUrl: this.#settings.getBaseUrl() || DEFAULT_BASE_URL,
+      model: this.#settings.getModel() || PROVIDER_DEFAULTS[provider].model,
+      baseUrl: this.#settings.getBaseUrl() || PROVIDER_DEFAULTS[provider].baseUrl,
       proxyUrl: this.#settings.getProxyUrl() || '',
       defaultProxyUrl: DEFAULT_PROXY_URL,
       prompt: this.#settings.getPrompt() || DEFAULT_PROMPT,
@@ -80,7 +84,7 @@ export default class TranslationAPIRequestHandler extends Basehandler {
     if (apiKey) {
       try {
         settings.key = await GeminiTranslator.describeKey(
-          apiKey, settings.baseUrl, settings.model, settings.proxyUrl || null
+          provider, apiKey, settings.baseUrl, settings.model, settings.proxyUrl || null
         );
       }
       catch (error) {
@@ -100,6 +104,16 @@ export default class TranslationAPIRequestHandler extends Basehandler {
   async handleSaveSettingsRequest(req: Request, res: Response) {
     const body = (req.body || {}) as Record<string, unknown>;
     const patch: Parameters<TranslationSettingsStore['update']>[0] = {};
+
+    if (body.provider !== undefined) {
+      if (!isLLMProvider(body.provider)) {
+        res.status(400).json({ error: `Unknown provider ${JSON.stringify(body.provider)}` });
+        return;
+      }
+      patch.provider = body.provider;
+    }
+    const provider = patch.provider || this.#settings.getProvider();
+    const switchingProvider = provider !== this.#settings.getProvider();
 
     if (body.model !== undefined) {
       patch.model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
@@ -157,8 +171,14 @@ export default class TranslationAPIRequestHandler extends Basehandler {
         patch.apiKey = null;
       }
       else {
-        const baseUrl = patch.baseUrl || this.#settings.getBaseUrl() || DEFAULT_BASE_URL;
-        const model = patch.model || this.#settings.getModel() || DEFAULT_MODEL;
+        // A key saved alongside a change of provider is checked against the
+        // new provider's defaults, not the old provider's stored values.
+        const baseUrl = patch.baseUrl ||
+          (switchingProvider ? null : this.#settings.getBaseUrl()) ||
+          PROVIDER_DEFAULTS[provider].baseUrl;
+        const model = patch.model ||
+          (switchingProvider ? null : this.#settings.getModel()) ||
+          PROVIDER_DEFAULTS[provider].model;
         // Through whatever proxy is being saved alongside, not the stored one:
         // the two arrive in the same request, and checking the key against the
         // old proxy would reject a key that is about to work.
@@ -166,7 +186,7 @@ export default class TranslationAPIRequestHandler extends Basehandler {
           patch.proxyUrl || null
           : this.#settings.getProxyUrl();
         try {
-          await GeminiTranslator.describeKey(apiKey, baseUrl, model, proxyUrl);
+          await GeminiTranslator.describeKey(provider, apiKey, baseUrl, model, proxyUrl);
         }
         catch (error) {
           res.status(400).json({
@@ -176,6 +196,19 @@ export default class TranslationAPIRequestHandler extends Basehandler {
         }
         patch.apiKey = apiKey;
       }
+    }
+    else if (switchingProvider) {
+      // The stored key belongs to the other provider and would only be
+      // rejected there. Dropped, so the form asks for one instead.
+      patch.apiKey = null;
+    }
+    // A value equal to the provider's own default is stored as "use the
+    // default", so a later switch of provider does not carry it across.
+    if (patch.baseUrl && patch.baseUrl.replace(/\/+$/, '') === PROVIDER_DEFAULTS[provider].baseUrl) {
+      patch.baseUrl = null;
+    }
+    if (patch.model && patch.model === PROVIDER_DEFAULTS[provider].model) {
+      patch.model = null;
     }
 
     this.#settings.update(patch);

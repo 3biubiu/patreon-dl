@@ -34,6 +34,8 @@ const SYSTEM_TEMPLATE = [
   '- Do not add an ellipsis to a line that continues into the next one.',
   '- Return the translation only: no notes, no pinyin, no original text.',
   '- A line that is already Simplified Chinese comes back unchanged.',
+  '- Quote with Chinese quotation marks (“ ”) inside a translation, never with a',
+  '  straight double quote: the answer is JSON, and a bare " breaks it.',
   '</rules>',
   '',
   '<preferences>',

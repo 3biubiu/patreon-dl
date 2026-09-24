@@ -23,9 +23,11 @@ import { fetch, type Response } from 'undici';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
 import type Logger from '../../../utils/logging/Logger.js';
 import { createProxyAgentFor } from '../../../utils/Proxy.js';
+import { buildLLMRequest, readLLMAnswer, type LLMProvider } from '../translation/LLMProtocol.js';
 import { type Segment } from './SubtitleBuilder.js';
 
 export interface PolisherSettings {
+  provider: LLMProvider;
   apiKey: string | null;
   model: string;
   /** Includes the API version, as the translator's does. */
@@ -77,14 +79,6 @@ const SYSTEM_PROMPT = [
   'Output a JSON object mapping every input key to its corrected text, and',
   'nothing else - no explanation, no markdown fences.'
 ].join('\n');
-
-interface GeminiResponse {
-  candidates?: {
-    content?: { parts?: { text?: string }[] };
-    finishReason?: string;
-  }[];
-  promptFeedback?: { blockReason?: string };
-}
 
 /**
  * Bigram Dice similarity of two strings, 0 to 1. Case-sensitive on purpose:
@@ -312,21 +306,23 @@ export default class SubtitlePolisher {
   ): Promise<string> {
     // Read per call: an administrator can change the key or model between one
     // batch and the next.
-    const { apiKey, model, baseUrl, proxyUrl, disableThinking } = this.#getSettings();
+    const { provider, apiKey, model, baseUrl, proxyUrl, disableThinking } = this.#getSettings();
     if (!apiKey) {
       throw Error('No API key');
     }
 
-    const body = {
-      systemInstruction: { parts: [ { text: SYSTEM_PROMPT } ] },
+    const request = buildLLMRequest({
+      provider,
+      apiKey,
+      model,
+      baseUrl: baseUrl.replace(/\/+$/, ''),
+      system: [ SYSTEM_PROMPT ],
       contents,
-      generationConfig: {
-        // Low, for the same reason the splitter's is: the freedom that helps
-        // a translation read well only invites rewrites here.
-        temperature: 0.1,
-        ...(disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {})
-      }
-    };
+      // Low, for the same reason the splitter's is: the freedom that helps
+      // a translation read well only invites rewrites here.
+      temperature: 0.1,
+      disableThinking
+    });
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -336,11 +332,11 @@ export default class SubtitlePolisher {
     let response: Response;
     try {
       response = await fetch(
-        `${baseUrl}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`,
+        request.url,
         {
           method: 'POST',
-          headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+          headers: request.headers,
+          body: JSON.stringify(request.body),
           dispatcher: this.#dispatcher(proxyUrl),
           signal: controller.signal
         }
@@ -368,20 +364,19 @@ export default class SubtitlePolisher {
       throw Error(`HTTP ${response.status}: ${text.slice(0, 200)}`);
     }
 
-    let json: GeminiResponse;
+    let json: unknown;
     try {
       json = JSON.parse(text);
     }
     catch {
       throw Error(`Response was not JSON: ${text.slice(0, 200)}`);
     }
-    if (json.promptFeedback?.blockReason) {
-      throw Error(`Refused (${json.promptFeedback.blockReason})`);
+    const { answer, finishReason, blockReason } = readLLMAnswer(provider, json);
+    if (blockReason) {
+      throw Error(`Refused (${blockReason})`);
     }
-    const candidate = json.candidates?.[0];
-    const answer = (candidate?.content?.parts || []).map((p) => p.text || '').join('');
     if (!answer.trim()) {
-      throw Error(`Nothing came back (${candidate?.finishReason || 'no candidates'})`);
+      throw Error(`Nothing came back (${finishReason || 'empty answer'})`);
     }
     return answer.trim().replace(/^```(?:\w+)?\s*/i, '').replace(/```\s*$/, '');
   }

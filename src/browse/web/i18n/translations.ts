@@ -463,6 +463,15 @@ export const translations = {
   clear_api_key_title: { en: 'Clear the saved API key?', zh: '清除已保存的 API 密钥？' },
   clear_api_key_desc: { en: 'Translation will stop working unless a key is set in the environment.', zh: '除非在环境变量中设置密钥，否则翻译将停止工作。' },
   from_gemini_env: { en: 'From GEMINI_API_KEY', zh: '来自 GEMINI_API_KEY' },
+  from_openai_env: { en: 'From OPENAI_API_KEY', zh: '来自 OPENAI_API_KEY' },
+  api_provider: { en: 'API protocol', zh: 'API 协议' },
+  api_provider_extra: { en: 'OpenAI-compatible covers any server that exposes /chat/completions (OpenAI, DeepSeek, OpenRouter, a local gateway...). Switching protocol needs the key for the new one.', zh: 'OpenAI 兼容适用于任何提供 /chat/completions 接口的服务（OpenAI、DeepSeek、OpenRouter、本地网关等）。切换协议后需要填写对应的新密钥。' },
+  provider_gemini: { en: 'Gemini', zh: 'Gemini' },
+  provider_openai: { en: 'OpenAI-compatible', zh: 'OpenAI 兼容' },
+  openai_create_desc: { en: 'The key for your OpenAI-compatible service. It is checked against its /models endpoint before being saved.', zh: '你的 OpenAI 兼容服务的密钥。保存前会通过其 /models 接口校验。' },
+  paste_openai_key: { en: 'Paste your API key', zh: '粘贴你的 API 密钥' },
+  openai_base_url_extra: { en: 'Up to and including the version, e.g. https://api.openai.com/v1 - requests go to <base>/chat/completions. A domestic service usually does not need the default proxy; clear it below.', zh: '填写到版本号为止，例如 https://api.openai.com/v1，请求会发往 <地址>/chat/completions。国内服务通常不需要默认代理，可在下方清空。' },
+  disable_thinking_gemini_only: { en: 'Only applies to the Gemini protocol.', zh: '仅对 Gemini 协议生效。' },
 
   // ---- Translation settings panel ----
   settings_panel: { en: 'Settings', zh: '设置' },

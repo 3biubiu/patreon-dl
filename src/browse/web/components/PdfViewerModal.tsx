@@ -230,6 +230,26 @@ const PAGE_IMAGE_QUALITY = 0.85;
 const BLANK_PROBE_SIZE = 64;
 
 /**
+ * How many times, and how far apart, a page is photographed before giving up
+ * on it. A canvas caught mid-redraw is blank for a moment, and one that comes
+ * back from `toBlob` as nothing (iOS, short of canvas memory) often does not
+ * the second time - and nothing else would ask for either page again.
+ */
+const CAPTURE_ATTEMPTS = 5;
+const CAPTURE_RETRY_MS = 400;
+
+/**
+ * Pages beyond the ones on screen whose picture is asked for in advance, so
+ * that turning to them does not wait a whole Baidu round trip. Only ever the
+ * ones already drawn, and only once nothing on screen is still waiting.
+ */
+const IMAGE_PREFETCH_PAGES = 1;
+
+/** Further than this and a finger on the page is a scroll, not a tap. */
+const TAP_MAX_MOVE_PX = 10;
+const TAP_MAX_MS = 350;
+
+/**
  * The two ways a translation is shown, remembered separately because they are
  * not alternatives: the overlay is for reading the page as if it were in your
  * own language, the panel is for reading the translation as prose beside the
@@ -438,14 +458,14 @@ function isBlankCanvas(canvas: HTMLCanvasElement) {
  * canvas with any left in it would come out with black where the paper should
  * be - and a black page is one Baidu can read nothing from.
  *
- * `null` where there was nothing to photograph. The caller records nothing for
- * it, deliberately: the page will be drawn again, and being drawn again is
- * what asks for it a second time.
+ * `'blank'` where there was nothing on the canvas, `null` where the browser
+ * would not hand the picture over. The caller photographs again a little
+ * later for either.
  */
-function capturePageImage(canvas: HTMLCanvasElement): Promise<Blob | null> {
+function capturePageImage(canvas: HTMLCanvasElement): Promise<Blob | 'blank' | null> {
   const source = Math.max(canvas.width, canvas.height);
   if (!source || isBlankCanvas(canvas)) {
-    return Promise.resolve(null);
+    return Promise.resolve('blank');
   }
   const scale = Math.min(1, PAGE_IMAGE_MAX_EDGE / source);
   const width = Math.max(1, Math.round(canvas.width * scale));
@@ -749,6 +769,8 @@ function PdfViewerModal(props: PdfViewerModalProps) {
    */
   const [ pageImages, setPageImages ] = useState(new Map<number, string | null>());
   const [ imageTranslating, setImageTranslating ] = useState(new Set<number>());
+  /** Bumped as each picture request finishes, which is what lets the next one go. */
+  const [ imageSettled, setImageSettled ] = useState(0);
   /**
    * What went wrong, per page.
    *
@@ -1344,14 +1366,42 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   }, [ target?.url, imageWanted, translationEpoch ]);
 
   const translatePageImage = useCallback(async (
-    pageNumber: number, canvas: HTMLCanvasElement, mediaId: string,
-    refresh: boolean, signal: AbortSignal
+    pageNumber: number, mediaId: string, refresh: boolean, signal: AbortSignal
   ) => {
     setImageTranslating((current) => new Set(current).add(pageNumber));
     try {
-      const image = await capturePageImage(canvas);
-      if (!image || signal.aborted) {
+      // Looked up afresh on every attempt: a redraw can replace the canvas,
+      // and the one this started with may be the one that was being cleared.
+      let image: Blob | 'blank' | null = null;
+      for (let attempt = 0; attempt < CAPTURE_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, CAPTURE_RETRY_MS));
+        }
+        if (signal.aborted) {
+          return;
+        }
+        const canvas = pageCanvases.current.get(pageNumber);
+        if (!canvas) {
+          // Scrolled out and unmounted. Drawing it again on the way back is
+          // what asks for it next.
+          return;
+        }
+        image = canvas.width ? await capturePageImage(canvas) : 'blank';
+        if (image instanceof Blob) {
+          break;
+        }
+      }
+      if (signal.aborted) {
         return;
+      }
+      if (image === 'blank') {
+        // Still being redrawn, most likely - a slow page can take longer than
+        // the attempts above. Nothing is recorded, so the paint that finishes
+        // it is what asks again.
+        return;
+      }
+      if (!image) {
+        throw new Error(t('pdf_could_not_capture_page'));
       }
       const result = await api.translatePdfPageImage(
         mediaId, pageNumber, image, { refresh, signal }
@@ -1396,9 +1446,10 @@ function PdfViewerModal(props: PdfViewerModalProps) {
   }, [api, t]);
 
   /**
-   * Sends the pages on screen to be translated as pictures.
+   * Sends the pages on screen to be translated as pictures, and then the one
+   * after them - see {@link IMAGE_PREFETCH_PAGES}.
    *
-   * Only the pages on screen, and only once each: a page already asked for is
+   * Only once each: a page already asked for is
    * in `imageUrls` whatever the answer was, including the answer "there is no
    * text on this one".
    */
@@ -1407,30 +1458,45 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     if (!target || !imageWanted || !controller) {
       return;
     }
-    for (const pageNumber of shownPages) {
+    const start = (pageNumber: number) => {
       const canvas = pageCanvases.current.get(pageNumber);
       // Drawn, and finished drawing: a canvas photographed halfway through
       // being painted is a page with half its glyphs on it.
       if (!canvas || !canvas.width || !paintedPages.has(pageNumber)) {
-        continue;
+        return;
       }
       if (imageUrls.current.has(pageNumber) || runningImages.current.has(pageNumber)) {
-        continue;
+        return;
       }
       runningImages.current.add(pageNumber);
       // Taken off as the request goes out, so one press means one forced
       // request rather than every request from here on.
       const forced = forcedImages.current.delete(pageNumber);
-      void translatePageImage(pageNumber, canvas, target.mediaId, forced, controller.signal)
+      void translatePageImage(pageNumber, target.mediaId, forced, controller.signal)
         .finally(() => {
           if (imageAbort.current === controller) {
             runningImages.current.delete(pageNumber);
+            // So this runs again: the next page may have been waiting on it.
+            setImageSettled((current) => current + 1);
           }
         });
+    };
+    for (const pageNumber of shownPages) {
+      start(pageNumber);
     }
+    // The page after, but only once the ones on screen are out of the way -
+    // they are what the reader is waiting on, and Baidu's QPS limit is shared.
+    if (shownPages.some((pageNumber) => runningImages.current.has(pageNumber))) {
+      return;
+    }
+    const last = shownPages[shownPages.length - 1];
+    renderedPages
+      .filter((pageNumber) => pageNumber > last)
+      .slice(0, IMAGE_PREFETCH_PAGES)
+      .forEach(start);
   }, [
-    target, imageWanted, shownPages, paintedPages, translatePageImage,
-    translationEpoch, retryEpoch
+    target, imageWanted, shownPages, renderedPages, paintedPages, translatePageImage,
+    translationEpoch, retryEpoch, imageSettled
   ]);
 
   /**
@@ -1586,6 +1652,60 @@ function PdfViewerModal(props: PdfViewerModalProps) {
       setPeeking(true);
     }, PEEK_HOLD_MS);
   }, [peekable]);
+
+  /**
+   * A touchscreen gets a tap instead of a hold: a hold there is the system's
+   * text selection, which is what used to swallow the gesture. A tap switches
+   * between the translation and the original and stays switched; a finger
+   * that moves, or stays down too long, is a scroll or a selection and is
+   * left alone. See the stylesheet for the selection being turned off.
+   */
+  const tapStart = useRef<{ x: number; y: number; at: number } | null>(null);
+
+  const handleStagePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      startPeek(event);
+      return;
+    }
+    tapStart.current = peekable && event.isPrimary ?
+      { x: event.clientX, y: event.clientY, at: performance.now() } : null;
+  }, [ peekable, startPeek ]);
+
+  const handleStagePointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      endPeek();
+      return;
+    }
+    const tap = tapStart.current;
+    tapStart.current = null;
+    if (!tap || !peekable ||
+      Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > TAP_MAX_MOVE_PX ||
+      performance.now() - tap.at > TAP_MAX_MS) {
+      return;
+    }
+    // A tap on a control in the page area - "try again", the error banner -
+    // is for that control.
+    if ((event.target as Element | null)?.closest('button, a, input, .ant-alert')) {
+      return;
+    }
+    setPeeking((current) => !current);
+  }, [ peekable, endPeek ]);
+
+  // A finger lifting also leaves the element, and that must not undo the tap
+  // it has just made. A cancel on touch is the browser taking over to scroll.
+  const handleStagePointerLeave = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'touch') {
+      endPeek();
+    }
+  }, [endPeek]);
+
+  const handleStagePointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === 'touch') {
+      tapStart.current = null;
+      return;
+    }
+    endPeek();
+  }, [endPeek]);
 
   // Nothing is being covered any more, so nothing can be peeked at either.
   useEffect(() => {
@@ -2331,6 +2451,7 @@ function PdfViewerModal(props: PdfViewerModalProps) {
     resizing ? 'pdf-viewer--resizing' : '',
     fullscreen ? 'pdf-viewer--fullscreen' : '',
     fullBleed ? 'pdf-viewer--full-bleed' : '',
+    peekable ? 'pdf-viewer--peekable' : '',
     peeking ? 'pdf-viewer--peeking' : ''
   ].filter(Boolean).join(' ');
 
@@ -2372,10 +2493,10 @@ function PdfViewerModal(props: PdfViewerModalProps) {
           className="pdf-viewer__stage"
           ref={setStageRef}
           onScroll={handleStageScroll}
-          onPointerDown={startPeek}
-          onPointerUp={endPeek}
-          onPointerLeave={endPeek}
-          onPointerCancel={endPeek}
+          onPointerDown={handleStagePointerDown}
+          onPointerUp={handleStagePointerUp}
+          onPointerLeave={handleStagePointerLeave}
+          onPointerCancel={handleStagePointerCancel}
         >
           <div
             className="pdf-viewer__pages"

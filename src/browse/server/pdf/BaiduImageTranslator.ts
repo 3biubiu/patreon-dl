@@ -51,6 +51,35 @@ const MAX_ASPECT_RATIO = 3;
 const REQUEST_TIMEOUT_MS = 45_000;
 
 /**
+ * Answers that mean "not now" rather than "not this page": the account's QPS
+ * limit, and Baidu's own timeouts and hiccups. Several pages on screen at once
+ * go out together and trip the QPS limit routinely, so these are asked again
+ * after a pause instead of being shown to the reader as a failed page.
+ */
+const RETRYABLE_CODES = new Set([ '52001', '52002', '54003', '54005' ]);
+const RETRY_DELAYS_MS = [ 1000, 2000, 4000 ];
+
+class RetryableError extends Error {}
+
+function wait(ms: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
  * Baidu's language codes, which are its own: two letters for some, three for
  * others, and traditional Chinese is a language rather than a region. Anything
  * not listed is passed through lower-cased, which is right for the plain
@@ -262,6 +291,31 @@ export default class BaiduImageTranslator {
     // "auto": a PDF is as likely to be in one language as another, and Baidu
     // detects it from the picture better than we could guess it from the file.
     const source = from ? toBaiduLanguage(from) : 'auto';
+
+    this.log('debug',
+      `Translating a page image into ${target} ` +
+      `(${(image.length / 1024).toFixed(0)} kB${settings.proxyUrl ? `, through ${settings.proxyUrl}` : ''})`
+    );
+
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.#request(image, appId, secretKey, source, target, settings.proxyUrl, signal);
+      }
+      catch (error) {
+        const delay = RETRY_DELAYS_MS[attempt];
+        if (!(error instanceof RetryableError) || delay === undefined || signal?.aborted) {
+          throw error;
+        }
+        this.log('debug', `${error.message}; asking again in ${delay} ms`);
+        await wait(delay + Math.floor(Math.random() * 500), signal);
+      }
+    }
+  }
+
+  async #request(
+    image: Buffer, appId: string, secretKey: string, source: string, target: string,
+    proxyUrl: string | null, signal?: AbortSignal
+  ): Promise<TranslatedImage | null> {
     const salt = String(Date.now());
     // md5(appid + md5(image) + salt + cuid + mac + secret), which is what the
     // API documents. The inner hash is over the raw bytes, not over any
@@ -285,19 +339,34 @@ export default class BaiduImageTranslator {
     form.append('version', VERSION);
     form.append('paste', PASTE_WHOLE_IMAGE);
 
-    this.log('debug',
-      `Translating a page image into ${target} ` +
-      `(${(image.length / 1024).toFixed(0)} kB${settings.proxyUrl ? `, through ${settings.proxyUrl}` : ''})`
-    );
-
-    const response = await fetch(ENDPOINT, {
-      method: 'POST',
-      body: form,
-      dispatcher: dispatcherFor(settings.proxyUrl, this.name, this.#logger),
-      signal: signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-    } as any);
+    // Both, not either: the caller's signal is the reader leaving, and without
+    // the timeout alongside it a request Baidu never answers holds the page
+    // on a spinner for good.
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(ENDPOINT, {
+        method: 'POST',
+        body: form,
+        dispatcher: dispatcherFor(proxyUrl, this.name, this.#logger),
+        signal: signal ? AbortSignal.any([ signal, timeout ]) : timeout
+      } as any);
+    }
+    catch (error) {
+      // The reader leaving is not worth asking again for; anything else on
+      // the way there - a timeout, a dropped connection - is.
+      if (signal?.aborted) {
+        throw error;
+      }
+      throw new RetryableError(
+        timeout.aborted ? 'Baidu did not answer in time' :
+          `Could not reach Baidu: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
     if (!response.ok) {
-      throw new Error(`Baidu answered ${response.status} ${response.statusText}`.trim());
+      const message = `Baidu answered ${response.status} ${response.statusText}`.trim();
+      throw response.status >= 500 || response.status === 429 ?
+        new RetryableError(message) : new Error(message);
     }
 
     const body = await response.json() as {
@@ -315,9 +384,8 @@ export default class BaiduImageTranslator {
     const code = body.error_code === undefined || body.error_code === null ?
       '0' : String(body.error_code);
     if (code !== '0') {
-      throw new Error(
-        ERROR_MESSAGES[code] || body.error_msg || `Baidu refused the page (error ${code})`
-      );
+      const message = ERROR_MESSAGES[code] || body.error_msg || `Baidu refused the page (error ${code})`;
+      throw RETRYABLE_CODES.has(code) ? new RetryableError(message) : new Error(message);
     }
     const pasted = body.data?.pasteImg;
     if (!pasted) {

@@ -419,6 +419,25 @@
     opacity: 0;
   }
 
+  // On a touchscreen that tap is what switches between the translation and
+  // the original, and a long press selecting the text underneath - or
+  // bringing up the system's menu over it - gets in its way. Only while there
+  // is something covering the page; with nothing to switch, the text is
+  // selectable as usual. `manipulation` also drops the double-tap zoom, which
+  // otherwise holds every tap back to see whether a second one follows.
+  @media (pointer: coarse) {
+    &--peekable &__stage,
+    &--peekable &__stage * {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    &--peekable &__stage {
+      touch-action: manipulation;
+    }
+  }
+
   // Something went wrong with an image translation. Kept in the flow at the
   // top of the column rather than floating over the page, and sticky so that
   // it is still there to be read after a scroll.

@@ -72,8 +72,8 @@ export function clearSession(res: Response) {
 /**
  * The user this request is signed in as, or `null`. A cookie that fails its
  * signature, has expired, names a user who has since been deleted, or carries
- * a session token the account has since rotated past - someone signed in on
- * another device - counts as signed out.
+ * a session token the account has since dropped - someone signed in on
+ * another device past the account's limit - counts as signed out.
  */
 export function getSessionUser(req: Request, store: AuthStore): AuthUser | null {
   const token = readCookie(req, COOKIE_NAME);
@@ -94,10 +94,10 @@ export function getSessionUser(req: Request, store: AuthStore): AuthUser | null 
   if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) {
     return null;
   }
-  // The signature proves the cookie is one we issued; this proves it is the
-  // one issued last. An older one belongs to a device someone has since
-  // signed in over.
-  if (store.getSessionToken(userId) !== sessionToken) {
+  // The signature proves the cookie is one we issued; this proves it is still
+  // among the account's live sessions. A dropped one belongs to a device
+  // someone has since signed in over.
+  if (!store.hasSessionToken(userId, sessionToken)) {
     return null;
   }
   // A banned account has no sessions, however valid the cookie - the next

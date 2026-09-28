@@ -23,7 +23,9 @@ import {
   CompressOutlined
 } from "@ant-design/icons";
 import { Document, Page, pdfjs } from "react-pdf";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+// The legacy worker, to match the legacy build `vite.config.js` aliases
+// pdfjs-dist to - the modern one does not run on iOS 17.
+import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { useAPI } from "../contexts/APIProvider";
 import { useLanguage } from "../contexts/LanguageProvider";
 import { useAuth } from "../contexts/AuthProvider";

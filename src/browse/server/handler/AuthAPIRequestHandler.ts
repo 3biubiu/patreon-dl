@@ -246,9 +246,9 @@ export default class AuthAPIRequestHandler extends Basehandler {
       });
       return;
     }
-    // Rotating the token here is what signs the account's other devices out:
-    // their cookies keep the token this replaces.
-    issueSession(res, this.#store, user, this.#store.rotateSessionToken(user.id));
+    // Starting a session here is what signs another device out once the
+    // account is at its limit: the oldest cookie keeps a token this drops.
+    issueSession(res, this.#store, user, this.#store.startSession(user.id));
     this.#recordLogin(req, user.username, user.id, true);
     res.json({ user });
     // After the response, deliberately: the check asks a location service

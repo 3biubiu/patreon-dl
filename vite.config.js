@@ -48,8 +48,14 @@ export default defineConfig({
     outDir: '../../../dist/browse/web'
   },
   resolve: {
-    alias: {
-      path: 'path-browserify',
-    },
+    alias: [
+      { find: 'path', replacement: 'path-browserify' },
+      // pdf.js's modern build leans on APIs Safari only gained in 17.4 / 18
+      // (Promise.withResolvers, URL.parse, ...). react-pdf imports it at
+      // module scope, so on iOS 17 the whole app failed to start - a white
+      // screen. The legacy build carries its own polyfills. Exact match only,
+      // so the cmaps and fonts copied above still come from the package root.
+      { find: /^pdfjs-dist$/, replacement: 'pdfjs-dist/legacy/build/pdf.mjs' },
+    ],
   },
 });

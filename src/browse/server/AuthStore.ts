@@ -28,11 +28,17 @@ interface StoredUser extends AuthUser {
   salt: string;
   passwordHash: string;
   /**
-   * The token the account's one live session carries. Replaced wholesale at
-   * every sign-in, which is what signs every other device out. Absent until
-   * the first sign-in after sessions became single-device.
+   * The single-device token written before administrators could hold several
+   * sessions. Read as a one-entry {@link sessionTokens} and dropped at the
+   * account's next sign-in.
    */
   sessionToken?: string;
+  /**
+   * The tokens of the account's live sessions, oldest first. Each sign-in
+   * appends one and drops whatever falls past the role's limit, which is what
+   * signs the oldest device out.
+   */
+  sessionTokens?: string[];
   /**
    * When a ban was last lifted, as epoch milliseconds.
    *
@@ -86,6 +92,11 @@ const MAX_USERNAME_LENGTH = 32;
  * than letting a stranger grow the credentials file without bound.
  */
 const MAX_PENDING_REGISTRATIONS = 50;
+/**
+ * How many devices an administrator may be signed in on at once. A fourth
+ * sign-in signs out the oldest; other accounts stay single-device.
+ */
+const MAX_ADMIN_SESSIONS = 3;
 
 /**
  * The stored form of a campaign restriction.
@@ -379,13 +390,13 @@ export default class AuthStore {
   }
 
   /**
-   * The token the account's one live session must present. `null` when nobody
-   * has signed in since sessions became single-device, which no cookie can
-   * match - such an account is simply signed out everywhere.
+   * Whether `token` belongs to one of the account's live sessions. Only the
+   * newest ones the current role allows count, so demoting an administrator
+   * takes effect on the next request rather than the next sign-in.
    */
-  getSessionToken(id: string): string | null {
+  hasSessionToken(id: string, token: string): boolean {
     const user = this.#data.users.find((u) => u.id === id);
-    return user?.sessionToken ?? null;
+    return !!user && AuthStore.#liveSessionTokens(user).includes(token);
   }
 
   isBanned(id: string): boolean {
@@ -441,19 +452,32 @@ export default class AuthStore {
   }
 
   /**
-   * Replaces the account's session token. Cookies keep the token they were
-   * issued with, so the moment this runs, every cookie but the one about to be
-   * issued stops being a session - this is the whole of how one sign-in puts
-   * every other device out.
+   * Starts a new session and returns its token. Cookies keep the token they
+   * were issued with, so once the oldest token is dropped to make room, the
+   * device holding it is signed out - this is the whole of how a sign-in puts
+   * another device out.
    */
-  rotateSessionToken(id: string): string {
+  startSession(id: string): string {
     const user = this.#data.users.find((u) => u.id === id);
     if (!user) {
       throw Error('User not found');
     }
-    user.sessionToken = crypto.randomBytes(16).toString('base64url');
+    const token = crypto.randomBytes(16).toString('base64url');
+    user.sessionTokens = [ ...AuthStore.#liveSessionTokens(user), token ]
+      .slice(-AuthStore.#maxSessions(user));
+    delete user.sessionToken;
     this.#save();
-    return user.sessionToken;
+    return token;
+  }
+
+  /** Administrators may stay signed in on several devices; everyone else on one. */
+  static #maxSessions(user: StoredUser): number {
+    return user.role === 'admin' ? MAX_ADMIN_SESSIONS : 1;
+  }
+
+  static #liveSessionTokens(user: StoredUser): string[] {
+    const tokens = user.sessionTokens ?? (user.sessionToken ? [ user.sessionToken ] : []);
+    return tokens.slice(-AuthStore.#maxSessions(user));
   }
 
   /**

@@ -136,23 +136,16 @@ function TranslationSettingsPanel() {
   }, [ save, t ]);
 
   /**
-   * Swaps the model and base URL for the new provider's defaults, unless they
-   * were changed from the old provider's - a Gemini URL is never what an
-   * OpenAI-compatible server wants, but a URL someone typed might be.
+   * Brings back what the new provider has saved. Each provider keeps its own
+   * key, model and base URL on the server, so switching over and back loses
+   * nothing - the key field is only cleared because it is write-only.
    */
   const handleProviderChange = (next: Settings['provider']) => {
     if (!settings) {
       return;
     }
-    const previous = next === 'openai' ? 'gemini' : 'openai';
-    const { model, baseUrl } = form.getFieldsValue([ 'model', 'baseUrl' ]);
-    const defaults = settings.providerDefaults;
-    if (!model || model === defaults[previous].model) {
-      form.setFieldValue('model', defaults[next].model);
-    }
-    if (!baseUrl || baseUrl.replace(/\/+$/, '') === defaults[previous].baseUrl) {
-      form.setFieldValue('baseUrl', defaults[next].baseUrl);
-    }
+    const profile = settings.profiles[next];
+    form.setFieldsValue({ apiKey: '', model: profile.model, baseUrl: profile.baseUrl });
   };
 
   if (!settings) {
@@ -162,6 +155,9 @@ function TranslationSettingsPanel() {
   const currentProvider = provider ?? settings.provider;
   const switchingProvider = currentProvider !== settings.provider;
   const isOpenAI = currentProvider === 'openai';
+  // The provider picked in the form, which may not be saved as in use yet.
+  const targetProfile = settings.profiles[currentProvider];
+  const targetFromEnvironment = targetProfile.source === 'env';
 
   const fromEnvironment = settings.source === 'env';
   const estimate = callsPerHour(
@@ -259,8 +255,8 @@ function TranslationSettingsPanel() {
             name="apiKey"
             label={t('api_key')}
             extra={
-              settings.configured && !switchingProvider ?
-                fromEnvironment ?
+              targetProfile.configured ?
+                targetFromEnvironment ?
                   t('env_key_precedence')
                   : t('saved_key_blank_to_keep')
                 : t(isOpenAI ? 'openai_create_desc' : 'gemini_create_desc')
@@ -269,7 +265,7 @@ function TranslationSettingsPanel() {
             <Input.Password
               autoComplete="off"
               placeholder={
-                settings.configured && !switchingProvider ?
+                targetProfile.configured ?
                   t('saved_placeholder')
                   : t(isOpenAI ? 'paste_openai_key' : 'paste_gemini_key')
               }
@@ -385,7 +381,9 @@ function TranslationSettingsPanel() {
               {t('save')}
             </Button>
             {
-              settings.source === 'file' ? (
+              // Clears the key of the provider in use, so not offered while
+              // the form is showing the other one.
+              settings.source === 'file' && !switchingProvider ? (
                 <Popconfirm
                   title={t('clear_api_key_title')}
                   description={t('clear_api_key_desc')}

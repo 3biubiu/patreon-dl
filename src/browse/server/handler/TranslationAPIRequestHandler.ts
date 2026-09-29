@@ -5,7 +5,7 @@ import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type TranslationQueue from '../translation/TranslationQueue.js';
 import type TranslationSettingsStore from '../translation/TranslationSettingsStore.js';
 import GeminiTranslator, { DEFAULT_PROXY_URL } from '../translation/GeminiTranslator.js';
-import { isLLMProvider, PROVIDER_DEFAULTS } from '../translation/LLMProtocol.js';
+import { isLLMProvider, PROVIDER_DEFAULTS, type LLMProvider } from '../translation/LLMProtocol.js';
 import { DEFAULT_PROMPT } from '../translation/TranslationPrompt.js';
 import { type TranslationSettings } from '../../types/Translation.js';
 
@@ -78,6 +78,10 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       maxLineCjk: this.#settings.getMaxLineCjk(),
       maxLineLatin: this.#settings.getMaxLineLatin(),
       totalRequests: this.#settings.getTotalRequests(),
+      profiles: {
+        gemini: this.#describeProfile('gemini'),
+        openai: this.#describeProfile('openai')
+      },
       key: null,
       keyError: null
     };
@@ -94,6 +98,17 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       }
     }
     res.json({ settings });
+  }
+
+  /** What the form fills in when switched to `provider`. Never the key itself. */
+  #describeProfile(provider: LLMProvider) {
+    const source = this.#settings.getApiKeySource(provider);
+    return {
+      configured: !!source,
+      source,
+      model: this.#settings.getModel(provider) || PROVIDER_DEFAULTS[provider].model,
+      baseUrl: this.#settings.getBaseUrl(provider) || PROVIDER_DEFAULTS[provider].baseUrl
+    };
   }
 
   /**
@@ -113,7 +128,6 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       patch.provider = body.provider;
     }
     const provider = patch.provider || this.#settings.getProvider();
-    const switchingProvider = provider !== this.#settings.getProvider();
 
     if (body.model !== undefined) {
       patch.model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
@@ -172,12 +186,12 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       }
       else {
         // A key saved alongside a change of provider is checked against the
-        // new provider's defaults, not the old provider's stored values.
+        // new provider's stored values, not the old provider's.
         const baseUrl = patch.baseUrl ||
-          (switchingProvider ? null : this.#settings.getBaseUrl()) ||
+          this.#settings.getBaseUrl(provider) ||
           PROVIDER_DEFAULTS[provider].baseUrl;
         const model = patch.model ||
-          (switchingProvider ? null : this.#settings.getModel()) ||
+          this.#settings.getModel(provider) ||
           PROVIDER_DEFAULTS[provider].model;
         // Through whatever proxy is being saved alongside, not the stored one:
         // the two arrive in the same request, and checking the key against the
@@ -197,13 +211,12 @@ export default class TranslationAPIRequestHandler extends Basehandler {
         patch.apiKey = apiKey;
       }
     }
-    else if (switchingProvider) {
-      // The stored key belongs to the other provider and would only be
-      // rejected there. Dropped, so the form asks for one instead.
-      patch.apiKey = null;
-    }
+    // Switching provider without a new key keeps each provider's own: the
+    // store holds one per provider, so the one switched to comes back as it
+    // was left.
+    //
     // A value equal to the provider's own default is stored as "use the
-    // default", so a later switch of provider does not carry it across.
+    // default", so a later change of that default is picked up.
     if (patch.baseUrl && patch.baseUrl.replace(/\/+$/, '') === PROVIDER_DEFAULTS[provider].baseUrl) {
       patch.baseUrl = null;
     }

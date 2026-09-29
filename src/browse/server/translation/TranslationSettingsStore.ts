@@ -24,13 +24,33 @@ const DEFAULT_BATCH_LINES = 120;
 export const BATCH_CHARACTERS_RANGE = { min: 500, max: 40000 };
 export const BATCH_LINES_RANGE = { min: 10, max: 1000 };
 
-interface SettingsFile {
-  /** Which wire protocol the key, model and base URL below speak. */
-  provider: LLMProvider;
-  /** API key for `provider`. Never leaves the server. */
+/**
+ * What belongs to one provider. Kept per provider so that switching back and
+ * forth does not throw away the other one's key, model and base URL.
+ */
+interface ProviderProfile {
+  /** Never leaves the server. */
   apiKey: string | null;
   model: string | null;
   baseUrl: string | null;
+}
+
+function emptyProfile(): ProviderProfile {
+  return { apiKey: null, model: null, baseUrl: null };
+}
+
+function readProfile(raw: Partial<ProviderProfile> | undefined): ProviderProfile {
+  return {
+    apiKey: raw?.apiKey || null,
+    model: raw?.model || null,
+    baseUrl: raw?.baseUrl || null
+  };
+}
+
+interface SettingsFile {
+  /** Which wire protocol is in use - which of `profiles` is read. */
+  provider: LLMProvider;
+  profiles: Record<LLMProvider, ProviderProfile>;
   /**
    * Proxy for the Gemini requests. `null` means the default is in use; the
    * empty string means an administrator turned it off and wants to go direct,
@@ -68,9 +88,7 @@ interface SettingsFile {
 
 const EMPTY: SettingsFile = {
   provider: 'gemini',
-  apiKey: null,
-  model: null,
-  baseUrl: null,
+  profiles: { gemini: emptyProfile(), openai: emptyProfile() },
   proxyUrl: null,
   prompt: null,
   batchCharacters: null,
@@ -115,14 +133,23 @@ export default class TranslationSettingsStore {
   static load(filePath: string, logger?: Logger | null) {
     if (fs.existsSync(filePath)) {
       try {
-        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Partial<SettingsFile>;
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as
+          Partial<SettingsFile> & Partial<ProviderProfile>;
+        // Absent in files written before OpenAI-compatible APIs were
+        // supported, all of which were Gemini.
+        const provider = isLLMProvider(parsed.provider) ? parsed.provider : 'gemini';
+        const profiles = {
+          gemini: readProfile(parsed.profiles?.gemini),
+          openai: readProfile(parsed.profiles?.openai)
+        };
+        // Files written before profiles held one key, model and base URL at
+        // the top level, all belonging to whichever provider was in use.
+        if (!parsed.profiles) {
+          profiles[provider] = readProfile(parsed);
+        }
         return new TranslationSettingsStore(filePath, {
-          // Absent in files written before OpenAI-compatible APIs were
-          // supported, all of which were Gemini.
-          provider: isLLMProvider(parsed.provider) ? parsed.provider : 'gemini',
-          apiKey: parsed.apiKey || null,
-          model: parsed.model || null,
-          baseUrl: parsed.baseUrl || null,
+          provider,
+          profiles,
           proxyUrl: parsed.proxyUrl ?? null,
           prompt: parsed.prompt || null,
           batchCharacters: parsed.batchCharacters || null,
@@ -144,7 +171,11 @@ export default class TranslationSettingsStore {
           `Could not read "${filePath}":`, error);
       }
     }
-    return new TranslationSettingsStore(filePath, { ...EMPTY }, logger);
+    return new TranslationSettingsStore(filePath, {
+      ...EMPTY,
+      // Fresh objects: the profiles are edited in place.
+      profiles: { gemini: emptyProfile(), openai: emptyProfile() }
+    }, logger);
   }
 
   getProvider(): LLMProvider {
@@ -152,8 +183,8 @@ export default class TranslationSettingsStore {
   }
 
   /** The environment variables that stand in for the saved values of `provider`. */
-  #env() {
-    return this.#data.provider === 'openai' ?
+  #env(provider: LLMProvider) {
+    return provider === 'openai' ?
       {
         apiKey: process.env.OPENAI_API_KEY,
         model: process.env.OPENAI_MODEL,
@@ -170,25 +201,28 @@ export default class TranslationSettingsStore {
    * The key in use, preferring what an administrator saved over the
    * environment. The environment remains the way to configure a deployment
    * that has no one to click anything.
+   *
+   * These read the provider in use unless another is named - the settings form
+   * names one to show what switching to it would bring back.
    */
-  getApiKey(): string | null {
-    return this.#data.apiKey || this.#env().apiKey || null;
+  getApiKey(provider = this.#data.provider): string | null {
+    return this.#data.profiles[provider].apiKey || this.#env(provider).apiKey || null;
   }
 
-  /** Where the key in use came from, so the browser can say so. */
-  getApiKeySource(): 'file' | 'env' | null {
-    if (this.#data.apiKey) {
+  /** Where the key came from, so the browser can say so. */
+  getApiKeySource(provider = this.#data.provider): 'file' | 'env' | null {
+    if (this.#data.profiles[provider].apiKey) {
       return 'file';
     }
-    return this.#env().apiKey ? 'env' : null;
+    return this.#env(provider).apiKey ? 'env' : null;
   }
 
-  getModel(): string | null {
-    return this.#data.model || this.#env().model || null;
+  getModel(provider = this.#data.provider): string | null {
+    return this.#data.profiles[provider].model || this.#env(provider).model || null;
   }
 
-  getBaseUrl(): string | null {
-    return this.#data.baseUrl || this.#env().baseUrl || null;
+  getBaseUrl(provider = this.#data.provider): string | null {
+    return this.#data.profiles[provider].baseUrl || this.#env(provider).baseUrl || null;
   }
 
   /**
@@ -271,6 +305,10 @@ export default class TranslationSettingsStore {
   /**
    * Passing `null` for `apiKey` clears it and falls back to the environment;
    * passing `null` for `prompt` puts the default prompt back.
+   *
+   * `apiKey`, `model` and `baseUrl` are written to the profile of the provider
+   * in use once `provider` has been applied. The other provider's are left as
+   * they were, ready for a switch back.
    */
   update(params: {
     provider?: LLMProvider;
@@ -291,14 +329,15 @@ export default class TranslationSettingsStore {
     if (params.provider !== undefined) {
       this.#data.provider = params.provider;
     }
+    const profile = this.#data.profiles[this.#data.provider];
     if (params.apiKey !== undefined) {
-      this.#data.apiKey = params.apiKey || null;
+      profile.apiKey = params.apiKey || null;
     }
     if (params.model !== undefined) {
-      this.#data.model = params.model || null;
+      profile.model = params.model || null;
     }
     if (params.baseUrl !== undefined) {
-      this.#data.baseUrl = params.baseUrl || null;
+      profile.baseUrl = params.baseUrl || null;
     }
     if (params.proxyUrl !== undefined) {
       // Kept verbatim, empty string included - see `getProxyUrl`.

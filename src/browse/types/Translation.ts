@@ -120,6 +120,17 @@ export interface TranslationSettings {
   maxLineLatin: number;
   /** Calls spent since this counter was last reset. */
   totalRequests: number;
+  /**
+   * What each provider has saved, so switching in the form brings back that
+   * provider's model and base URL - and says whether it already has a key -
+   * rather than starting it over. The key itself is never included.
+   */
+  profiles: Record<'gemini' | 'openai', {
+    configured: boolean;
+    source: 'file' | 'env' | null;
+    model: string;
+    baseUrl: string;
+  }>;
   key: TranslationKeyDescription | null;
   keyError: string | null;
 }

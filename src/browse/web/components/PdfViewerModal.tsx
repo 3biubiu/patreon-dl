@@ -125,7 +125,7 @@ const MEMORY_CONSTRAINED = (() => {
  * covers reading at a normal pace without holding a whole document's worth of
  * canvases in memory.
  */
-const DEFAULT_PRELOAD_PAGES = MEMORY_CONSTRAINED ? 1 : 3;
+const DEFAULT_PRELOAD_PAGES = 3;
 
 /**
  * And a smaller number for the two layouts that already hold more than one
@@ -144,7 +144,7 @@ const MULTI_PAGE_PRELOAD = MEMORY_CONSTRAINED ? 1 : 2;
  * held by pdf.js. The preload numbers above are per-layout intentions; this
  * is the budget they all share.
  */
-const MAX_DRAWN_PAGES = MEMORY_CONSTRAINED ? 3 : 8;
+const MAX_DRAWN_PAGES = MEMORY_CONSTRAINED ? 4 : 12;
 
 /**
  * How the pages are laid out.

@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { commonLog, type LogLevel } from '../../../utils/logging/Logger.js';
@@ -24,39 +25,67 @@ const DEFAULT_BATCH_LINES = 120;
 export const BATCH_CHARACTERS_RANGE = { min: 500, max: 40000 };
 export const BATCH_LINES_RANGE = { min: 10, max: 1000 };
 
+/** Long enough for "SiliconFlow - DeepSeek V3", short enough for a dropdown. */
+export const MAX_SOURCE_NAME_LENGTH = 40;
+
 /**
- * What belongs to one provider. Kept per provider so that switching back and
- * forth does not throw away the other one's key, model and base URL.
+ * Where requests go: a key, model, base URL and proxy that belong together.
+ * Gemini has one; the OpenAI-compatible protocol may have several, since that
+ * protocol is spoken by many services an administrator may switch between.
  */
 interface ProviderProfile {
   /** Never leaves the server. */
   apiKey: string | null;
   model: string | null;
   baseUrl: string | null;
+  /**
+   * `null` means the default is in use; the empty string means an
+   * administrator turned it off and wants to go direct, which is why the two
+   * are not the same value here. Per source because a domestic service wants
+   * no proxy and an overseas one usually does.
+   */
+  proxyUrl: string | null;
+}
+
+/** One named OpenAI-compatible service. */
+interface OpenAISource extends ProviderProfile {
+  id: string;
+  name: string;
+}
+
+/** What the settings form is told about a source. Never the key itself. */
+export interface ProfileDescription {
+  source: 'file' | 'env' | null;
+  model: string | null;
+  baseUrl: string | null;
+  /** Resolved: `null` means going direct. */
+  proxyUrl: string | null;
 }
 
 function emptyProfile(): ProviderProfile {
-  return { apiKey: null, model: null, baseUrl: null };
+  return { apiKey: null, model: null, baseUrl: null, proxyUrl: null };
 }
 
-function readProfile(raw: Partial<ProviderProfile> | undefined): ProviderProfile {
+function readProfile(raw: Partial<ProviderProfile> | undefined, proxyUrl: string | null): ProviderProfile {
   return {
     apiKey: raw?.apiKey || null,
     model: raw?.model || null,
-    baseUrl: raw?.baseUrl || null
+    baseUrl: raw?.baseUrl || null,
+    proxyUrl: raw?.proxyUrl !== undefined ? raw.proxyUrl : proxyUrl
   };
 }
 
+function newSourceId() {
+  return crypto.randomBytes(6).toString('base64url');
+}
+
 interface SettingsFile {
-  /** Which wire protocol is in use - which of `profiles` is read. */
+  /** Which wire protocol is in use. */
   provider: LLMProvider;
-  profiles: Record<LLMProvider, ProviderProfile>;
-  /**
-   * Proxy for the Gemini requests. `null` means the default is in use; the
-   * empty string means an administrator turned it off and wants to go direct,
-   * which is why the two are not the same value here.
-   */
-  proxyUrl: string | null;
+  gemini: ProviderProfile;
+  openaiSources: OpenAISource[];
+  /** Which of `openaiSources` is read when `provider` is `openai`. */
+  activeOpenAISourceId: string | null;
   /** The editable half of the prompt; `null` means the default is in use. */
   prompt: string | null;
   batchCharacters: number | null;
@@ -86,21 +115,32 @@ interface SettingsFile {
   totalRequests: number;
 }
 
-const EMPTY: SettingsFile = {
-  provider: 'gemini',
-  profiles: { gemini: emptyProfile(), openai: emptyProfile() },
-  proxyUrl: null,
-  prompt: null,
-  batchCharacters: null,
-  batchLines: null,
-  disableThinking: false,
-  segmentation: true,
-  sourceSegmentation: true,
-  polish: false,
-  maxLineCjk: null,
-  maxLineLatin: null,
-  totalRequests: 0
+/**
+ * The shapes older files were written in: one key, model and base URL at the
+ * top level, then one profile per provider. Either way the proxy was shared.
+ */
+type LegacyFields = Partial<ProviderProfile> & {
+  profiles?: Partial<Record<LLMProvider, Partial<ProviderProfile>>>;
 };
+
+function emptySettings(): SettingsFile {
+  return {
+    provider: 'gemini',
+    gemini: emptyProfile(),
+    openaiSources: [],
+    activeOpenAISourceId: null,
+    prompt: null,
+    batchCharacters: null,
+    batchLines: null,
+    disableThinking: false,
+    segmentation: true,
+    sourceSegmentation: true,
+    polish: false,
+    maxLineCjk: null,
+    maxLineLatin: null,
+    totalRequests: 0
+  };
+}
 
 function clamp(value: number, range: { min: number; max: number }) {
   return Math.max(range.min, Math.min(range.max, Math.round(value)));
@@ -134,23 +174,50 @@ export default class TranslationSettingsStore {
     if (fs.existsSync(filePath)) {
       try {
         const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as
-          Partial<SettingsFile> & Partial<ProviderProfile>;
+          Partial<SettingsFile> & LegacyFields;
         // Absent in files written before OpenAI-compatible APIs were
         // supported, all of which were Gemini.
         const provider = isLLMProvider(parsed.provider) ? parsed.provider : 'gemini';
-        const profiles = {
-          gemini: readProfile(parsed.profiles?.gemini),
-          openai: readProfile(parsed.profiles?.openai)
-        };
-        // Files written before profiles held one key, model and base URL at
-        // the top level, all belonging to whichever provider was in use.
-        if (!parsed.profiles) {
-          profiles[provider] = readProfile(parsed);
+        // Shared by both providers before each source had its own.
+        const legacyProxy = parsed.proxyUrl ?? null;
+
+        let gemini: ProviderProfile;
+        let openaiSources: OpenAISource[];
+        let activeOpenAISourceId: string | null;
+        if (Array.isArray(parsed.openaiSources)) {
+          gemini = readProfile(parsed.gemini, null);
+          openaiSources = parsed.openaiSources
+            .filter((source) => source && typeof source.id === 'string')
+            .map((source) => ({
+              ...readProfile(source, null),
+              id: source.id,
+              name: source.name || 'OpenAI'
+            }));
+          activeOpenAISourceId =
+            openaiSources.find((source) => source.id === parsed.activeOpenAISourceId)?.id ??
+            openaiSources[0]?.id ?? null;
         }
+        else {
+          // One profile per provider, or before that one set of fields at the
+          // top level belonging to whichever provider was in use.
+          const legacy = parsed.profiles || { [provider]: parsed };
+          gemini = readProfile(legacy.gemini, legacyProxy);
+          const openai = readProfile(legacy.openai, legacyProxy);
+          openaiSources = [];
+          activeOpenAISourceId = null;
+          if (openai.apiKey || openai.model || openai.baseUrl || provider === 'openai') {
+            // A fixed id, so it stays the same across restarts until the file
+            // is next written in the new shape.
+            openaiSources.push({ ...openai, id: 'default', name: 'OpenAI' });
+            activeOpenAISourceId = 'default';
+          }
+        }
+
         return new TranslationSettingsStore(filePath, {
           provider,
-          profiles,
-          proxyUrl: parsed.proxyUrl ?? null,
+          gemini,
+          openaiSources,
+          activeOpenAISourceId,
           prompt: parsed.prompt || null,
           batchCharacters: parsed.batchCharacters || null,
           batchLines: parsed.batchLines || null,
@@ -171,11 +238,7 @@ export default class TranslationSettingsStore {
           `Could not read "${filePath}":`, error);
       }
     }
-    return new TranslationSettingsStore(filePath, {
-      ...EMPTY,
-      // Fresh objects: the profiles are edited in place.
-      profiles: { gemini: emptyProfile(), openai: emptyProfile() }
-    }, logger);
+    return new TranslationSettingsStore(filePath, emptySettings(), logger);
   }
 
   getProvider(): LLMProvider {
@@ -197,50 +260,102 @@ export default class TranslationSettingsStore {
       };
   }
 
-  /**
-   * The key in use, preferring what an administrator saved over the
-   * environment. The environment remains the way to configure a deployment
-   * that has no one to click anything.
-   *
-   * These read the provider in use unless another is named - the settings form
-   * names one to show what switching to it would bring back.
-   */
-  getApiKey(provider = this.#data.provider): string | null {
-    return this.#data.profiles[provider].apiKey || this.#env(provider).apiKey || null;
-  }
-
-  /** Where the key came from, so the browser can say so. */
-  getApiKeySource(provider = this.#data.provider): 'file' | 'env' | null {
-    if (this.#data.profiles[provider].apiKey) {
-      return 'file';
-    }
-    return this.#env(provider).apiKey ? 'env' : null;
-  }
-
-  getModel(provider = this.#data.provider): string | null {
-    return this.#data.profiles[provider].model || this.#env(provider).model || null;
-  }
-
-  getBaseUrl(provider = this.#data.provider): string | null {
-    return this.#data.profiles[provider].baseUrl || this.#env(provider).baseUrl || null;
+  #activeOpenAISource(): OpenAISource | null {
+    return this.#data.openaiSources.find(
+      (source) => source.id === this.#data.activeOpenAISourceId
+    ) || null;
   }
 
   /**
-   * The proxy the Gemini requests go through, or `null` to go direct.
-   *
-   * Unset means the built-in default, which is a local proxy: Gemini is not
-   * reachable from everywhere. An administrator who saves an empty value gets
-   * `''` stored, which is honoured as "no proxy" rather than falling back to
-   * the default again.
+   * The profile requests are sent with. `null` only when the OpenAI-compatible
+   * protocol is in use with no source saved, which leaves the environment.
    */
-  getProxyUrl(): string | null {
-    if (this.#data.proxyUrl !== null) {
-      return this.#data.proxyUrl || null;
+  #activeProfile(): ProviderProfile | null {
+    return this.#data.provider === 'openai' ? this.#activeOpenAISource() : this.#data.gemini;
+  }
+
+  /**
+   * The saved value, then the environment, then the built-in default - which
+   * is a local proxy, since Gemini is not reachable from everywhere. A saved
+   * empty string is honoured as "no proxy" rather than falling back again.
+   */
+  static #resolveProxy(saved: string | null): string | null {
+    if (saved !== null) {
+      return saved || null;
     }
     if (process.env.GEMINI_PROXY_URL !== undefined) {
       return process.env.GEMINI_PROXY_URL || null;
     }
     return DEFAULT_PROXY_URL;
+  }
+
+  #describe(provider: LLMProvider, profile: ProviderProfile | null): ProfileDescription {
+    const env = this.#env(provider);
+    return {
+      source: profile?.apiKey ? 'file' : env.apiKey ? 'env' : null,
+      model: profile?.model || env.model || null,
+      baseUrl: profile?.baseUrl || env.baseUrl || null,
+      proxyUrl: TranslationSettingsStore.#resolveProxy(profile?.proxyUrl ?? null)
+    };
+  }
+
+  /**
+   * The key in use, preferring what an administrator saved over the
+   * environment. The environment remains the way to configure a deployment
+   * that has no one to click anything.
+   */
+  getApiKey(): string | null {
+    return this.#activeProfile()?.apiKey || this.#env(this.#data.provider).apiKey || null;
+  }
+
+  /** Where the key in use came from, so the browser can say so. */
+  getApiKeySource(): 'file' | 'env' | null {
+    return this.#describe(this.#data.provider, this.#activeProfile()).source;
+  }
+
+  getModel(): string | null {
+    return this.#describe(this.#data.provider, this.#activeProfile()).model;
+  }
+
+  getBaseUrl(): string | null {
+    return this.#describe(this.#data.provider, this.#activeProfile()).baseUrl;
+  }
+
+  /** The proxy the requests in use go through, or `null` to go direct. */
+  getProxyUrl(): string | null {
+    return TranslationSettingsStore.#resolveProxy(this.#activeProfile()?.proxyUrl ?? null);
+  }
+
+  getActiveOpenAISourceId(): string | null {
+    return this.#data.activeOpenAISourceId;
+  }
+
+  /** Everything saved, for the form to switch between. Never a key. */
+  describeProfiles() {
+    return {
+      gemini: this.#describe('gemini', this.#data.gemini),
+      openai: this.#data.openaiSources.map((source) => ({
+        id: source.id,
+        name: source.name,
+        ...this.#describe('openai', source)
+      }))
+    };
+  }
+
+  hasOpenAISource(id: string): boolean {
+    return this.#data.openaiSources.some((source) => source.id === id);
+  }
+
+  /**
+   * Forgets a source, key included. When it was the one in use the first one
+   * left takes over, or the environment when none is.
+   */
+  deleteOpenAISource(id: string) {
+    this.#data.openaiSources = this.#data.openaiSources.filter((source) => source.id !== id);
+    if (this.#data.activeOpenAISourceId === id) {
+      this.#data.activeOpenAISourceId = this.#data.openaiSources[0]?.id ?? null;
+    }
+    this.#save();
   }
 
   /** `null` when the default is in use, which is what the form shows as such. */
@@ -306,12 +421,19 @@ export default class TranslationSettingsStore {
    * Passing `null` for `apiKey` clears it and falls back to the environment;
    * passing `null` for `prompt` puts the default prompt back.
    *
-   * `apiKey`, `model` and `baseUrl` are written to the profile of the provider
-   * in use once `provider` has been applied. The other provider's are left as
-   * they were, ready for a switch back.
+   * `apiKey`, `model`, `baseUrl` and `proxyUrl` are written to the profile in
+   * use once `provider` and the source have been applied: Gemini's, or the
+   * OpenAI-compatible source picked by `openaiSourceId` - or a new one named
+   * `newOpenAISourceName`. Every other profile is left as it was, ready for a
+   * switch back.
    */
   update(params: {
     provider?: LLMProvider;
+    /** Must name a source that exists - the caller checks. */
+    openaiSourceId?: string;
+    newOpenAISourceName?: string;
+    /** Renames the source in use. */
+    sourceName?: string;
     apiKey?: string | null;
     model?: string | null;
     baseUrl?: string | null;
@@ -329,19 +451,45 @@ export default class TranslationSettingsStore {
     if (params.provider !== undefined) {
       this.#data.provider = params.provider;
     }
-    const profile = this.#data.profiles[this.#data.provider];
-    if (params.apiKey !== undefined) {
-      profile.apiKey = params.apiKey || null;
+    if (params.newOpenAISourceName !== undefined) {
+      const id = newSourceId();
+      this.#data.openaiSources.push({ ...emptyProfile(), id, name: params.newOpenAISourceName });
+      this.#data.activeOpenAISourceId = id;
     }
-    if (params.model !== undefined) {
-      profile.model = params.model || null;
+    else if (params.openaiSourceId !== undefined && this.hasOpenAISource(params.openaiSourceId)) {
+      this.#data.activeOpenAISourceId = params.openaiSourceId;
     }
-    if (params.baseUrl !== undefined) {
-      profile.baseUrl = params.baseUrl || null;
+
+    let profile = this.#activeProfile();
+    // Saving OpenAI-compatible settings with nothing to save them into makes
+    // the first source rather than dropping them.
+    if (!profile && this.#data.provider === 'openai') {
+      const id = newSourceId();
+      const source = { ...emptyProfile(), id, name: params.sourceName || 'OpenAI' };
+      this.#data.openaiSources.push(source);
+      this.#data.activeOpenAISourceId = id;
+      profile = source;
     }
-    if (params.proxyUrl !== undefined) {
-      // Kept verbatim, empty string included - see `getProxyUrl`.
-      this.#data.proxyUrl = params.proxyUrl;
+    if (params.sourceName && this.#data.provider === 'openai') {
+      const source = this.#activeOpenAISource();
+      if (source) {
+        source.name = params.sourceName;
+      }
+    }
+    if (profile) {
+      if (params.apiKey !== undefined) {
+        profile.apiKey = params.apiKey || null;
+      }
+      if (params.model !== undefined) {
+        profile.model = params.model || null;
+      }
+      if (params.baseUrl !== undefined) {
+        profile.baseUrl = params.baseUrl || null;
+      }
+      if (params.proxyUrl !== undefined) {
+        // Kept verbatim, empty string included - see `#resolveProxy`.
+        profile.proxyUrl = params.proxyUrl;
+      }
     }
     if (params.prompt !== undefined) {
       this.#data.prompt = params.prompt || null;

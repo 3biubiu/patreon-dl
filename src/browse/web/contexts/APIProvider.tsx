@@ -1005,6 +1005,12 @@ class API {
    */
   async saveTranslationSettings(params: {
     provider?: 'gemini' | 'openai';
+    /** The OpenAI-compatible source to use and save into. */
+    openaiSourceId?: string;
+    /** Makes a new OpenAI-compatible source with this name, used from now on. */
+    newOpenAISourceName?: string;
+    /** Renames the OpenAI-compatible source being saved into. */
+    sourceName?: string;
     apiKey?: string;
     model?: string;
     baseUrl?: string;
@@ -1051,6 +1057,14 @@ class API {
   async stopAllTranslations(): Promise<TranscriptionRecord[]> {
     const data = await readJSON(await apiFetch('/api/translations/stop', { method: 'POST' }));
     return (data.records || []) as TranscriptionRecord[];
+  }
+
+  /** Forgets one OpenAI-compatible translation source, key included. */
+  async deleteTranslationSource(id: string): Promise<TranslationSettings> {
+    const data = await readJSON(await apiFetch(
+      `/api/translation/sources/${encodeURIComponent(id)}`, { method: 'DELETE' }
+    ));
+    return data.settings as TranslationSettings;
   }
 
   /** Puts the running count of Gemini calls back to zero. */

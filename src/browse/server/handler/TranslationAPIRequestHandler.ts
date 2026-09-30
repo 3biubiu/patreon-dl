@@ -4,6 +4,10 @@ import Basehandler from './BaseHandler.js';
 import type TranscriptionIndex from '../transcription/TranscriptionIndex.js';
 import type TranslationQueue from '../translation/TranslationQueue.js';
 import type TranslationSettingsStore from '../translation/TranslationSettingsStore.js';
+import {
+  MAX_SOURCE_NAME_LENGTH,
+  type ProfileDescription
+} from '../translation/TranslationSettingsStore.js';
 import GeminiTranslator, { DEFAULT_PROXY_URL } from '../translation/GeminiTranslator.js';
 import { isLLMProvider, PROVIDER_DEFAULTS, type LLMProvider } from '../translation/LLMProtocol.js';
 import { DEFAULT_PROMPT } from '../translation/TranslationPrompt.js';
@@ -78,10 +82,7 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       maxLineCjk: this.#settings.getMaxLineCjk(),
       maxLineLatin: this.#settings.getMaxLineLatin(),
       totalRequests: this.#settings.getTotalRequests(),
-      profiles: {
-        gemini: this.#describeProfile('gemini'),
-        openai: this.#describeProfile('openai')
-      },
+      ...this.#describeSources(),
       key: null,
       keyError: null
     };
@@ -100,15 +101,41 @@ export default class TranslationAPIRequestHandler extends Basehandler {
     res.json({ settings });
   }
 
-  /** What the form fills in when switched to `provider`. Never the key itself. */
-  #describeProfile(provider: LLMProvider) {
-    const source = this.#settings.getApiKeySource(provider);
+  /**
+   * What the form fills in when switched to Gemini or to one of the
+   * OpenAI-compatible sources. Never a key.
+   */
+  #describeSources(): Pick<TranslationSettings, 'sources' | 'activeOpenAISourceId'> {
+    const profiles = this.#settings.describeProfiles();
+    const view = (provider: LLMProvider, profile: ProfileDescription) => ({
+      configured: !!profile.source,
+      source: profile.source,
+      model: profile.model || PROVIDER_DEFAULTS[provider].model,
+      baseUrl: profile.baseUrl || PROVIDER_DEFAULTS[provider].baseUrl,
+      proxyUrl: profile.proxyUrl || ''
+    });
     return {
-      configured: !!source,
-      source,
-      model: this.#settings.getModel(provider) || PROVIDER_DEFAULTS[provider].model,
-      baseUrl: this.#settings.getBaseUrl(provider) || PROVIDER_DEFAULTS[provider].baseUrl
+      sources: {
+        gemini: view('gemini', profiles.gemini),
+        openai: profiles.openai.map((source) => ({
+          id: source.id,
+          name: source.name,
+          ...view('openai', source)
+        }))
+      },
+      activeOpenAISourceId: this.#settings.getActiveOpenAISourceId()
     };
+  }
+
+  /** Forgets one OpenAI-compatible source, key included. */
+  async handleDeleteSourceRequest(req: Request, res: Response, id: string) {
+    if (!this.#settings.hasOpenAISource(id)) {
+      res.status(404).json({ error: 'Source not found' });
+      return;
+    }
+    this.#settings.deleteOpenAISource(id);
+    this.log('info', 'Translation source deleted');
+    await this.handleGetSettingsRequest(req, res);
   }
 
   /**
@@ -128,6 +155,40 @@ export default class TranslationAPIRequestHandler extends Basehandler {
       patch.provider = body.provider;
     }
     const provider = patch.provider || this.#settings.getProvider();
+
+    // Which OpenAI-compatible source the fields below belong to: a new one,
+    // one picked by id, or - neither given - the one already in use.
+    if (provider === 'openai') {
+      if (body.newOpenAISourceName !== undefined) {
+        const name = typeof body.newOpenAISourceName === 'string' ?
+          body.newOpenAISourceName.trim().slice(0, MAX_SOURCE_NAME_LENGTH)
+          : '';
+        if (!name) {
+          res.status(400).json({ error: 'A new source needs a name' });
+          return;
+        }
+        patch.newOpenAISourceName = name;
+      }
+      else if (body.openaiSourceId !== undefined) {
+        if (typeof body.openaiSourceId !== 'string' || !this.#settings.hasOpenAISource(body.openaiSourceId)) {
+          res.status(400).json({ error: 'Unknown source' });
+          return;
+        }
+        patch.openaiSourceId = body.openaiSourceId;
+      }
+      if (typeof body.sourceName === 'string' && body.sourceName.trim()) {
+        patch.sourceName = body.sourceName.trim().slice(0, MAX_SOURCE_NAME_LENGTH);
+      }
+    }
+    // What is saved for the profile being written, for the key check below to
+    // fall back on. Nothing for a source that is only now being made.
+    const profiles = this.#settings.describeProfiles();
+    const targetId = patch.openaiSourceId ?? this.#settings.getActiveOpenAISourceId();
+    const target = provider === 'gemini' ?
+      profiles.gemini
+      : patch.newOpenAISourceName !== undefined ?
+        null
+        : profiles.openai.find((source) => source.id === targetId) || null;
 
     if (body.model !== undefined) {
       patch.model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null;
@@ -185,20 +246,20 @@ export default class TranslationAPIRequestHandler extends Basehandler {
         patch.apiKey = null;
       }
       else {
-        // A key saved alongside a change of provider is checked against the
-        // new provider's stored values, not the old provider's.
+        // A key saved alongside a change of provider or source is checked
+        // against what that one has stored, not the one in use until now.
         const baseUrl = patch.baseUrl ||
-          this.#settings.getBaseUrl(provider) ||
+          target?.baseUrl ||
           PROVIDER_DEFAULTS[provider].baseUrl;
         const model = patch.model ||
-          this.#settings.getModel(provider) ||
+          target?.model ||
           PROVIDER_DEFAULTS[provider].model;
         // Through whatever proxy is being saved alongside, not the stored one:
         // the two arrive in the same request, and checking the key against the
         // old proxy would reject a key that is about to work.
         const proxyUrl = patch.proxyUrl !== undefined ?
           patch.proxyUrl || null
-          : this.#settings.getProxyUrl();
+          : target ? target.proxyUrl : DEFAULT_PROXY_URL;
         try {
           await GeminiTranslator.describeKey(provider, apiKey, baseUrl, model, proxyUrl);
         }
@@ -211,9 +272,9 @@ export default class TranslationAPIRequestHandler extends Basehandler {
         patch.apiKey = apiKey;
       }
     }
-    // Switching provider without a new key keeps each provider's own: the
-    // store holds one per provider, so the one switched to comes back as it
-    // was left.
+    // Switching provider or source without a new key keeps each one's own:
+    // the store holds a profile per source, so the one switched to comes back
+    // as it was left.
     //
     // A value equal to the provider's own default is stored as "use the
     // default", so a later change of that default is picked up.

@@ -62,6 +62,16 @@ export interface TranslationKeyDescription {
   modelFound: boolean;
 }
 
+/** One saved key, model, base URL and proxy, as the browser may see it. */
+export interface TranslationSourceView {
+  configured: boolean;
+  source: 'file' | 'env' | null;
+  model: string;
+  baseUrl: string;
+  /** Empty means going direct. */
+  proxyUrl: string;
+}
+
 /**
  * The translation settings as the browser is allowed to see them.
  *
@@ -121,16 +131,17 @@ export interface TranslationSettings {
   /** Calls spent since this counter was last reset. */
   totalRequests: number;
   /**
-   * What each provider has saved, so switching in the form brings back that
-   * provider's model and base URL - and says whether it already has a key -
-   * rather than starting it over. The key itself is never included.
+   * Everything saved, so switching in the form brings back what that one was
+   * left with - and says whether it already has a key - rather than starting
+   * it over. Gemini has one; the OpenAI-compatible protocol may have several
+   * named sources. The keys themselves are never included.
    */
-  profiles: Record<'gemini' | 'openai', {
-    configured: boolean;
-    source: 'file' | 'env' | null;
-    model: string;
-    baseUrl: string;
-  }>;
+  sources: {
+    gemini: TranslationSourceView;
+    openai: (TranslationSourceView & { id: string; name: string })[];
+  };
+  /** Which of `sources.openai` is used when `provider` is `openai`. */
+  activeOpenAISourceId: string | null;
   key: TranslationKeyDescription | null;
   keyError: string | null;
 }

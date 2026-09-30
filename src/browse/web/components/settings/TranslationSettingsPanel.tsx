@@ -1,12 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Popconfirm, Radio, Space, Switch, Tag } from "antd";
+import { Alert, Button, Card, Descriptions, Divider, Form, Input, InputNumber, Popconfirm, Radio, Select, Space, Switch, Tag } from "antd";
 import { useAPI } from "../../contexts/APIProvider";
 import { LoadingBlock } from "../Loading";
 import { useLanguage } from "../../contexts/LanguageProvider";
-import { type TranslationSettings as Settings } from "../../../types/Translation";
+import {
+  type TranslationSettings as Settings,
+  type TranslationSourceView
+} from "../../../types/Translation";
+
+/** The source picker's value for "make a new one". Never a real id. */
+const NEW_SOURCE = '__new__';
 
 interface FormValues {
   provider: Settings['provider'];
+  /** An OpenAI-compatible source's id, or {@link NEW_SOURCE}. */
+  sourceId: string;
+  sourceName: string;
   apiKey: string;
   model: string;
   baseUrl: string;
@@ -58,13 +67,19 @@ function TranslationSettingsPanel() {
   const batchCharacters = Form.useWatch('batchCharacters', form);
   const batchLines = Form.useWatch('batchLines', form);
   const provider = Form.useWatch('provider', form);
+  const sourceId = Form.useWatch('sourceId', form);
   const { t } = useLanguage();
 
   const apply = useCallback((result: Settings) => {
     setSettings(result);
     setPrompt(result.prompt);
+    const activeSource = result.sources.openai.find(
+      (source) => source.id === result.activeOpenAISourceId
+    );
     form.setFieldsValue({
       provider: result.provider,
+      sourceId: activeSource?.id ?? NEW_SOURCE,
+      sourceName: activeSource?.name ?? '',
       apiKey: '',
       model: result.model,
       baseUrl: result.baseUrl,
@@ -114,6 +129,11 @@ function TranslationSettingsPanel() {
   const handleSubmit = useCallback(async (values: FormValues) => {
     const params: Parameters<typeof api.saveTranslationSettings>[0] = {
       provider: values.provider,
+      ...(
+        values.provider !== 'openai' ? {}
+          : values.sourceId === NEW_SOURCE ? { newOpenAISourceName: values.sourceName }
+            : { openaiSourceId: values.sourceId, sourceName: values.sourceName }
+      ),
       model: values.model,
       baseUrl: values.baseUrl,
       proxyUrl: values.proxyUrl ?? '',
@@ -135,17 +155,62 @@ function TranslationSettingsPanel() {
     await save(params, t('settings_saved'));
   }, [ save, t ]);
 
+  const deleteSource = useCallback(async (id: string) => {
+    setSubmitting(true);
+    setError(null);
+    setSaved(null);
+    try {
+      apply(await api.deleteTranslationSource(id));
+      setSaved(t('source_deleted'));
+    }
+    catch (e) {
+      setError(e instanceof Error ? e.message : t('could_not_save_translation_settings'));
+    }
+    finally {
+      setSubmitting(false);
+    }
+  }, [ api, apply, t ]);
+
   /**
-   * Brings back what the new provider has saved. Each provider keeps its own
-   * key, model and base URL on the server, so switching over and back loses
-   * nothing - the key field is only cleared because it is write-only.
+   * What is saved for Gemini or one OpenAI-compatible source, or `null` for a
+   * source that does not exist yet.
    */
-  const handleProviderChange = (next: Settings['provider']) => {
+  const viewOf = (next: Settings['provider'], id: string | undefined): TranslationSourceView | null => {
+    if (!settings) {
+      return null;
+    }
+    return next === 'gemini' ?
+      settings.sources.gemini
+      : settings.sources.openai.find((source) => source.id === id) || null;
+  };
+
+  /**
+   * Brings back what the picked provider or source has saved. Each one keeps
+   * its own key, model, base URL and proxy on the server, so switching over
+   * and back loses nothing - the key field is only cleared because it is
+   * write-only. A new source starts from the protocol's defaults.
+   */
+  const fillFrom = (next: Settings['provider'], id: string | undefined) => {
     if (!settings) {
       return;
     }
-    const profile = settings.profiles[next];
-    form.setFieldsValue({ apiKey: '', model: profile.model, baseUrl: profile.baseUrl });
+    const view = viewOf(next, id);
+    form.setFieldsValue({
+      apiKey: '',
+      model: view?.model ?? settings.providerDefaults[next].model,
+      baseUrl: view?.baseUrl ?? settings.providerDefaults[next].baseUrl,
+      proxyUrl: view ? view.proxyUrl : settings.defaultProxyUrl
+    });
+  };
+
+  const handleProviderChange = (next: Settings['provider']) => {
+    fillFrom(next, form.getFieldValue('sourceId'));
+  };
+
+  const handleSourceChange = (id: string) => {
+    fillFrom('openai', id);
+    form.setFieldValue('sourceName',
+      settings?.sources.openai.find((source) => source.id === id)?.name ?? '');
   };
 
   if (!settings) {
@@ -153,11 +218,19 @@ function TranslationSettingsPanel() {
   }
 
   const currentProvider = provider ?? settings.provider;
-  const switchingProvider = currentProvider !== settings.provider;
   const isOpenAI = currentProvider === 'openai';
-  // The provider picked in the form, which may not be saved as in use yet.
-  const targetProfile = settings.profiles[currentProvider];
-  const targetFromEnvironment = targetProfile.source === 'env';
+  const currentSourceId = sourceId ?? settings.activeOpenAISourceId ?? NEW_SOURCE;
+  // Whether the form is showing something other than what is in use - a
+  // different protocol, or a different OpenAI-compatible source.
+  const switchingTarget = currentProvider !== settings.provider ||
+    (isOpenAI && currentSourceId !== settings.activeOpenAISourceId);
+  // What the form is showing, which may not be saved as in use yet.
+  const targetView = viewOf(currentProvider, currentSourceId);
+  const targetConfigured = !!targetView?.configured;
+  const targetFromEnvironment = targetView?.source === 'env';
+  const activeSourceName = settings.sources.openai.find(
+    (source) => source.id === settings.activeOpenAISourceId
+  )?.name;
 
   const fromEnvironment = settings.source === 'env';
   const estimate = callsPerHour(
@@ -167,7 +240,13 @@ function TranslationSettingsPanel() {
 
   return (
     <Space orientation="vertical" size="middle" style={{ display: 'flex' }}>
-      <Card title={t(settings.provider === 'openai' ? 'provider_openai' : 'provider_gemini')}>
+      <Card
+        title={
+          settings.provider === 'openai' && activeSourceName ?
+            `${t('provider_openai')} · ${activeSourceName}`
+            : t(settings.provider === 'openai' ? 'provider_openai' : 'provider_gemini')
+        }
+      >
         <Descriptions column={1} size="small">
           <Descriptions.Item label={t('status')}>
             {
@@ -251,11 +330,53 @@ function TranslationSettingsPanel() {
             />
           </Form.Item>
 
+          {
+            isOpenAI ? (
+              <>
+                <Form.Item label={t('translation_source')} extra={t('translation_source_extra')}>
+                  <Space.Compact style={{ display: 'flex' }}>
+                    <Form.Item name="sourceId" noStyle>
+                      <Select
+                        style={{ flex: 1 }}
+                        onChange={handleSourceChange}
+                        options={[
+                          ...settings.sources.openai.map((source) => ({
+                            value: source.id,
+                            label: source.name
+                          })),
+                          { value: NEW_SOURCE, label: t('new_source') }
+                        ]}
+                      />
+                    </Form.Item>
+                    <Popconfirm
+                      title={t('delete_source_title')}
+                      description={t('delete_source_desc')}
+                      onConfirm={() => void deleteSource(currentSourceId)}
+                      disabled={currentSourceId === NEW_SOURCE}
+                    >
+                      <Button danger disabled={submitting || currentSourceId === NEW_SOURCE}>
+                        {t('delete_source')}
+                      </Button>
+                    </Popconfirm>
+                  </Space.Compact>
+                </Form.Item>
+
+                <Form.Item
+                  name="sourceName"
+                  label={t('source_name')}
+                  rules={[ { required: true, whitespace: true, message: t('source_name_required') } ]}
+                >
+                  <Input maxLength={40} placeholder={t('source_name_placeholder')} />
+                </Form.Item>
+              </>
+            ) : null
+          }
+
           <Form.Item
             name="apiKey"
             label={t('api_key')}
             extra={
-              targetProfile.configured ?
+              targetConfigured ?
                 targetFromEnvironment ?
                   t('env_key_precedence')
                   : t('saved_key_blank_to_keep')
@@ -265,7 +386,7 @@ function TranslationSettingsPanel() {
             <Input.Password
               autoComplete="off"
               placeholder={
-                targetProfile.configured ?
+                targetConfigured ?
                   t('saved_placeholder')
                   : t(isOpenAI ? 'paste_openai_key' : 'paste_gemini_key')
               }
@@ -381,9 +502,9 @@ function TranslationSettingsPanel() {
               {t('save')}
             </Button>
             {
-              // Clears the key of the provider in use, so not offered while
-              // the form is showing the other one.
-              settings.source === 'file' && !switchingProvider ? (
+              // Clears the key of the source in use, so not offered while the
+              // form is showing another one.
+              settings.source === 'file' && !switchingTarget ? (
                 <Popconfirm
                   title={t('clear_api_key_title')}
                   description={t('clear_api_key_desc')}

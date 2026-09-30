@@ -566,6 +566,10 @@ class _Router {
       this.#handlers.translation.handleSaveSettingsRequest(req, res)
     );
 
+    this.#router.delete('/api/translation/sources/:id', requireAdmin, (req, res) =>
+      this.#handlers.translation.handleDeleteSourceRequest(req, res, req.params.id)
+    );
+
     this.#router.post('/api/translation/requests/reset', requireAdmin, (req, res) =>
       this.#handlers.translation.handleResetRequestCountRequest(req, res)
     );
